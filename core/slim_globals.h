@@ -41,6 +41,10 @@ class Subpopulation;
 class SLiMEidosBlock;
 
 
+#define SLIM_VERSION_STRING ("nick testing")
+#define SLIM_VERSION_FLOAT (3.6)
+
+
 void SLiM_WarmUp(void);
 
 

@@ -2286,23 +2286,29 @@ EidosValue_SP Eidos_ExecuteFunction_log2(const std::vector<EidosValue_SP> &p_arg
 //		bZ t Xstart Xstop Z Hilln aZ ZnoFB
 EidosValue_SP Eidos_ExecuteFunction_NARIntegrate(const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter)
 {
+	std::ostream &output_stream = (p_interpreter.ExecutionOutputStream());
+
 	typedef std::vector<double> state_type;
 	EidosValue_SP result_SP(nullptr);
 	std::vector<double> EV_data;
+	int argument_count = (int)p_arguments.size();
+	output_stream << argument_count << std::endl;
+
 	// Fill a vector with the data we need
-	for (uint i = 0; i < p_arguments.size(); ++i) 
+	for (int arg_index = 0; arg_index < argument_count; ++arg_index) 
 	{
-		EV_data.emplace_back(*(p_arguments[i].get()->FloatVector()->data()));
+		EidosValue *arg_value = p_arguments[arg_index].get();
+		double EV_float = arg_value->FloatAtIndex(0, nullptr);
+		EV_data.emplace_back(EV_float);
 	} 
 
-	if (EV_data.size() != 9)
+	if (EV_data.size() != 8)
 		EIDOS_TERMINATION << "ERROR (Eidos_ExecuteFunction_NARIntegrate): function NarIntegrate() requires 8 arguments in this order: Aalpha, Abeta, Balpha, Bbeta, Hilln, Bthreshold, Xstart, Xstop" << EidosTerminate(nullptr);
 	
-
 	// Set up the initial state
-	state_type x(2);
-	x[0] = 0.0; // A
-	x[1] = 0.0; // B
+	state_type NARstate(2);
+	NARstate[0] = 0.0; // A
+	NARstate[1] = 0.0; // B
 	std::vector<state_type> x_vec;
 	std::vector<double> times;
 
@@ -2321,37 +2327,32 @@ EidosValue_SP Eidos_ExecuteFunction_NARIntegrate(const std::vector<EidosValue_SP
 			m_times.emplace_back( t );
 		}
 	};
-
 	// Declare/define a lambda which defines the ODE system - this is going to be very ugly
-	auto ODESystem = [&EV_data](const state_type &x, state_type &dxdt, double t)
+	auto ODESystem = [&EV_data](const state_type &val, state_type &dxdt, double t)
 	{
 		// dA <- Abeta * (t > Xstart && t <= Xstop) * 1/(1 + A^Hilln) - Aalpha*A
-		dxdt[0] = EV_data[1] * 1.0/(1.0+pow(x[0], EV_data[4])) - EV_data[0] * x[0];
+		dxdt[0] = EV_data[1] * 1.0/(1.0+pow(val[0], EV_data[4])) - EV_data[0] * val[0];
 
 		// dB <- Bbeta * A^Hilln/(Bthreshold^Hilln + A^Hilln) - Balpha*B
-		dxdt[1] = EV_data[3] * pow(x[0], EV_data[4])/(pow(EV_data[5], EV_data[4]) + pow(x[0], EV_data[4])) - EV_data[2] * x[1];
+		dxdt[1] = EV_data[3] * pow(val[0], EV_data[4])/(pow(EV_data[5], EV_data[4]) + pow(val[0], EV_data[4])) - EV_data[2] * val[1];
 	};
-
-	size_t steps = boost::numeric::odeint::integrate(ODESystem, x, EV_data[6], EV_data[7], 0.1, push_back_state_and_time(x_vec, times));
+	size_t steps = boost::numeric::odeint::integrate(ODESystem, NARstate, EV_data[6], EV_data[7], 0.1, push_back_state_and_time(x_vec, times));
 
 	// Initialise an Eidos vector to store our calculations
-	EidosValue_Float_vector *float_result = (new (gEidosValuePool->AllocateChunk()) EidosValue_Float_vector())->resize_no_initialize(x.size());
+	EidosValue_Float_vector *float_result = (new (gEidosValuePool->AllocateChunk()) EidosValue_Float_vector())->resize_no_initialize(NARstate.size());
 	result_SP = EidosValue_SP(float_result);
 	std::vector<double> x_auc_a = std::vector<double>(steps);
 	std::vector<double> x_auc_b = std::vector<double>(steps);
 	std::vector<double> x_auc = std::vector<double>(2);
-
-
 
 	for (uint i = 0; i <= steps; i++)
 	{
 		x_auc_a.emplace_back(x_vec[i][0]);
 		x_auc_b.emplace_back(x_vec[i][1]);
 	}
-
 	x_auc[0] = std::accumulate(x_auc_a.begin(), x_auc_a.end(), 0.0);
 	x_auc[1] = std::accumulate(x_auc_b.begin(), x_auc_b.end(), 0.0);
-	result_SP = EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float_vector(x_auc));
+	result_SP = EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float_vector{x_auc[0], x_auc[1]});
 	return result_SP;
 }
 
