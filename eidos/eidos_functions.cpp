@@ -2289,9 +2289,9 @@ EidosValue_SP Eidos_ExecuteFunction_NARIntegrate(const std::vector<EidosValue_SP
 	EidosValue_SP result_SP(nullptr);
 	std::vector<double> EV_data;
 	// Fill a vector with the data we need
-	for (int i = 0; i < p_arguments.size(); ++i) 
+	for (uint i = 0; i < p_arguments.size(); ++i) 
 	{
-		EV_data.emplace_back(p_arguments[i].get()->FloatVector_Mutable()->data());
+		EV_data.emplace_back(*(p_arguments[i].get()->FloatVector()->data()));
 	} 
 
 	if (EV_data.size() != 9)
@@ -2316,13 +2316,13 @@ EidosValue_SP Eidos_ExecuteFunction_NARIntegrate(const std::vector<EidosValue_SP
 
 		void operator()( const state_type &x , double t )
 		{
-			m_states.push_back( x );
-			m_times.push_back( t );
+			m_states.emplace_back( x );
+			m_times.emplace_back( t );
 		}
 	};
 
 	// Declare/define a lambda which defines the ODE system - this is going to be very ugly
-	auto ODESystem = [&EV_data](const state_type &x, state_type &dxdt)
+	auto ODESystem = [&EV_data](const state_type &x, state_type &dxdt, double t)
 	{
 		// dA <- Abeta * (t > Xstart && t <= Xstop) * 1/(1 + A^Hilln) - Aalpha*A
 		dxdt[0] = EV_data[1] * 1.0/(1.0+pow(x[0], EV_data[4])) - EV_data[0] * x[0];
@@ -2342,7 +2342,7 @@ EidosValue_SP Eidos_ExecuteFunction_NARIntegrate(const std::vector<EidosValue_SP
 
 
 
-	for (int i = 0; i <= steps; i++)
+	for (uint i = 0; i <= steps; i++)
 	{
 		x_auc_a.emplace_back(x_vec[i][0]);
 		x_auc_b.emplace_back(x_vec[i][1]);
