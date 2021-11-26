@@ -41,7 +41,7 @@ class Subpopulation;
 class SLiMEidosBlock;
 
 
-#define SLIM_VERSION_STRING	("3.6")
+#define SLIM_VERSION_STRING	("nick testing")
 #define SLIM_VERSION_FLOAT	(3.6)
 
 
