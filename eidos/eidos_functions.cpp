@@ -60,6 +60,7 @@
 #include "gsl_cdf.h"
 
 #include "../eidos_zlib/zlib.h"
+#include "boost/numeric/odeint.hpp"
 
 #include "eidos_globals.h"
 #if EIDOS_ROBIN_HOOD_HASHING
@@ -166,6 +167,7 @@ const std::vector<EidosFunctionSignature_CSP> &EidosInterpreter::BuiltInFunction
 		signatures->emplace_back((EidosFunctionSignature *)(new EidosFunctionSignature("log",				Eidos_ExecuteFunction_log,			kEidosValueMaskFloat))->AddNumeric("x"));
 		signatures->emplace_back((EidosFunctionSignature *)(new EidosFunctionSignature("log10",				Eidos_ExecuteFunction_log10,		kEidosValueMaskFloat))->AddNumeric("x"));
 		signatures->emplace_back((EidosFunctionSignature *)(new EidosFunctionSignature("log2",				Eidos_ExecuteFunction_log2,			kEidosValueMaskFloat))->AddNumeric("x"));
+		signatures->emplace_back((EidosFunctionSignature *)(new EidosFunctionSignature("NARIntegrate",		Eidos_ExecuteFunction_NARIntegrate,	kEidosValueMaskFloat))->AddNumeric("Aalpha")->AddNumeric("Abeta")->AddNumeric("Balpha")->AddNumeric("Bbeta")->AddNumeric("Hilln")->AddNumeric("Bthreshold")->AddNumeric("Xstart")->AddNumeric("Xstop"));
 		signatures->emplace_back((EidosFunctionSignature *)(new EidosFunctionSignature("product",			Eidos_ExecuteFunction_product,		kEidosValueMaskNumeric | kEidosValueMaskSingleton))->AddNumeric("x"));
 		signatures->emplace_back((EidosFunctionSignature *)(new EidosFunctionSignature("round",				Eidos_ExecuteFunction_round,		kEidosValueMaskFloat))->AddFloat("x"));
 		signatures->emplace_back((EidosFunctionSignature *)(new EidosFunctionSignature("setUnion",			Eidos_ExecuteFunction_setUnion,		kEidosValueMaskAny))->AddAny("x")->AddAny("y"));
@@ -2279,6 +2281,81 @@ EidosValue_SP Eidos_ExecuteFunction_log2(const std::vector<EidosValue_SP> &p_arg
 	
 	return result_SP;
 }
+
+// Calculate the integral for a very specific ODE: First argument is a vector of inputs in the order:
+//		bZ t Xstart Xstop Z Hilln aZ ZnoFB
+EidosValue_SP Eidos_ExecuteFunction_NARIntegrate(const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter)
+{
+	typedef std::vector<double> state_type;
+	EidosValue_SP result_SP(nullptr);
+	std::vector<double> EV_data;
+	// Fill a vector with the data we need
+	for (uint i = 0; i < p_arguments.size(); ++i) 
+	{
+		EV_data.emplace_back(*(p_arguments[i].get()->FloatVector()->data()));
+	} 
+
+	if (EV_data.size() != 9)
+		EIDOS_TERMINATION << "ERROR (Eidos_ExecuteFunction_NARIntegrate): function NarIntegrate() requires 8 arguments in this order: Aalpha, Abeta, Balpha, Bbeta, Hilln, Bthreshold, Xstart, Xstop" << EidosTerminate(nullptr);
+	
+
+	// Set up the initial state
+	state_type x(2);
+	x[0] = 0.0; // A
+	x[1] = 0.0; // B
+	std::vector<state_type> x_vec;
+	std::vector<double> times;
+
+	// Define observer: https://github.com/headmyshoulder/odeint-v2/blob/master/examples/harmonic_oscillator.cpp
+	struct push_back_state_and_time
+	{
+		std::vector< state_type >& m_states;
+		std::vector< double >& m_times;
+
+		push_back_state_and_time( std::vector< state_type > &states , std::vector< double > &times )
+		: m_states( states ) , m_times( times ) { }
+
+		void operator()( const state_type &x , double t )
+		{
+			m_states.emplace_back( x );
+			m_times.emplace_back( t );
+		}
+	};
+
+	// Declare/define a lambda which defines the ODE system - this is going to be very ugly
+	auto ODESystem = [&EV_data](const state_type &x, state_type &dxdt, double t)
+	{
+		// dA <- Abeta * (t > Xstart && t <= Xstop) * 1/(1 + A^Hilln) - Aalpha*A
+		dxdt[0] = EV_data[1] * 1.0/(1.0+pow(x[0], EV_data[4])) - EV_data[0] * x[0];
+
+		// dB <- Bbeta * A^Hilln/(Bthreshold^Hilln + A^Hilln) - Balpha*B
+		dxdt[1] = EV_data[3] * pow(x[0], EV_data[4])/(pow(EV_data[5], EV_data[4]) + pow(x[0], EV_data[4])) - EV_data[2] * x[1];
+	};
+
+	size_t steps = boost::numeric::odeint::integrate(ODESystem, x, EV_data[6], EV_data[7], 0.1, push_back_state_and_time(x_vec, times));
+
+	// Initialise an Eidos vector to store our calculations
+	EidosValue_Float_vector *float_result = (new (gEidosValuePool->AllocateChunk()) EidosValue_Float_vector())->resize_no_initialize(x.size());
+	result_SP = EidosValue_SP(float_result);
+	std::vector<double> x_auc_a = std::vector<double>(steps);
+	std::vector<double> x_auc_b = std::vector<double>(steps);
+	std::vector<double> x_auc = std::vector<double>(2);
+
+
+
+	for (uint i = 0; i <= steps; i++)
+	{
+		x_auc_a.emplace_back(x_vec[i][0]);
+		x_auc_b.emplace_back(x_vec[i][1]);
+	}
+
+	x_auc[0] = std::accumulate(x_auc_a.begin(), x_auc_a.end(), 0.0);
+	x_auc[1] = std::accumulate(x_auc_b.begin(), x_auc_b.end(), 0.0);
+	result_SP = EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float_vector(x_auc));
+	return result_SP;
+}
+
+
 
 //	(numeric$)product(numeric x)
 EidosValue_SP Eidos_ExecuteFunction_product(const std::vector<EidosValue_SP> &p_arguments, __attribute__((unused)) EidosInterpreter &p_interpreter)

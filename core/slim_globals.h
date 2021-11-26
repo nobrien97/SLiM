@@ -41,11 +41,6 @@ class Subpopulation;
 class SLiMEidosBlock;
 
 
-#define SLIM_VERSION_STRING	("nick_testing")
-#define SLIM_VERSION_FLOAT	(3.6)
-
-
-// This should be called once at startup to give SLiM an opportunity to initialize static state
 void SLiM_WarmUp(void);
 
 

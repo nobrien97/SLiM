@@ -64,6 +64,7 @@ EidosValue_SP Eidos_ExecuteFunction_isNAN(const std::vector<EidosValue_SP> &p_ar
 EidosValue_SP Eidos_ExecuteFunction_log(const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter);
 EidosValue_SP Eidos_ExecuteFunction_log10(const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter);
 EidosValue_SP Eidos_ExecuteFunction_log2(const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter);
+EidosValue_SP Eidos_ExecuteFunction_NARIntegrate(const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter);
 EidosValue_SP Eidos_ExecuteFunction_product(const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter);
 EidosValue_SP Eidos_ExecuteFunction_round(const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter);
 EidosValue_SP Eidos_ExecuteFunction_setDifference(const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter);
