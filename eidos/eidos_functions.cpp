@@ -2282,8 +2282,11 @@ EidosValue_SP Eidos_ExecuteFunction_log2(const std::vector<EidosValue_SP> &p_arg
 	return result_SP;
 }
 
-// Calculate the integral for a very specific ODE: First argument is a vector of inputs in the order:
-//		bZ t Xstart Xstop Z Hilln aZ ZnoFB
+// Calculate the integral for a very specific ODE: 
+// First argument is a vector of individuals
+// Second argument is a vector of inputs in the order:
+//		Aalpha, Abeta, Balpha, Bbeta, Hilln, Bthreshold, Xstart, Xstop
+
 EidosValue_SP Eidos_ExecuteFunction_NARIntegrate(const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter)
 {
 	//	std::ostream &output_stream = (p_interpreter.ExecutionOutputStream());
@@ -2339,7 +2342,7 @@ EidosValue_SP Eidos_ExecuteFunction_NARIntegrate(const std::vector<EidosValue_SP
 		dxdt[1] = EV_data[3] * pow(val[0], EV_data[4])/(pow(EV_data[5], EV_data[4]) + pow(val[0], EV_data[4])) - EV_data[2] * val[1];
 	};
 
-	auto AUC = [](double h, double a, double b)
+	auto AUC = [](const double &h, const double &a, const double &b)
 	{
 		return ((a+b)*0.5)*h;
 	};

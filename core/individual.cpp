@@ -23,6 +23,7 @@
 #include "slim_sim.h"
 #include "eidos_property_signature.h"
 #include "eidos_call_signature.h"
+#include "boost/numeric/odeint.hpp" 
 
 #include <string>
 #include <algorithm>
