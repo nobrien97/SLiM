@@ -54,7 +54,7 @@ jobs:
             /usr/share/miniconda/envs/anaconda-client-env
             ~/osx-conda
             ~/.profile
-          key: ${{ runner.os }}-${{ matrix.python}}-conda-v10-${{ hashFiles('treerec/tests/conda-requirements.txt') }}-${{ hashFiles('treerec/tests/pip-requirements.txt') }}
+          key: ${{ runner.os }}-${{ matrix.python}}-conda-v11-${{ hashFiles('treerec/tests/conda-requirements.txt') }}-${{ hashFiles('treerec/tests/pip-requirements.txt') }}
 
       - name: Install Conda
         uses: conda-incubator/setup-miniconda@v2
@@ -190,13 +190,6 @@ jobs:
           qmake ..
           make -j 2
 
-  # Just test that the repository can be cloned on windows.
-  tests-windows-clone:
-    runs-on: windows-2019
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v2
-        
   # test windows-latest compilation
   tests-windows-latest-CLI:
     runs-on: windows-latest
@@ -204,8 +197,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-        - { sys: mingw64, env: x86_64 }
-        - { sys: ucrt64, env: ucrt-x86_64 }
+        - { sys: mingw64, env: x86_64, python: 3.8 }
+        - { sys: ucrt64, env: ucrt-x86_64, python: 3.8 }
     name: Windows CLI (${{ matrix.sys }}, ${{ matrix.env }})
     defaults:
       run:
@@ -228,6 +221,50 @@ jobs:
           msys2-devel
           mingw-w64-${{matrix.env}}-toolchain
           mingw-w64-${{matrix.env}}-cmake
+          automake1.16
+          autoconf
+
+    - name: Cache conda and dependancies
+      id: cache
+      uses: actions/cache@v2
+      with:
+        path: |
+          c:\Miniconda\envs\anaconda-client-env
+          /usr/share/miniconda/envs/anaconda-client-env
+          ~/osx-conda
+          ~/.profile
+        key: ${{ runner.os }}-${{ matrix.python}}-conda-v11-${{ hashFiles('treerec/tests/conda-requirements.txt') }}-${{ hashFiles('treerec/tests/pip-requirements.txt') }}
+
+    - name: Install Conda
+      uses: conda-incubator/setup-miniconda@v2
+      if: steps.cache.outputs.cache-hit != 'true'
+      with:
+        activate-environment: anaconda-client-env
+        python-version: ${{ matrix.python }}
+        channels: conda-forge
+        channel-priority: strict
+        auto-update-conda: true
+        use-only-tar-bz2: true
+
+    - name: Install conda deps
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: pwsh
+      run: |
+        C:\Miniconda\condabin\conda.bat install --yes --file=treerec/tests/conda-requirements.txt
+        C:\Miniconda\condabin\conda.bat init powershell
+
+    - name: Install pip deps
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: pwsh
+      run: |
+        pip3 install -r treerec/tests/pip-requirements.txt
+
+    - name: Install pyslim
+      shell: pwsh
+      run: |
+        C:\Miniconda\condabin\conda.bat activate anaconda-client-env
+        git clone https://github.com/tskit-dev/pyslim.git
+        cd pyslim && pip install .
 
     - name: Debug
       run: |
@@ -249,6 +286,14 @@ jobs:
         ./eidos -testEidos
         ./slim -testEidos
         ./slim -testSLiM
+    
+    - name: Treesequence tests
+      shell: pwsh
+      run: |
+        C:\Miniconda\condabin\conda.bat activate anaconda-client-env
+        $env:path += ";$(pwd)\Release"
+        cd treerec\tests 
+        pytest -xv
 
   tests-windows-latest-GUI:
     runs-on: windows-latest
@@ -281,6 +326,8 @@ jobs:
           mingw-w64-${{matrix.env}}-toolchain
           mingw-w64-${{matrix.env}}-cmake
           mingw-w64-${{matrix.env}}-qt5-base
+          automake1.16
+          autoconf
 
     - name: Build (cmake)
       run: |

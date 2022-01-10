@@ -5580,7 +5580,7 @@ void SLiMSim::CheckCoalescenceAfterSimplification(void)
 	{
 #if 0
 		// If we didn't keep first-generation lineages, or remember genomes, >1 root would mean not coalesced
-		if (t.right_sib[t.left_root] != TSK_NULL)
+		if (tsk_tree_get_num_roots(&t) > 1)
 		{
 			fully_coalesced = false;
 			break;
@@ -5591,7 +5591,7 @@ void SLiMSim::CheckCoalescenceAfterSimplification(void)
 		// remembered individuals may mean that more than one root node has children, too, even when we have
 		// coalesced.  What we need to know is: how many roots are there that have >0 *extant* children?  This
 		// is what we use the tracked samples for; they are extant individuals.
-		for (tsk_id_t root = t.left_root; root != TSK_NULL; root = t.right_sib[root])
+		for (tsk_id_t root = tsk_tree_get_left_root(&t); root != TSK_NULL; root = t.right_sib[root])
 		{
 			int64_t num_tracked = t.num_tracked_samples[root];
 			
@@ -6623,7 +6623,7 @@ void SLiMSim::WritePopulationTable(tsk_table_collection_t *p_tables)
 			} else {
 				tsk_population_id = tsk_population_table_add_row(
 						&p_tables->populations,
-						NULL, 0);
+						"null", 4);
 				if (tsk_population_id < 0) handle_error("tsk_population_table_add_row", tsk_population_id);
 			}
 			assert(tsk_population_id == last_id_written);
@@ -7374,37 +7374,33 @@ void SLiMSim::WriteTreeSequence(std::string &p_recording_tree_path, bool p_binar
 	// Add top-level metadata and metadata schema
 	WriteTreeSequenceMetadata(&output_tables, p_metadata_dict);
 	
+	// Set the simulation time unit, in case that is useful to someone.  This is set up in initializeTreeSeq().
+	ret = tsk_table_collection_set_time_units(&output_tables, treeseq_time_unit_.c_str(), treeseq_time_unit_.length());
+	if (ret < 0) handle_error("tsk_table_collection_set_time_units", ret);
+	
 	// Write out the copied tables
 	if (p_binary)
 	{
 		// derived state data must be in ASCII (or unicode) on disk, according to tskit policy
 		DerivedStatesToAscii(&output_tables);
 		
-		tsk_table_collection_dump(&output_tables, path.c_str(), 0);
-		
-		// In nucleotide-based models, write out the ancestral sequence, re-opening the kastore to append
+		// In nucleotide-based models, put an ASCII representation of the reference sequence into the tables
 		if (nucleotide_based_)
 		{
 			std::size_t buflen = chromosome_->AncestralSequence()->size();
 			char *buffer = (char *)malloc(buflen);
-			kastore_t store;
 			
 			if (!buffer)
 				EIDOS_TERMINATION << "ERROR (SLiMSim::WriteTreeSequence): allocation failed; you may need to raise the memory limit for SLiM." << EidosTerminate();
 			
 			chromosome_->AncestralSequence()->WriteNucleotidesToBuffer(buffer);
 			
-			ret = kastore_open(&store, path.c_str(), "a", 0);
-			if (ret < 0) handle_error("kastore_open", ret);
-			
-			kastore_oputs_int8(&store, "reference_sequence/data", (int8_t *)buffer, buflen, 0);
-			if (ret < 0) handle_error("kastore_oputs_int8", ret);
-			
-			ret = kastore_close(&store);
-			if (ret < 0) handle_error("kastore_close", ret);
-			
-			// kastore owns buffer now, so we do not free it
+			ret = tsk_reference_sequence_takeset_data(&output_tables.reference_sequence, buffer, buflen);		// tskit now owns buffer
+			if (ret < 0) handle_error("tsk_reference_sequence_takeset_data", ret);
 		}
+		
+		ret = tsk_table_collection_dump(&output_tables, path.c_str(), 0);
+		if (ret < 0) handle_error("tsk_table_collection_dump", ret);
 	}
 	else
 	{
@@ -7469,8 +7465,9 @@ void SLiMSim::WriteTreeSequence(std::string &p_recording_tree_path, bool p_binar
 	}
 	
 	// Done with our tables copy
-	tsk_table_collection_free(&output_tables);
-}	
+	ret = tsk_table_collection_free(&output_tables);
+	if (ret < 0) handle_error("tsk_table_collection_free", ret);
+}
 
 
 void SLiMSim::FreeTreeSequence()
@@ -8268,6 +8265,8 @@ void SLiMSim::__CreateSubpopulationsFromTabulation(std::unordered_map<slim_objec
 				individual->SetPedigreeID(pedigree_id);
 				pedigree_id_check.emplace_back(pedigree_id);	// we will test for collisions below
 				gSLiM_next_pedigree_id = std::max(gSLiM_next_pedigree_id, pedigree_id + 1);
+
+				individual->SetParentPedigreeID(subpop_info.pedigreeP1_[tabulation_index], subpop_info.pedigreeP2_[tabulation_index]);
 				
 				uint32_t flags = subpop_info.flags_[tabulation_index];
 				if (flags & SLIM_INDIVIDUAL_METADATA_MIGRATED)
@@ -8343,12 +8342,6 @@ void SLiMSim::__ConfigureSubpopulationsFromTables(EidosInterpreter *p_interprete
 		// validate and parse metadata; get metadata values or fall back to default values
 		size_t metadata_length = pop_table.metadata_offset[pop_index + 1] - pop_table.metadata_offset[pop_index];
 		
-		if (metadata_length == 0)
-		{
-			// empty rows in the population table correspond to unused subpop IDs; ignore them
-			continue;
-		}
-		
 		char *metadata_char = pop_table.metadata + pop_table.metadata_offset[pop_index];
 		std::string metadata_string(metadata_char, metadata_length);
 		nlohmann::json subpop_metadata;
@@ -8358,6 +8351,12 @@ void SLiMSim::__ConfigureSubpopulationsFromTables(EidosInterpreter *p_interprete
 		} catch (...) {
 			EIDOS_TERMINATION << "ERROR (SLiMSim::__ConfigureSubpopulationsFromTables): population metadata does not parse as a valid JSON string; this file cannot be read." << EidosTerminate(nullptr);
 		}
+
+        if (subpop_metadata.is_null()) {
+			// 'null' rows in the population table correspond to unused subpop IDs; ignore them
+			// note that 'null' is required by tskit, it cannot just be empty; see _InstantiateSLiMObjectsFromTables(), WritePopulationTable()
+			continue;
+        }
 		
 		if (!subpop_metadata.is_object())
 			EIDOS_TERMINATION << "ERROR (SLiMSim::__ConfigureSubpopulationsFromTables): population metadata does not parse as a JSON object; this file cannot be read." << EidosTerminate(nullptr);
@@ -9027,7 +9026,7 @@ void SLiMSim::_InstantiateSLiMObjectsFromTables(EidosInterpreter *p_interpreter,
 		if (row_count > 0)
 		{
 			std::string new_metadata;
-			tsk_size_t *new_metadata_offsets = (tsk_size_t *)malloc((row_count + 1) * sizeof(tsk_size_t));
+			tsk_size_t *new_metadata_offsets = (tsk_size_t *)malloc((tables_.populations.max_rows + 1) * sizeof(tsk_size_t));
 			
 			if (!new_metadata_offsets)
 				EIDOS_TERMINATION << "ERROR (SLiMSim::_InstantiateSLiMObjectsFromTables): allocation failed; you may need to raise the memory limit for SLiM." << EidosTerminate(nullptr);
@@ -9105,7 +9104,10 @@ void SLiMSim::_InstantiateSLiMObjectsFromTables(EidosInterpreter *p_interpreter,
 				}
 				else
 				{
-					new_metadata_offsets[row_index + 1] = new_metadata_offsets[row_index];
+					// The tskit JSON metadata parser expects a 4-byte "null" value for empty metadata; it can't just be empty.
+					// See also WritePopulationTable(), __ConfigureSubpopulationsFromTables() for interacting code.
+					new_metadata.append("null");
+					new_metadata_offsets[row_index + 1] = new_metadata_offsets[row_index] + 4;
 				}
 			}
 			
@@ -9347,7 +9349,7 @@ slim_generation_t SLiMSim::_InitializePopulationFromTskitBinaryFile(const char *
 		recording_mutations_ = true;
 	}
 	
-	ret = tsk_table_collection_load(&tables_, p_file, 0);
+	ret = tsk_table_collection_load(&tables_, p_file, TSK_LOAD_SKIP_REFERENCE_SEQUENCE);	// we load the ref seq ourselves; see below
 	if (ret != 0) handle_error("tsk_table_collection_load", ret);
 	
 	// BCH 4/25/2019: if indexes are present on tables_ we want to drop them; they are synced up
@@ -9368,7 +9370,8 @@ slim_generation_t SLiMSim::_InitializePopulationFromTskitBinaryFile(const char *
 	
 	ReadTreeSequenceMetadata(&tables_, &metadata_gen, &file_model_type, &file_version);
 	
-	// in nucleotide-based models, read the ancestral sequence
+	// in nucleotide-based models, read the ancestral sequence; we do this ourselves, directly from kastore, to avoid having
+	// tskit make a full ASCII copy of the reference sequences from kastore into tables_; see tsk_table_collection_load() above
 	if (nucleotide_based_)
 	{
 		char *buffer;				// kastore needs to provide us with a memory location from which to read the data
@@ -9381,7 +9384,13 @@ slim_generation_t SLiMSim::_InitializePopulationFromTskitBinaryFile(const char *
 			handle_error("kastore_open", ret);
 		}
 		
-		ret = kastore_gets_int8(&store, "reference_sequence/data", (int8_t **)&buffer, &buffer_length);
+		ret = kastore_gets_uint8(&store, "reference_sequence/data", (uint8_t **)&buffer, &buffer_length);
+		
+		// SLiM 3.6 and earlier wrote out int8_t data, but now tskit writes uint8_t data; to be tolerant of the old type, if
+		// we get a type mismatch, try again with int8_t.  Note that buffer points into kastore's data and need not be freed.
+		if (ret == KAS_ERR_TYPE_MISMATCH)
+			ret = kastore_gets_int8(&store, "reference_sequence/data", (int8_t **)&buffer, &buffer_length);
+		
 		if (ret != 0)
 			buffer = NULL;
 		
