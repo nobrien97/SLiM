@@ -2177,6 +2177,7 @@ EidosValue_SP SLiMSim::ExecuteMethod_deregisterScriptBlock(EidosGlobalStringID p
 }
 
 //	*********************	- (float)NARIntegrate(Object<Individual> individuals, float Aalpha, float Abeta, float Balpha, float Bbeta, float Hilln, float Bthreshold, float Xstart, float Xstop)
+// Extending this: Switch statement to choose certain ODEs? How do we combine multiple ODEs together?
 //
 EidosValue_SP SLiMSim::ExecuteMethod_NARIntegrate(EidosGlobalStringID p_method_ID, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter)
 {
@@ -2260,7 +2261,6 @@ EidosValue_SP SLiMSim::ExecuteMethod_NARIntegrate(EidosGlobalStringID p_method_I
 			// dB <- Bbeta * A^Hilln/(Bthreshold^Hilln + A^Hilln) - Balpha*B
 			dxdt[1] = EV_data[3] * pow(val[0], EV_data[4]) / (pow(EV_data[5], EV_data[4]) + pow(val[0], EV_data[4])) - EV_data[2] * val[1];
 		};
-
 		size_t steps = boost::numeric::odeint::integrate_const(boost::numeric::odeint::runge_kutta4<state_type>(), ODESystem, NARstate, 0.0, 10.0, 0.1, push_back_state_and_time(x_vec, times));
 
 		// Calculate AUC
