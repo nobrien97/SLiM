@@ -93,8 +93,7 @@ jobs:
         run: |
           source ~/.profile
           conda activate anaconda-client-env
-          git clone https://github.com/tskit-dev/pyslim.git
-          cd pyslim && pip install .
+          pip install pyslim
 
       - name: Build (Debug)
         run: |
@@ -130,7 +129,7 @@ jobs:
           conda activate anaconda-client-env
           export PATH=$PATH:$PWD/Release
           echo $PATH
-          cd treerec/tests && pytest -xv
+          cd treerec/tests && python -m pytest -xv
 
   GUI:
     runs-on: ${{ matrix.os }}
@@ -221,8 +220,6 @@ jobs:
           msys2-devel
           mingw-w64-${{matrix.env}}-toolchain
           mingw-w64-${{matrix.env}}-cmake
-          automake1.16
-          autoconf
 
     - name: Cache conda and dependancies
       id: cache
@@ -233,7 +230,7 @@ jobs:
           /usr/share/miniconda/envs/anaconda-client-env
           ~/osx-conda
           ~/.profile
-        key: ${{ runner.os }}-${{ matrix.python}}-conda-v11-${{ hashFiles('treerec/tests/conda-requirements.txt') }}-${{ hashFiles('treerec/tests/pip-requirements.txt') }}
+        key: ${{ runner.os }}-${{ matrix.python}}-conda-v15-${{ hashFiles('treerec/tests/conda-requirements.txt') }}-${{ hashFiles('treerec/tests/pip-requirements.txt') }}
 
     - name: Install Conda
       uses: conda-incubator/setup-miniconda@v2
@@ -257,17 +254,20 @@ jobs:
       if: steps.cache.outputs.cache-hit != 'true'
       shell: pwsh
       run: |
-        pip3 install -r treerec/tests/pip-requirements.txt
+        C:\Miniconda\condabin\conda.bat activate anaconda-client-env
+        pip install -r treerec/tests/pip-requirements.txt
 
     - name: Install pyslim
       shell: pwsh
       run: |
         C:\Miniconda\condabin\conda.bat activate anaconda-client-env
-        git clone https://github.com/tskit-dev/pyslim.git
-        cd pyslim && pip install .
+        C:\Miniconda\condabin\conda.bat install -c conda-forge pyslim
 
     - name: Debug
       run: |
+        cd windows_compat/gnulib
+        touch --date="`date`" aclocal.m4 Makefile.am configure configure.ac config.h.in Makefile.in
+        cd ../..
         mkdir Debug
         cd Debug
         cmake -G"MSYS Makefiles" -DCMAKE_BUILD_TYPE=Debug ..
@@ -275,6 +275,9 @@ jobs:
 
     - name: Build (Release)
       run: |
+        cd windows_compat/gnulib
+        touch --date="`date`" aclocal.m4 Makefile.am configure configure.ac config.h.in Makefile.in
+        cd ../..
         mkdir Release
         cd Release
         cmake -G"MSYS Makefiles" -DCMAKE_BUILD_TYPE=Release ..
@@ -293,7 +296,7 @@ jobs:
         C:\Miniconda\condabin\conda.bat activate anaconda-client-env
         $env:path += ";$(pwd)\Release"
         cd treerec\tests 
-        pytest -xv
+        python -m pytest -xv
 
   tests-windows-latest-GUI:
     runs-on: windows-latest
@@ -326,11 +329,12 @@ jobs:
           mingw-w64-${{matrix.env}}-toolchain
           mingw-w64-${{matrix.env}}-cmake
           mingw-w64-${{matrix.env}}-qt5-base
-          automake1.16
-          autoconf
 
     - name: Build (cmake)
       run: |
+        cd windows_compat/gnulib
+        touch --date="`date`" aclocal.m4 Makefile.am configure configure.ac config.h.in Makefile.in
+        cd ../..
         # Just do a release build.
         mkdir Release
         cd Release

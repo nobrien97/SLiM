@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 12/26/14.
-//  Copyright (c) 2014-2021 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2014-2022 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -5262,7 +5262,7 @@ void SLiMSim::AddParentsColumnForOutput(tsk_table_collection_t *p_tables, INDIVI
 	size_t num_rows = p_tables->individuals.num_rows;
 	size_t parents_buffer_size = num_rows * 2 * sizeof(tsk_id_t);
 	tsk_id_t *parents_buffer = (tsk_id_t *)malloc(parents_buffer_size);
-	tsk_size_t *parents_offset_buffer = (tsk_size_t *)malloc(p_tables->individuals.max_rows * sizeof(tsk_size_t));
+	tsk_size_t *parents_offset_buffer = (tsk_size_t *)malloc((p_tables->individuals.max_rows + 1) * sizeof(tsk_size_t));	// +1 for the trailing length entry
 	
 	if (!parents_buffer || !parents_offset_buffer)
 		EIDOS_TERMINATION << "ERROR (SLiMSim::AddParentsColumnForOutput): allocation failed; you may need to raise the memory limit for SLiM." << EidosTerminate(nullptr);
@@ -5627,10 +5627,26 @@ bool SLiMSim::SubpopulationIDInUse(slim_objectid_t p_subpop_id)
 	if (subpop_ids_.count(p_subpop_id))
 		return true;
 	
-	// Then check the tree-sequence population table, if there is one; we assume that every valid index is "in use"
-	if (RecordingTreeSequence())
-		if (p_subpop_id < (int)tables_.populations.num_rows)
-			return true;
+	// Then check the tree-sequence population table, if there is one. We'll
+	// assume that *any* metadata means we can't use the subpop, which means we
+	// won't clobber any existing metadata, although there might be subpops
+	// with metadata not put in by SLiM.
+	if (RecordingTreeSequence()) {
+		if (p_subpop_id < (int)tables_.populations.num_rows) {
+			int ret;
+			tsk_population_t row;
+
+			ret = tsk_population_table_get_row(&tables_.populations, p_subpop_id, &row);
+			if (ret != 0) handle_error("tsk_population_table_get_row", ret);
+			if (row.metadata_length > 0) {
+				// Check the metadata is not "null". It would maybe be better
+				// to parse the metadata, though.
+				if ((row.metadata_length != 4) || (strncmp(row.metadata, "null", 4) != 0)) {
+					return true;
+				}
+			}
+		}
+	}
 	
 	return false;
 }

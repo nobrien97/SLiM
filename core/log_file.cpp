@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 11/2/20.
-//  Copyright (c) 2020-2021 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2020-2022 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -597,7 +597,7 @@ EidosValue_SP LogFile::ExecuteInstanceMethod(EidosGlobalStringID p_method_id, co
 
 void LogFile::RaiseForLockedHeader(const std::string &p_caller_name)
 {
-	EIDOS_TERMINATION << "ERROR (" << p_caller_name << "): this LogFile has already emitted its header line, so new dada generators cannot be added." << EidosTerminate(nullptr);
+	EIDOS_TERMINATION << "ERROR (" << p_caller_name << "): this LogFile has already emitted its header line, so new data generators cannot be added." << EidosTerminate(nullptr);
 }
 
 //	*********************	- (void)addCustomColumn(string$ columnName, string$ source, [* context = NULL])
