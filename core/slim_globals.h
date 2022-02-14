@@ -42,7 +42,7 @@ class SLiMEidosBlock;
 
 
 #define SLIM_VERSION_STRING	("3.7.1 OB Lab")
-#define SLIM_VERSION_FLOAT	(3.7.1)
+#define SLIM_VERSION_FLOAT	(3.71)
 
 
 void SLiM_WarmUp(void);
