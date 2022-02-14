@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 1/4/15.
-//  Copyright (c) 2015-2021 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2015-2022 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -41,8 +41,8 @@ class Subpopulation;
 class SLiMEidosBlock;
 
 
-#define SLIM_VERSION_STRING	("3.7 OB Lab")
-#define SLIM_VERSION_FLOAT	(3.7)
+#define SLIM_VERSION_STRING	("3.7.1 OB Lab")
+#define SLIM_VERSION_FLOAT	(3.7.1)
 
 
 void SLiM_WarmUp(void);
