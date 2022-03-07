@@ -87,6 +87,8 @@ public:
 	
 	slim_usertag_t tag_value_;			// a user-defined tag value
 	double tagF_value_;					// a user-defined tag value of float type
+	double phenotype_value_ = 0.0;		// a user-defined phenotype: float
+	double phenotype4_value_[] = { 0.0, 0.0, 0.0, 0.0 };				// a user-defined phenotype for models with 4 traits
 	
 	double fitness_scaling_ = 1.0;		// the fitnessScaling property value
 	double cached_fitness_UNSAFE_;		// the last calculated fitness value for this individual; NaN for new offspring, 1.0 for new subpops

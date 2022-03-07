@@ -595,6 +595,18 @@ EidosValue_SP Individual::GetProperty(EidosGlobalStringID p_property_id)
 			
 			return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float_singleton(tagF_value));
 		}
+		case gID_phenotype:
+		{
+			double phenotype_value = phenotype_value_;
+
+			return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float_singleton(phenotype_value));
+		}
+		case gID_phenotype4:
+		{
+			double phenotype4_value[] = phenotype4_value_;
+
+			return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float_vector(phenotype4_value));
+		}
 		case gID_migrant:			// ACCELERATED
 		{
 			return (migrant_ ? gStaticEidosValue_LogicalT : gStaticEidosValue_LogicalF);

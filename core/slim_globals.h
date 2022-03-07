@@ -997,6 +997,8 @@ enum _SLiMGlobalStringID : int {
 	gID_verbosity,
 	gID_tag,
 	gID_tagF,
+	gID_phenotype,
+	gID_phenotype4,
 	gID_migrant,
 	gID_fitnessScaling,
 	gID_firstMaleIndex,
