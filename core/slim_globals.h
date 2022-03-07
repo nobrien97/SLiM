@@ -653,6 +653,8 @@ extern const std::string &gStr_colorSubstitution;
 extern const std::string &gStr_verbosity;
 extern const std::string &gStr_tag;
 extern const std::string &gStr_tagF;
+extern const std::string &gStr_phenotype;
+extern const std::string &gStr_phenotype4;
 extern const std::string &gStr_migrant;
 extern const std::string &gStr_fitnessScaling;
 extern const std::string &gStr_firstMaleIndex;

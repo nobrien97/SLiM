@@ -88,7 +88,7 @@ public:
 	slim_usertag_t tag_value_;			// a user-defined tag value
 	double tagF_value_;					// a user-defined tag value of float type
 	double phenotype_value_ = 0.0;		// a user-defined phenotype: float
-	double phenotype4_value_[] = { 0.0, 0.0, 0.0, 0.0 };				// a user-defined phenotype for models with 4 traits
+	std::vector<double> phenotype4_value_;				// a user-defined phenotype for models with 4 traits
 	
 	double fitness_scaling_ = 1.0;		// the fitnessScaling property value
 	double cached_fitness_UNSAFE_;		// the last calculated fitness value for this individual; NaN for new offspring, 1.0 for new subpops
@@ -231,6 +231,8 @@ public:
 #endif  // SLIM_NONWF_ONLY
 	static EidosValue *GetProperty_Accelerated_reproductiveOutput(EidosObject **p_values, size_t p_values_size);
 	static EidosValue *GetProperty_Accelerated_tagF(EidosObject **p_values, size_t p_values_size);
+	static EidosValue *GetProperty_Accelerated_phenotype(EidosObject **p_values, size_t p_values_size);
+	static EidosValue *GetProperty_Accelerated_phenotype4(EidosObject **p_values, size_t p_values_size);
 	static EidosValue *GetProperty_Accelerated_migrant(EidosObject **p_values, size_t p_values_size);
 	static EidosValue *GetProperty_Accelerated_fitnessScaling(EidosObject **p_values, size_t p_values_size);
 	static EidosValue *GetProperty_Accelerated_x(EidosObject **p_values, size_t p_values_size);
@@ -243,6 +245,8 @@ public:
 	// Accelerated property writing; see class EidosObject for comments on this mechanism
 	static void SetProperty_Accelerated_tag(EidosObject **p_values, size_t p_values_size, const EidosValue &p_source, size_t p_source_size);
 	static void SetProperty_Accelerated_tagF(EidosObject **p_values, size_t p_values_size, const EidosValue &p_source, size_t p_source_size);
+	static void SetProperty_Accelerated_phenotype(EidosObject **p_values, size_t p_values_size, const EidosValue &p_source, size_t p_source_size);
+	static void SetProperty_Accelerated_phenotype4(EidosObject **p_values, size_t p_values_size, const EidosValue &p_source, size_t p_source_size);
 	static void SetProperty_Accelerated_fitnessScaling(EidosObject **p_values, size_t p_values_size, const EidosValue &p_source, size_t p_source_size);
 	static void SetProperty_Accelerated_x(EidosObject **p_values, size_t p_values_size, const EidosValue &p_source, size_t p_source_size);
 	static void SetProperty_Accelerated_y(EidosObject **p_values, size_t p_values_size, const EidosValue &p_source, size_t p_source_size);
