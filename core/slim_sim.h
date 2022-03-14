@@ -814,7 +814,7 @@ public:
 	EidosValue_SP ExecuteMethod_treeSeqRememberIndividuals(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter);
 	EidosValue_SP ExecuteMethod_treeSeqOutput(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter);
 	// Extremely unfitting helper function for pairwiseR2 trying its best to fit in with the EidosValue_SP returning methods
-	double SLiMSim::sharedMutFreq(std::vector<Genome*>& genomes, int& mut1, int& mut2);
+	double sharedMutFreq(std::vector<Genome*>& genomes, int& mut1, int& mut2);
 };
 
 class SLiMSim_Class : public EidosDictionaryUnretained_Class
