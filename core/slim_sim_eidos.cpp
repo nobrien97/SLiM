@@ -26,6 +26,7 @@
 #include "polymorphism.h"
 #include "log_file.h"
 #include "boost/numeric/odeint.hpp"
+#include "matrixClass.h"
 
 #include <iostream>
 #include <iomanip>
@@ -1952,6 +1953,7 @@ EidosValue_SP SLiMSim::ExecuteInstanceMethod(EidosGlobalStringID p_method_id, co
 		case gID_mutationCounts:				return ExecuteMethod_mutationFreqsCounts(p_method_id, p_arguments, p_interpreter);
 		case gID_mutationsOfType:				return ExecuteMethod_mutationsOfType(p_method_id, p_arguments, p_interpreter);
 		case gID_NARIntegrate:					return ExecuteMethod_NARIntegrate(p_method_id, p_arguments, p_interpreter);
+		case gID_pairwiseR2:					return ExecuteMethod_pairwiseR2(p_method_id, p_arguments, p_interpreter);
 		case gID_countOfMutationsOfType:		return ExecuteMethod_countOfMutationsOfType(p_method_id, p_arguments, p_interpreter);
 		case gID_outputFixedMutations:			return ExecuteMethod_outputFixedMutations(p_method_id, p_arguments, p_interpreter);
 		case gID_outputFull:					return ExecuteMethod_outputFull(p_method_id, p_arguments, p_interpreter);
@@ -2308,6 +2310,99 @@ EidosValue_SP SLiMSim::ExecuteMethod_NARIntegrate(EidosGlobalStringID p_method_I
 
 	// Initialise an Eidos vector to return our calculations
 	return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float_vector{out});
+}
+
+//	*********************	– (float)pairwiseR2(Nio<Subpopulation> subpops)
+EidosValue_SP SLiMSim::ExecuteMethod_pairwiseR2(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter)
+{
+	Subpopulation* subpop_value = (Subpopulation*)p_arguments[0].get();
+	std::vector<Genome*> genomes = subpop_value->CurrentGenomes();
+	int genomelength = population_.sim_.TheChromosome().last_position_ + 1;
+	double singletonFreq = (double)(1.0/genomelength);
+	double denominator = subpop_value->population_.total_genome_count_;
+	
+	// Store the MAFs and the mutation positions in a vector
+	std::vector<std::pair<double, int>> mutFreqMAFs(genomelength);
+
+	// Get all mutations in a std::vector
+	std::vector<Mutation *> allMuts;
+	slim_refcount_t *refcount_block_ptr = gSLiM_Mutation_Refcounts;
+
+	Mutation *mut_block_ptr = gSLiM_Mutation_Block;
+	int registry_size;
+	const MutationIndex *registry = population_.MutationRegistry(&registry_size);
+
+	for (int value_index = 0; value_index < registry_size; ++value_index)
+	{
+		allMuts.emplace_back(mut_block_ptr + registry[value_index]);
+	}
+
+	// Iterate over each site in the genome, get all mutations there, calculate R2
+
+	for (int i = 0; i < genomelength; ++i)
+	{
+		std::vector<Mutation *> iMuts;
+		std::copy_if(allMuts.begin(), allMuts.end(), std::back_inserter ( iMuts ), [i]( const Mutation& mut ) { return mut.position_ == i; });
+	
+		// Get each mutation's frequency
+		std::vector<std::pair<double, Mutation*>> mutAllFreq;
+		for (Mutation* mut : iMuts)
+		{
+			int8_t mut_state = mut->state_;
+			double freq;
+				
+			if (mut_state == MutationState::kInRegistry)			freq = *(refcount_block_ptr + mut->BlockIndex()) / denominator;
+			else if (mut_state == MutationState::kLostAndRemoved)	freq = 0.0;
+			else													freq = 1.0;
+
+			mutAllFreq.emplace_back(freq, mut);
+		}
+		std::pair<double, Mutation *> MAF = std::min_element(mutAllFreq.cbegin(), mutAllFreq.cend())[0];
+		mutFreqMAFs[i].first = (MAF.first > singletonFreq) ? MAF.first : 0.0;
+		mutFreqMAFs[i].second = (MAF.first > singletonFreq) ? MAF.second->position_ : -1;
+	
+	// Then, calculate correlations and store in a matrix
+	// Initialise values to 100 so we can check if values have been filled
+	matrix<double> corTable(genomelength, genomelength, 100);
+	
+	for (int i = 0; i < genomelength; ++i) 
+	{
+		for (int j = 0; j < genomelength; ++j) 
+		{
+		// Check if the reciprocal has already been done - if so, we can skip this iteration, we already know the value
+			if (corTable[j][i] < 100) {
+				corTable[i][j] = corTable[j][i];
+				continue;
+			}
+			
+		// Check if we are on the diagonal: in this case r^2 = 1, even if we don't have any mutations (e.g. wildtype)
+			if (i == j) {
+				corTable[i][j] = 1.0;
+				continue;
+			}		
+			
+		// Check if any mutations have frequency 0 - if they do, set the r^2 to 0 and move on
+			if ((mutFreqMAFs[i].first == 0.0) || (mutFreqMAFs[j].first == 0.0)) {
+				corTable[i][j] = 0.0;
+				continue;
+			}		
+		
+		// Check that we have mutations at both sites - if not, shared freq is 0
+			if ((mutFreqMAFs[i].second == -1) || (mutFreqMAFs[j].second == -1)) {
+				double ABFreq = 0.0;
+			} else {
+			// Stolyarova et al. 2021
+				double ABFreq = sharedMutFreq(p1, sim.mutations[sim.mutations.id == mutFreqMAFs[i].second], sim.mutations[sim.mutations.id == mutMAFs[j]]);
+				}
+			corTable[i][j] = (( ABFreq - (mutFreqMAFs[i].first * mutFreqMAFs[j].first))^2) / ((mutFreqMAFs[i].first * (1 - mutFreqMAFs[i].first) * mutFreqMAFs[j].first * (1 - mutFreqMAFs[j].first)));	
+		}
+	
+	}
+	
+	return corTable;
+
+	}
+
 }
 
 //	*********************	– (object<Individual>)individualsWithPedigreeIDs(integer pedigreeIDs, [Nio<Subpopulation> subpops = NULL])
@@ -3975,6 +4070,16 @@ EidosValue_SP SLiMSim::ExecuteMethod_treeSeqOutput(EidosGlobalStringID p_method_
 }
 
 
+// Helper Function for pairwiseR2 - gets the shared frequency between mutations
+double SLiMSim::sharedMutFreq(const Subpopulation& subpop, const Mutation& mut1, const Mutation& mut2) {
+	// Find the frequency of AB: number of genomes with alleles i and j and loci n and m
+	std::vector<Genome*> subpop.CurrentGenomes();
+	validGenomes = subpop.genomes[pop.genomes.containsMutations(mut1) & pop.genomes.containsMutations(mut2)];
+	return validGenomes.size()/pop.genomes.size();
+}
+
+
+
 //
 //	SLiMSim_Class
 //
@@ -4041,6 +4146,7 @@ const std::vector<EidosMethodSignature_CSP> *SLiMSim_Class::Methods(void) const
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_mutationFrequencies, kEidosValueMaskFloat))->AddIntObject_N("subpops", gSLiM_Subpopulation_Class)->AddObject_ON("mutations", gSLiM_Mutation_Class, gStaticEidosValueNULL));
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_mutationsOfType, kEidosValueMaskObject, gSLiM_Mutation_Class))->AddIntObject_S("mutType", gSLiM_MutationType_Class));
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_NARIntegrate, kEidosValueMaskFloat))->AddIntObject_N("individuals", gSLiM_Individual_Class)->AddNumeric("Aalpha")->AddNumeric("Abeta")->AddNumeric("Balpha")->AddNumeric("Bbeta")->AddNumeric("Hilln")->AddNumeric("Bthreshold")->AddNumeric("Xstart")->AddNumeric("Xstop"));
+		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_pairwiseR2, kEidosValueMaskObject | kEidosValueMaskSingleton, gSLiM_Subpopulation_Class))->AddIntString_S("subpopID"));
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_outputFixedMutations, kEidosValueMaskVOID))->AddString_OSN(gEidosStr_filePath, gStaticEidosValueNULL)->AddLogical_OS("append", gStaticEidosValue_LogicalF));
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_outputFull, kEidosValueMaskVOID))->AddString_OSN(gEidosStr_filePath, gStaticEidosValueNULL)->AddLogical_OS("binary", gStaticEidosValue_LogicalF)->AddLogical_OS("append", gStaticEidosValue_LogicalF)->AddLogical_OS("spatialPositions", gStaticEidosValue_LogicalT)->AddLogical_OS("ages", gStaticEidosValue_LogicalT)->AddLogical_OS("ancestralNucleotides", gStaticEidosValue_LogicalT)->AddLogical_OS("pedigreeIDs", gStaticEidosValue_LogicalF));
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_outputMutations, kEidosValueMaskVOID))->AddObject("mutations", gSLiM_Mutation_Class)->AddString_OSN(gEidosStr_filePath, gStaticEidosValueNULL)->AddLogical_OS("append", gStaticEidosValue_LogicalF));
