@@ -2383,10 +2383,13 @@ EidosValue_SP SLiMSim::ExecuteMethod_pairwiseR2(EidosGlobalStringID p_method_id,
 			if (i == j) {
 				corTable[i][j] = 1.0;
 				continue;
-			}		
+			}
+
+			double mutFreqA = std::get<0>(mutFreqMAFs[i]);
+			double mutFreqB = std::get<0>(mutFreqMAFs[j])	
 			
 		// Check if any mutations have frequency 0 - if they do, set the r^2 to 0 and move on
-			if ((std::get<0>(mutFreqMAFs[i]) == 0.0) || (std::get<0>(mutFreqMAFs[j]) == 0.0)) {
+			if ((mutFreqA == 0.0) || (mutFreqB == 0.0)) {
 				corTable[i][j] = 0.0;
 				continue;
 			}		
@@ -2398,13 +2401,11 @@ EidosValue_SP SLiMSim::ExecuteMethod_pairwiseR2(EidosGlobalStringID p_method_id,
 			// Stolyarova et al. 2021
 				ABFreq = sharedMutFreq(genomes, std::get<2>(mutFreqMAFs[i]), std::get<2>(mutFreqMAFs[j]));
 				}
-			corTable[i][j] = (( ABFreq - (std::get<0>(mutFreqMAFs[i]) * std::get<0>(mutFreqMAFs[j])))^2) / ((std::get<0>(mutFreqMAFs[i]) * (1 - std::get<0>(mutFreqMAFs[i])) * std::get<0>(mutFreqMAFs[j]) * (1 - std::get<0>(mutFreqMAFs[j]))));	
+			corTable[i][j] = ( (ABFreq - (mutFreqA * mutFreqB) ) * (ABFreq - (mutFreqA * mutFreqB) ) ) / (mutFreqA * (1 - mutFreqA) * mutFreqB * (1 - mutFreqB));	
 		}
 	
-	}
-	
-	return corTable;
-
+	}	
+	return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float_vector{corTable.flattenMatrix()});
 	}
 
 }
