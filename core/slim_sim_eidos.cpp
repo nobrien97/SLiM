@@ -2321,8 +2321,9 @@ EidosValue_SP SLiMSim::ExecuteMethod_pairwiseR2(EidosGlobalStringID p_method_id,
 	double singletonFreq = (double)(1.0/genomelength);
 	double denominator = subpop_value->population_.total_genome_count_;
 	
-	// Store the MAFs and the mutation positions in a vector
-	std::vector<std::pair<double, int>> mutFreqMAFs(genomelength);
+	// Store the MAFs, mutation positions, and mutation ID in a vector
+	// [0] = MAF; [1] = pos; [2] = ID
+	std::vector<std::tuple<double, int, int>> mutFreqMAFs(genomelength);
 
 	// Get all mutations in a std::vector
 	std::vector<Mutation *> allMuts;
@@ -2358,12 +2359,15 @@ EidosValue_SP SLiMSim::ExecuteMethod_pairwiseR2(EidosGlobalStringID p_method_id,
 			mutAllFreq.emplace_back(freq, mut);
 		}
 		std::pair<double, Mutation *> MAF = std::min_element(mutAllFreq.cbegin(), mutAllFreq.cend())[0];
-		mutFreqMAFs[i].first = (MAF.first > singletonFreq) ? MAF.first : 0.0;
-		mutFreqMAFs[i].second = (MAF.first > singletonFreq) ? MAF.second->position_ : -1;
+		std::get<0>(mutFreqMAFs[i]) = (MAF.first > singletonFreq) ? MAF.first : 0.0;
+		std::get<1>(mutFreqMAFs[i]) = (MAF.first > singletonFreq) ? MAF.second->position_ : -1;
+		std::get<2>(mutFreqMAFs[i]) = (MAF.first > singletonFreq) ? MAF.second->mutation_id_ : -1;
+
 	
 	// Then, calculate correlations and store in a matrix
 	// Initialise values to 100 so we can check if values have been filled
 	matrix<double> corTable(genomelength, genomelength, 100);
+	double ABFreq;
 	
 	for (int i = 0; i < genomelength; ++i) 
 	{
@@ -2382,19 +2386,19 @@ EidosValue_SP SLiMSim::ExecuteMethod_pairwiseR2(EidosGlobalStringID p_method_id,
 			}		
 			
 		// Check if any mutations have frequency 0 - if they do, set the r^2 to 0 and move on
-			if ((mutFreqMAFs[i].first == 0.0) || (mutFreqMAFs[j].first == 0.0)) {
+			if ((std::get<0>(mutFreqMAFs[i]) == 0.0) || (std::get<0>(mutFreqMAFs[j]) == 0.0)) {
 				corTable[i][j] = 0.0;
 				continue;
 			}		
 		
 		// Check that we have mutations at both sites - if not, shared freq is 0
-			if ((mutFreqMAFs[i].second == -1) || (mutFreqMAFs[j].second == -1)) {
-				double ABFreq = 0.0;
+			if ((std::get<1>(mutFreqMAFs[i]) == -1) || (std::get<1>(mutFreqMAFs[j]) == -1)) {
+				ABFreq = 0.0;
 			} else {
 			// Stolyarova et al. 2021
-				double ABFreq = sharedMutFreq(p1, sim.mutations[sim.mutations.id == mutFreqMAFs[i].second], sim.mutations[sim.mutations.id == mutMAFs[j]]);
+				ABFreq = sharedMutFreq(genomes, std::get<2>(mutFreqMAFs[i]), std::get<2>(mutFreqMAFs[j]));
 				}
-			corTable[i][j] = (( ABFreq - (mutFreqMAFs[i].first * mutFreqMAFs[j].first))^2) / ((mutFreqMAFs[i].first * (1 - mutFreqMAFs[i].first) * mutFreqMAFs[j].first * (1 - mutFreqMAFs[j].first)));	
+			corTable[i][j] = (( ABFreq - (std::get<0>(mutFreqMAFs[i]) * std::get<0>(mutFreqMAFs[j])))^2) / ((std::get<0>(mutFreqMAFs[i]) * (1 - std::get<0>(mutFreqMAFs[i])) * std::get<0>(mutFreqMAFs[j]) * (1 - std::get<0>(mutFreqMAFs[j]))));	
 		}
 	
 	}
@@ -4071,11 +4075,20 @@ EidosValue_SP SLiMSim::ExecuteMethod_treeSeqOutput(EidosGlobalStringID p_method_
 
 
 // Helper Function for pairwiseR2 - gets the shared frequency between mutations
-double SLiMSim::sharedMutFreq(const Subpopulation& subpop, const Mutation& mut1, const Mutation& mut2) {
+double SLiMSim::sharedMutFreq(std::vector<Genome*>& genomes, int& mut1, int& mut2) {
 	// Find the frequency of AB: number of genomes with alleles i and j and loci n and m
-	std::vector<Genome*> subpop.CurrentGenomes();
-	validGenomes = subpop.genomes[pop.genomes.containsMutations(mut1) & pop.genomes.containsMutations(mut2)];
-	return validGenomes.size()/pop.genomes.size();
+	auto containsBothMuts = [mut1, mut2] (Genome* genome) { 
+		return (genome->contains_mutation(mut1)) && (genome->contains_mutation(mut2)); 
+		};
+
+	// Go through each genome, determine if it has both mutations or not, add to counter
+	int validGenomes = 0;
+	for (Genome* g : genomes)
+	{
+		validGenomes += (containsBothMuts(g)) ? 1 : 0;
+	}	
+	
+	return (double)validGenomes/genomes.size();
 }
 
 
