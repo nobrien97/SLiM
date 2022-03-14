@@ -16,9 +16,9 @@ class matrix
         m.resize(x, std::vector<T>(y, false));
         _y = y;
         _x = x;
-        for (int i = 0; i < x; ++i)
+        for (unsigned int i = 0; i < x; ++i)
         {
-            for (int j = 0; j < y; ++j)
+            for (unsigned int j = 0; j < y; ++j)
             {
                 m[i][j] = init;
             }
@@ -50,7 +50,7 @@ class matrix
         std::vector<T>& row;
      public:
         matrix_row(std::vector<T>& r) : row(r) {}
-        bool& operator[](unsigned int y { return row.at(y);})
+        T& operator[](unsigned int y) { return row.at(y);}
     };
     matrix_row& operator[](unsigned int x) { return matrix_row(m.at(x));}
 

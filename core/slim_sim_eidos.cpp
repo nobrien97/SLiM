@@ -2340,10 +2340,10 @@ EidosValue_SP SLiMSim::ExecuteMethod_pairwiseR2(EidosGlobalStringID p_method_id,
 
 	// Iterate over each site in the genome, get all mutations there, calculate R2
 
-	for (int i = 0; i < genomelength; ++i)
+	for (int n = 0; n < genomelength; ++n)
 	{
 		std::vector<Mutation *> iMuts;
-		std::copy_if(allMuts.begin(), allMuts.end(), std::back_inserter ( iMuts ), [i]( const Mutation& mut ) { return mut.position_ == i; });
+		std::copy_if(allMuts.begin(), allMuts.end(), std::back_inserter ( iMuts ), [n]( Mutation& mut ) { return mut.position_ == n; });
 	
 		// Get each mutation's frequency
 		std::vector<std::pair<double, Mutation*>> mutAllFreq;
@@ -2359,11 +2359,10 @@ EidosValue_SP SLiMSim::ExecuteMethod_pairwiseR2(EidosGlobalStringID p_method_id,
 			mutAllFreq.emplace_back(freq, mut);
 		}
 		std::pair<double, Mutation *> MAF = std::min_element(mutAllFreq.cbegin(), mutAllFreq.cend())[0];
-		std::get<0>(mutFreqMAFs[i]) = (MAF.first > singletonFreq) ? MAF.first : 0.0;
-		std::get<1>(mutFreqMAFs[i]) = (MAF.first > singletonFreq) ? MAF.second->position_ : -1;
-		std::get<2>(mutFreqMAFs[i]) = (MAF.first > singletonFreq) ? MAF.second->mutation_id_ : -1;
-
-	
+		std::get<0>(mutFreqMAFs[n]) = (MAF.first > singletonFreq) ? MAF.first : 0.0;
+		std::get<1>(mutFreqMAFs[n]) = (MAF.first > singletonFreq) ? MAF.second->position_ : -1;
+		std::get<2>(mutFreqMAFs[n]) = (MAF.first > singletonFreq) ? MAF.second->mutation_id_ : -1;
+	}
 	// Then, calculate correlations and store in a matrix
 	// Initialise values to 100 so we can check if values have been filled
 	matrix<double> corTable(genomelength, genomelength, 100);
@@ -2386,7 +2385,7 @@ EidosValue_SP SLiMSim::ExecuteMethod_pairwiseR2(EidosGlobalStringID p_method_id,
 			}
 
 			double mutFreqA = std::get<0>(mutFreqMAFs[i]);
-			double mutFreqB = std::get<0>(mutFreqMAFs[j])	
+			double mutFreqB = std::get<0>(mutFreqMAFs[j]);	
 			
 		// Check if any mutations have frequency 0 - if they do, set the r^2 to 0 and move on
 			if ((mutFreqA == 0.0) || (mutFreqB == 0.0)) {
@@ -2406,7 +2405,6 @@ EidosValue_SP SLiMSim::ExecuteMethod_pairwiseR2(EidosGlobalStringID p_method_id,
 	
 	}	
 	return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float_vector{corTable.flattenMatrix()});
-	}
 
 }
 
