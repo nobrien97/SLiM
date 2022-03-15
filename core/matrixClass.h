@@ -1,60 +1,42 @@
 #include <vector>
 
+#define OUT_OF_RANGE 0x0A
+
 template <class T>
 class matrix
 {
-    std::vector<std::vector<T>> m;
-
  public:
-    matrix(unsigned int x, unsigned int y) {
-        m.resize(x, std::vector<T>(y, false));
-        _y = y;
-        _x = x;
-    }
+    matrix(size_t rows, size_t cols) : nRows(rows), nCols(cols), m(rows * cols) {}
     // If we're given an initialiser value, initialise to that value
-    matrix(unsigned int x, unsigned int y, T init) {
-        m.resize(x, std::vector<T>(y, false));
-        _y = y;
-        _x = x;
-        for (unsigned int i = 0; i < x; ++i)
+    matrix(size_t rows, size_t cols, T init) : nRows(rows), nCols(cols), m(rows * cols) 
+    {
+        for (unsigned int i = 0; i < rows; ++i)
         {
-            for (unsigned int j = 0; j < y; ++j)
+            for (unsigned int j = 0; j < cols; ++j)
             {
-                m[i][j] = init;
+                m[i * cols + j] = init;
             }
         }
     }
-    std::vector<T> flattenMatrix()
-    {
-        int x = nCols();
-        int y = nRows();
-        std::vector<T> result;
-        result.reserve(x * y * sizeof(T));
 
-        for (int i = 0; i < x; ++i)
-        {
-            for (int j = 0; j < y; ++j)
-            {
-                result.emplace_back(this[i][j]);
-            }
-        }
-        return result; 
+    std::vector<T> getVec() { return m; }
+
+    T& operator()(size_t i, size_t j) 
+    { 
+        if ((i * nCols + j) >= m.size())
+            throw OUT_OF_RANGE;
+        return m[i * nCols + j]; 
     }
 
-    unsigned int nRows() {return _y; }
-    unsigned int nCols() {return _x; }
-
-
-    class matrix_row
-    {
-        std::vector<T>& row;
-     public:
-        matrix_row(std::vector<T>& r) : row(r) {}
-        T& operator[](unsigned int y) { return row.at(y);}
-    };
-    matrix_row& operator[](unsigned int x) { return matrix_row(m.at(x));}
+    T operator()(size_t i, size_t j) const 
+    { 
+        if ((i * nCols + j) >= m.size())
+            throw OUT_OF_RANGE;
+        return m[i * nCols + j]; 
+    }
 
  private:
-    unsigned int _y;
-    unsigned int _x;
+    unsigned int nCols;
+    unsigned int nRows;
+    std::vector<T> m;
 };
