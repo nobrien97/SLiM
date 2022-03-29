@@ -203,6 +203,8 @@ public:
 	inline __attribute__((always_inline)) void SetParentPedigreeID(slim_pedigreeid_t p1_new_id, slim_pedigreeid_t p2_new_id)		{ pedigree_p1_ = p1_new_id; pedigree_p2_ = p2_new_id; }	// also?
 	inline __attribute__((always_inline)) int32_t ReproductiveOutput()				{ return reproductive_output_; }
 	
+	double productOfMutationsOfType(const slim_objectid_t &mutType);
+
 	//
 	// Eidos support
 	//

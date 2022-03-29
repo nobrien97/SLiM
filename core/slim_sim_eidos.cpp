@@ -2206,19 +2206,16 @@ EidosValue_SP SLiMSim::ExecuteMethod_deregisterScriptBlock(EidosGlobalStringID p
 	return gStaticEidosValueVOID;
 }
 
-//	*********************	- (float)NARIntegrate(Object<Individual> individuals, float Aalpha, float Abeta, float Balpha, float Bbeta, float Hilln, float Bthreshold, float Xstart, float Xstop)
+//	*********************	- (float)NARIntegrate(Object<Individual> individuals)
 // Extending this: Switch statement to choose certain ODEs? How do we combine multiple ODEs together?
 //
 EidosValue_SP SLiMSim::ExecuteMethod_NARIntegrate(EidosGlobalStringID p_method_ID, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter)
 {
-
 	// std::ostream &output_stream = p_interpreter.ExecutionOutputStream();
 
 	typedef std::vector<double> state_type;
 	EidosValue_SP result_SP(nullptr);
-	int argument_count = (int)p_arguments.size();
-	if (argument_count != 9)
-		EIDOS_TERMINATION << "ERROR (SLiMSim_ExecuteMethod_NARIntegrate): function NarIntegrate() requires 9 inputs in this order: individuals, Aalpha, Abeta, Balpha, Bbeta, Hilln, Bthreshold, Xstart, Xstop" << EidosTerminate(nullptr);
+	EidosValue_Object *individuals_value = (EidosValue_Object *)p_arguments[0].get();
 	
 	// Define observer: https://github.com/headmyshoulder/odeint-v2/blob/master/examples/harmonic_oscillator.cpp
 	struct push_back_state_and_time
@@ -2236,76 +2233,110 @@ EidosValue_SP SLiMSim::ExecuteMethod_NARIntegrate(EidosGlobalStringID p_method_I
 		}
 	};
 
-
+	// Lambda to calculate area under the curve via the trapezoid method
 	auto AUC = [](const double &h, const double &a, const double &b)
 	{
 		return ((a + b) * 0.5) * h;
 	};
 
-
-
-	// Iterate over all individuals, calculating their NAR AUC from their parameter set
-	EidosValue* inds = p_arguments[0].get();
-	int inds_count = inds->Count();
+	// Iterate over all individuals, calculating their NAR AUC from their parameter set:
+	// First need to actually calculate their parameter set
+	// m3 alphaZ
+	// m4 Kz
+	// m5 betaZ
+	// m6 Kxz
+	int inds_count = p_arguments[0].get()->Count();
 	std::vector<double> out;
-	out.reserve(size_t(inds_count*2));
+	out.reserve(size_t(inds_count));
 
+	// For each mutation type, get the relevant substitutions and calculate product of
+	// selection coefficients - we store that in subData
+
+	std::vector<Substitution*> &subs = population_.substitutions_;
+	std::vector<double> subData(8, 1.0);
+
+	size_t subType = 2;
+	// Lambda to compare our current subType to the sub's type
+	auto cond = [&subType](Substitution* const &sub)
+	{
+		return ((size_t)(sub->mutation_type_ptr_->mutation_type_id_) == subType);
+	};
+	// Lambda to get product of selection coefficients - multiply by 2 because we have two genomes
+	auto subCoef = [](double i, Substitution* const &sub)
+	{
+		return i * sub->selection_coeff_ * 2;
+	};
+	// Fill subData with the products of mutations with the same mutationType
+	for (; subType < 8; ++subType)
+	{
+		std::vector<Substitution*> curSubs;
+		std::copy_if(subs.begin(), subs.end(), std::back_inserter(curSubs), cond);
+		// If there are substitutions here update the value, otherwise
+		// we can keep it as 1 (which when multiplied means no effect)
+		if (curSubs.size())
+			subData[subType] = std::accumulate(begin(curSubs), end(curSubs), 1, subCoef);
+	}
+
+
+
+	// Now iterate over individuals to calculate phenotype
 	for (int ind_ex = 0; ind_ex < inds_count; ++ind_ex)
 	{
+		// First, iterate over mutations and calculate NAR parameters
 		// Set up storage of NAR parameters
-		std::vector<double> EV_data;
-
-		// Fill a vector with the data we need
-		for (int arg_index = 1; arg_index < argument_count; ++arg_index)
+		std::vector<double> EV_data(4);
+		Individual *ind = (Individual *)individuals_value->ObjectElementAtIndex(ind_ex, nullptr);
+		// Get the individual's mutation values
+		for (slim_objectid_t mutType = 0; mutType < 4; ++mutType)
 		{
-			EidosValue *arg_value = p_arguments[arg_index].get();
-			// Check we have the proper number of entries for this argument
-			int curCount = arg_value->Count();
-			double EV_float;
-			if (curCount == 1) {
-				EV_float = arg_value->FloatAtIndex(0, nullptr);
-			} else if (curCount == inds_count) {
-				EV_float = arg_value->FloatAtIndex(ind_ex, nullptr);
-			} else
-				EIDOS_TERMINATION << "ERROR (SLiMSim_ExecuteMethod_NARIntegrate): Argument " << arg_index << " has an inconsistent number of entries. Use 1 parameter value for all individuals or a parameter value for each individual." << EidosTerminate(nullptr);
-			EV_data.emplace_back(EV_float);
+			double indVals = ind->productOfMutationsOfType(mutType + 2);
+			indVals *= subData[mutType];
+			EV_data[mutType] = indVals;
 		}
 
+		// Insert the other values that we have fixed:
+		// Xstart, Xstop, nXZ, nZ
+		std::vector<double> fixedVals = {1.0, 6.0, 8.0, 8.0};
+		EV_data.insert(EV_data.end(), fixedVals.begin(), fixedVals.end());
+
 		if (EV_data.size() != 8)
-			EIDOS_TERMINATION << "ERROR (SLiMSim_ExecuteMethod_NARIntegrate): function NarIntegrate() requires a vector of inputs in this order: Aalpha, Abeta, Balpha, Bbeta, Hilln, Bthreshold, Xstart, Xstop" << EidosTerminate(nullptr);
+			EIDOS_TERMINATION << "ERROR (SLiMSim_ExecuteMethod_NARIntegrate): function NARIntegrate() requires 4 mutation types for several parameters: m3 = aZ, m4 = KZ, m5 = bZ, m6 = KXZ" << EidosTerminate(nullptr);
 
 		// Set up the initial state
 		state_type NARstate(2);
-		NARstate[0] = 0.0; // A
-		NARstate[1] = 0.0; // B
+		NARstate[0] = 0.0; // X
+		NARstate[1] = 0.0; // Z
 		std::vector<state_type> x_vec;
 		std::vector<double> times;
 
+		// alphaZ 0, Kz 1, bZ 2, Kxz 3, Xstart 4, Xstop 5, nXZ 6, nZ 7
 		// Lambdas for AUC and ODE system
 		// Declare/define a lambda which defines the ODE system - this is going to be very ugly
 		auto ODESystem = [&EV_data](const state_type &val, state_type &dxdt, double t)
 		{
 			// dA <- Abeta * (t > Xstart && t <= Xstop) * 1/(1 + A^Hilln) - Aalpha*A
-			dxdt[0] = EV_data[1] * (t > EV_data[6] && t <= EV_data[7]) * 1.0 / (1.0 + pow(val[0], EV_data[4])) - EV_data[0] * val[0];
+			dxdt[0] = EV_data[2] * (t > EV_data[4] && t <= EV_data[5]) * 1.0 / (1.0 + pow(val[0], EV_data[6])) - EV_data[0] * val[0];
 
 			// dB <- Bbeta * A^Hilln/(Bthreshold^Hilln + A^Hilln) - Balpha*B
-			dxdt[1] = EV_data[3] * pow(val[0], EV_data[4]) / (pow(EV_data[5], EV_data[4]) + pow(val[0], EV_data[4])) - EV_data[2] * val[1];
+			// dxdt[1] = EV_data[3] * pow(val[0], EV_data[4]) / (pow(EV_data[5], EV_data[4]) + pow(val[0], EV_data[4])) - EV_data[2] * val[1];
+			// dZ <- bZ * X^nXZ/(KXZ^nXZ + X^nXZ) * (KZ^nZ/(Kz^nZ+Z^nZ)) - aZ
+			dxdt[1] = EV_data[3] * pow(val[0], EV_data[6]) / (pow(EV_data[3], EV_data[6]) + pow(val[0], EV_data[6])) * (pow(EV_data[1], EV_data[7])/pow(EV_data[1], EV_data[7]) + pow(val[1], EV_data[7])) - EV_data[0];
 		};
 		size_t steps = boost::numeric::odeint::integrate_const(boost::numeric::odeint::runge_kutta4<state_type>(), ODESystem, NARstate, 0.0, 10.0, 0.1, push_back_state_and_time(x_vec, times));
 
 		// Calculate AUC
-		std::vector<double> x_auc_a = std::vector<double>(steps);
+		// std::vector<double> x_auc_a = std::vector<double>(steps);
 		std::vector<double> x_auc_b = std::vector<double>(steps);
-		std::vector<double> x_auc = std::vector<double>(2);
+		// std::vector<double> x_auc = std::vector<double>(2);
 		for (uint i = 0; i < steps; ++i)
 		{
-			x_auc_a.emplace_back(AUC(0.1, x_vec[i][0], x_vec[i + 1][0]));
+			// x_auc_a.emplace_back(AUC(0.1, x_vec[i][0], x_vec[i + 1][0]));
 			x_auc_b.emplace_back(AUC(0.1, x_vec[i][1], x_vec[i + 1][1]));
 		}
-		x_auc[0] = std::accumulate(x_auc_a.begin(), x_auc_a.end(), 0.0);
-		x_auc[1] = std::accumulate(x_auc_b.begin(), x_auc_b.end(), 0.0);
-		out.emplace_back(x_auc[0]);
-		out.emplace_back(x_auc[1]);
+		// x_auc[0] = std::accumulate(x_auc_a.begin(), x_auc_a.end(), 0.0);
+		double z = std::accumulate(x_auc_b.begin(), x_auc_b.end(), 0.0);
+		//out.emplace_back(x_auc[0]);
+		out.emplace_back(z);
 	}
 
 	// Initialise an Eidos vector to return our calculations
@@ -4168,7 +4199,7 @@ const std::vector<EidosMethodSignature_CSP> *SLiMSim_Class::Methods(void) const
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_mutationCounts, kEidosValueMaskInt))->AddIntObject_N("subpops", gSLiM_Subpopulation_Class)->AddObject_ON("mutations", gSLiM_Mutation_Class, gStaticEidosValueNULL));
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_mutationFrequencies, kEidosValueMaskFloat))->AddIntObject_N("subpops", gSLiM_Subpopulation_Class)->AddObject_ON("mutations", gSLiM_Mutation_Class, gStaticEidosValueNULL));
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_mutationsOfType, kEidosValueMaskObject, gSLiM_Mutation_Class))->AddIntObject_S("mutType", gSLiM_MutationType_Class));
-		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_NARIntegrate, kEidosValueMaskFloat))->AddIntObject_N("individuals", gSLiM_Individual_Class)->AddNumeric("Aalpha")->AddNumeric("Abeta")->AddNumeric("Balpha")->AddNumeric("Bbeta")->AddNumeric("Hilln")->AddNumeric("Bthreshold")->AddNumeric("Xstart")->AddNumeric("Xstop"));
+		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_NARIntegrate, kEidosValueMaskFloat))->AddIntObject_N("individuals", gSLiM_Individual_Class));
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_pairwiseR2, kEidosValueMaskFloat))->AddIntObject_S("subpop", gSLiM_Subpopulation_Class));
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_outputFixedMutations, kEidosValueMaskVOID))->AddString_OSN(gEidosStr_filePath, gStaticEidosValueNULL)->AddLogical_OS("append", gStaticEidosValue_LogicalF));
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_outputFull, kEidosValueMaskVOID))->AddString_OSN(gEidosStr_filePath, gStaticEidosValueNULL)->AddLogical_OS("binary", gStaticEidosValue_LogicalF)->AddLogical_OS("append", gStaticEidosValue_LogicalF)->AddLogical_OS("spatialPositions", gStaticEidosValue_LogicalT)->AddLogical_OS("ages", gStaticEidosValue_LogicalT)->AddLogical_OS("ancestralNucleotides", gStaticEidosValue_LogicalT)->AddLogical_OS("pedigreeIDs", gStaticEidosValue_LogicalF));

@@ -251,6 +251,59 @@ double Individual::RelatednessToIndividual(Individual &p_ind)
 	return _Relatedness(A, A_P1, A_P2, A_G1, A_G2, A_G3, A_G4, B, B_P1, B_P2, B_G1, B_G2, B_G3, B_G4, indA.sex_, indB.sex_, chrtype);
 }
 
+// Get the product of a vector of mutations of a given type
+double Individual::productOfMutationsOfType(const slim_objectid_t &mutType)
+{	
+	// Count the number of mutations of the given type
+	Mutation *mut_block_ptr = gSLiM_Mutation_Block;
+	
+	Genome *genome1 = this->genome1_;
+	Genome *genome2 = this->genome2_;
+	double selcoeff_prod = 1.0;
+		
+	if (!genome1->IsNull())
+	{
+		int mutrun_count = genome1->mutrun_count_;
+			
+		for (int run_index = 0; run_index < mutrun_count; ++run_index)
+		{
+			MutationRun *mutrun = genome1->mutruns_[run_index].get();
+			int genome1_count = mutrun->size();
+			const MutationIndex *genome1_ptr = mutrun->begin_pointer_const();
+			
+			for (int mut_index = 0; mut_index < genome1_count; ++mut_index)
+			{
+				Mutation *mut_ptr = mut_block_ptr + genome1_ptr[mut_index];
+				
+				if (mut_ptr->mutation_type_ptr_->mutation_type_id_ == mutType)
+					selcoeff_prod *= mut_ptr->selection_coeff_;
+			}
+		}
+	}
+	if (!genome2->IsNull())
+	{
+		int mutrun_count = genome2->mutrun_count_;
+		
+		for (int run_index = 0; run_index < mutrun_count; ++run_index)
+		{
+			MutationRun *mutrun = genome2->mutruns_[run_index].get();
+			int genome2_count = mutrun->size();
+			const MutationIndex *genome2_ptr = mutrun->begin_pointer_const();
+			
+			for (int mut_index = 0; mut_index < genome2_count; ++mut_index)
+			{
+				Mutation *mut_ptr = mut_block_ptr + genome2_ptr[mut_index];
+				
+				if (mut_ptr->mutation_type_ptr_->mutation_type_id_ == mutType)
+					selcoeff_prod *= mut_ptr->selection_coeff_;
+			}
+		}
+	}
+
+	return selcoeff_prod;
+}
+
+
 
 //
 // Eidos support
