@@ -2314,13 +2314,11 @@ EidosValue_SP SLiMSim::ExecuteMethod_NARIntegrate(EidosGlobalStringID p_method_I
 		// Declare/define a lambda which defines the ODE system - this is going to be very ugly
 		auto ODESystem = [&EV_data](const state_type &val, state_type &dxdt, double t)
 		{
-			// dA <- Abeta * (t > Xstart && t <= Xstop) * 1/(1 + A^Hilln) - Aalpha*A
+			// dX <- aX * (t > Xstart && t <= Xstop) * 1/(1 + X^nXZ) - aX*X
 			dxdt[0] = EV_data[2] * (t > EV_data[4] && t <= EV_data[5]) * 1.0 / (1.0 + pow(val[0], EV_data[6])) - EV_data[0] * val[0];
 
-			// dB <- Bbeta * A^Hilln/(Bthreshold^Hilln + A^Hilln) - Balpha*B
-			// dxdt[1] = EV_data[3] * pow(val[0], EV_data[4]) / (pow(EV_data[5], EV_data[4]) + pow(val[0], EV_data[4])) - EV_data[2] * val[1];
-			// dZ <- bZ * X^nXZ/(KXZ^nXZ + X^nXZ) * (KZ^nZ/(Kz^nZ+Z^nZ)) - aZ
-			dxdt[1] = EV_data[3] * pow(val[0], EV_data[6]) / (pow(EV_data[3], EV_data[6]) + pow(val[0], EV_data[6])) * (pow(EV_data[1], EV_data[7])/pow(EV_data[1], EV_data[7]) + pow(val[1], EV_data[7])) - EV_data[0];
+			// dZ <- bZ * X^nXZ/(KXZ^nXZ + X^nXZ) * (KZ^nZ/(Kz^nZ+Z^nZ)) - aZ*Z
+			dxdt[1] = EV_data[3] * pow(val[0], EV_data[6]) / (pow(EV_data[3], EV_data[6]) + pow(val[0], EV_data[6])) * (pow(EV_data[1], EV_data[7])/pow(EV_data[1], EV_data[7]) + pow(val[1], EV_data[7])) - EV_data[0] * val[1];
 		};
 		size_t steps = boost::numeric::odeint::integrate_const(boost::numeric::odeint::runge_kutta4<state_type>(), ODESystem, NARstate, 0.0, 10.0, 0.1, push_back_state_and_time(x_vec, times));
 
@@ -2336,6 +2334,10 @@ EidosValue_SP SLiMSim::ExecuteMethod_NARIntegrate(EidosGlobalStringID p_method_I
 		// x_auc[0] = std::accumulate(x_auc_a.begin(), x_auc_a.end(), 0.0);
 		double z = std::accumulate(x_auc_b.begin(), x_auc_b.end(), 0.0);
 		//out.emplace_back(x_auc[0]);
+
+		// Check that z is > 0
+		z = (z >= 0) ? z : 0.0; 
+
 		out.emplace_back(z);
 	}
 
