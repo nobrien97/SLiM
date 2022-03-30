@@ -2309,7 +2309,7 @@ EidosValue_SP SLiMSim::ExecuteMethod_NARIntegrate(EidosGlobalStringID p_method_I
 		std::vector<state_type> x_vec;
 		std::vector<double> times;
 
-		// alphaZ 0, Kz 1, bZ 2, Kxz 3, Xstart 4, Xstop 5, nXZ 6, nZ 7
+		// aZ 0, Kz 1, bZ 2, Kxz 3, Xstart 4, Xstop 5, nXZ 6, nZ 7
 		// Lambdas for AUC and ODE system
 		// Declare/define a lambda which defines the ODE system - this is going to be very ugly
 		auto ODESystem = [&EV_data](const state_type &val, state_type &dxdt, double t)
