@@ -27,6 +27,7 @@
 #include "log_file.h"
 #include "boost/numeric/odeint.hpp"
 #include "matrixClass.h"
+#include "Ascent.h"
 
 #include <iostream>
 #include <iomanip>
@@ -39,6 +40,8 @@
 #include <ctime>
 #include <unordered_map>
 
+using namespace heyoka;
+namespace hy = heyoka;
 
 static void PrintBytes(std::ostream &p_out, size_t p_bytes)
 {
@@ -2277,6 +2280,20 @@ EidosValue_SP SLiMSim::ExecuteMethod_NARIntegrate(EidosGlobalStringID p_method_I
 			subData[subType] = std::accumulate(begin(curSubs), end(curSubs), 1, subCoef);
 	}
 
+	// Iterate over individuals to get input parameter values, store in a series of vectors
+	std::vector<double*> aZ;
+	std::vector<double*> KZ;
+	std::vector<double*> bZ;
+	std::vector<double*> KXZ;
+	double Xstart = 1.0;
+	double Xstop = 6.0;
+	double nXZ = 8.0;
+	double nZ = 8.0;
+
+	aZ.reserve(inds_count);
+	KZ.reserve(inds_count);
+	bZ.reserve(inds_count);
+	KXZ.reserve(inds_count);
 
 
 	// Now iterate over individuals to calculate phenotype
@@ -2293,53 +2310,61 @@ EidosValue_SP SLiMSim::ExecuteMethod_NARIntegrate(EidosGlobalStringID p_method_I
 			indVals *= subData[mutType];
 			EV_data[mutType] = indVals;
 		}
+		
+		// Store our data
+		aZ[ind_ex] = EV_data[0];
+		KZ[ind_ex] = EV_data[1];
+		bZ[ind_ex] = EV_data[2];
+		KXZ[ind_ex] = EV_data[3];
 
-		// Insert the other values that we have fixed:
-		// Xstart, Xstop, nXZ, nZ
-		std::vector<double> fixedVals = {1.0, 6.0, 8.0, 8.0};
-		EV_data.insert(EV_data.end(), fixedVals.begin(), fixedVals.end());
-
-		if (EV_data.size() != 8)
-			EIDOS_TERMINATION << "ERROR (SLiMSim_ExecuteMethod_NARIntegrate): function NARIntegrate() requires 4 mutation types for several parameters: m3 = aZ, m4 = KZ, m5 = bZ, m6 = KXZ" << EidosTerminate(nullptr);
-
-		// Set up the initial state
-		state_type NARstate(2);
-		NARstate[0] = 0.0; // X
-		NARstate[1] = 0.0; // Z
-		std::vector<state_type> x_vec;
-		std::vector<double> times;
-
-		// aZ 0, Kz 1, bZ 2, Kxz 3, Xstart 4, Xstop 5, nXZ 6, nZ 7
-		// Lambdas for AUC and ODE system
-		// Declare/define a lambda which defines the ODE system - this is going to be very ugly
-		auto ODESystem = [&EV_data](const state_type &val, state_type &dxdt, double t)
-		{
-			// dX <- aX * (t > Xstart && t <= Xstop) * 1/(1 + X^nXZ) - aX*X
-			dxdt[0] = EV_data[2] * (t > EV_data[4] && t <= EV_data[5]) * 1.0 / (1.0 + pow(val[0], EV_data[6])) - EV_data[0] * val[0];
-
-			// dZ <- bZ * X^nXZ/(KXZ^nXZ + X^nXZ) * (KZ^nZ/(Kz^nZ+Z^nZ)) - aZ*Z
-			dxdt[1] = EV_data[3] * pow(val[0], EV_data[6]) / (pow(EV_data[3], EV_data[6]) + pow(val[0], EV_data[6])) * (pow(EV_data[1], EV_data[7])/pow(EV_data[1], EV_data[7]) + pow(val[1], EV_data[7])) - EV_data[0] * val[1];
-		};
-		size_t steps = boost::numeric::odeint::integrate_const(boost::numeric::odeint::runge_kutta4<state_type>(), ODESystem, NARstate, 0.0, 10.0, 0.1, push_back_state_and_time(x_vec, times));
-
-		// Calculate AUC
-		// std::vector<double> x_auc_a = std::vector<double>(steps);
-		std::vector<double> x_auc_b = std::vector<double>(steps);
-		// std::vector<double> x_auc = std::vector<double>(2);
-		for (uint i = 0; i < steps; ++i)
-		{
-			// x_auc_a.emplace_back(AUC(0.1, x_vec[i][0], x_vec[i + 1][0]));
-			x_auc_b.emplace_back(AUC(0.1, x_vec[i][1], x_vec[i + 1][1]));
-		}
-		// x_auc[0] = std::accumulate(x_auc_a.begin(), x_auc_a.end(), 0.0);
-		double z = std::accumulate(x_auc_b.begin(), x_auc_b.end(), 0.0);
-		//out.emplace_back(x_auc[0]);
-
-		// Check that z is > 0
-		z = (z >= 0) ? z : 0.0; 
-
-		out.emplace_back(z);
 	}
+
+	if (aZ.size() < inds_count || KZ.size() < inds_count || bZ.size() < inds_count || KXZ.size() < inds_count)
+		EIDOS_TERMINATION << "ERROR (SLiMSim_ExecuteMethod_NARIntegrate): function NARIntegrate() requires 4 mutation types for several parameters: m3 = aZ, m4 = KZ, m5 = bZ, m6 = KXZ" << EidosTerminate(nullptr);
+	
+	// aZ 0, Kz 1, bZ 2, Kxz 3, Xstart 4, Xstop 5, nXZ 6, nZ 7
+	// Lambdas for AUC and ODE system
+	// Declare/define a lambda which defines the ODE system - this is going to be very ugly
+	auto ODESystem = [&aZ, &KZ, &bZ, &KXZ, &Xstart, &Xstop, &nXZ, &nZ](const state_type &val, state_type &dxdt, double t)
+	{
+		// dX <- bX * (t > Xstart && t <= Xstop) * 1/(1 + X^nXZ) - aX*X
+		dxdt[0] = bZ * (t > Xstart && t <= Xstop) * 1.0 / (1.0 + pow(val[0], nXZ)) - aZ * val[0];
+
+		// dZ <- bZ * X^nXZ/(KXZ^nXZ + X^nXZ) * (KZ^nZ/(Kz^nZ+Z^nZ)) - aZ*Z
+		dxdt[1] = bZ * pow(val[0], nXZ) / (pow(KXZ, nXZ) + pow(val[0], nXZ)) * (pow(KZ, nZ)/pow(KZ, nZ) + pow(val[1], nZ)) - aZ * val[1];
+	};
+
+	// Set up the initial state
+	state_type NARstate = {0.0, 0.0};
+	double t = 0.0;
+	double dt = 0.1;
+	double t_end = 10.0;
+
+	RK4 integrator;
+	Recorder recorder;
+
+	while (t < t_end)
+	{
+		recorder({t, NARstate[0], NARstate[1]});
+		integrator(ODEsystem, NARstate, t, dt);
+	}
+
+	// Calculate AUC
+	// std::vector<double> x_auc_a = std::vector<double>(steps);
+	std::vector<double> x_auc_b = std::vector<double>(steps);
+	// std::vector<double> x_auc = std::vector<double>(2);
+	for (uint i = 0; i < steps; ++i)
+	{
+		// x_auc_a.emplace_back(AUC(0.1, x_vec[i][0], x_vec[i + 1][0]));
+		x_auc_b.emplace_back(AUC(0.1, x_vec[i][1], x_vec[i + 1][1]));
+	}
+	// x_auc[0] = std::accumulate(x_auc_a.begin(), x_auc_a.end(), 0.0);
+	double z = std::accumulate(x_auc_b.begin(), x_auc_b.end(), 0.0);
+	//out.emplace_back(x_auc[0]);
+
+	// Check that z is > 0
+	z = (z >= 0) ? z : 0.0; 
+
 
 	// Initialise an Eidos vector to return our calculations
 	return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float_vector{out});

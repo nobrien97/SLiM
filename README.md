@@ -11,15 +11,8 @@
 	SLiM is an evolutionary simulation framework that combines a powerful engine for population genetic simulations with the capability of modeling arbitrarily complex evolutionary scenarios. Simulations are configured via the integrated Eidos scripting language that allows interactive control over practically every aspect of the simulated evolutionary scenarios. The underlying individual-based simulation engine is highly optimized to enable modeling of entire chromosomes in large populations. We also provide a graphical user interface on macOS and Linux for easy simulation set-up, interactive runtime control, and dynamical visualization of simulation output.
 </p>
 
-GitHub Actions | Travis CI | Fedora Copr
----|---|---
-![SLiM on GitHub Actions:](https://github.com/MesserLab/SLiM/workflows/tests/badge.svg) |![SLiM on Travis-CI:](https://travis-ci.com/MesserLab/SLiM.svg?branch=master) | [![Copr build status](https://copr.fedorainfracloud.org/coprs/bacarson/SLiM-Selection_on_Linked_Mutations/package/SLiM/status_image/last_build.png)](https://copr.fedorainfracloud.org/coprs/bacarson/SLiM-Selection_on_Linked_Mutations/package/SLiM/)
 
-:construction: This GitHub repository hosts the <em>upstream, development head version</em> of SLiM and SLiMgui.
-
-:warning: <strong>End users should generally not use these sources; they may contain serious bugs, or may not even compile</strong>.
-
-:heavy_check_mark: The <strong><em>release</em></strong> version of SLiM and SLiMgui is available at [http://messerlab.org/slim/](http://messerlab.org/slim/).
+This version includes functions for integrating ODE systems and pairwise R2 calculation. For ODE system solutions we use AVX instructions for faster vectorised solutions. This comes with the ODE solver we use, Heyoka. To compile and run this, we'll need LLVM >=10.0 installed, as well as Boost (>=1.6), {fmt}, spdlog, and TBB, as well as SLEEF.
 
 
 License
