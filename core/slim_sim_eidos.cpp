@@ -2279,20 +2279,10 @@ EidosValue_SP SLiMSim::ExecuteMethod_NARIntegrate(EidosGlobalStringID p_method_I
 	}
 
 	// Iterate over individuals to get input parameter values, store in a series of vectors
-	std::vector<double> aZ;
-	std::vector<double> KZ;
-	std::vector<double> bZ;
-	std::vector<double> KXZ;
-	std::vector<double> Xstart(inds_count, 1.0); // TODO: Make this less memory-wasteful and more gooderer
-	std::vector<double> Xstop(inds_count, 6.0);
-	std::vector<double> nXZ(inds_count, 8.0);
-	std::vector<double> nZ(inds_count, 8.0);
-
-	aZ.reserve(inds_count);
-	KZ.reserve(inds_count);
-	bZ.reserve(inds_count);
-	KXZ.reserve(inds_count);
-
+	const double Xstart = 1.0; 
+	const double Xstop = 6.0;
+	const double nXZ = 8.0;
+	const double nZ = 8.0;
 
 	// Now iterate over individuals to calculate phenotype
 	for (int ind_ex = 0; ind_ex < inds_count; ++ind_ex)
@@ -2308,14 +2298,7 @@ EidosValue_SP SLiMSim::ExecuteMethod_NARIntegrate(EidosGlobalStringID p_method_I
 			indVals *= subData[mutType];
 			EV_data[mutType] = indVals;
 		}
-		
-		// Store our data
-		aZ[ind_ex] = EV_data[0];
-		KZ[ind_ex] = EV_data[1];
-		bZ[ind_ex] = EV_data[2];
-		KXZ[ind_ex] = EV_data[3];
 
-	}
 /*
 	if (aZ.size() < inds_count || KZ.size() < inds_count || bZ.size() < inds_count || KXZ.size() < inds_count)
 		EIDOS_TERMINATION << "ERROR (SLiMSim_ExecuteMethod_NARIntegrate): function NARIntegrate() requires 4 mutation types for several parameters: m3 = aZ, m4 = KZ, m5 = bZ, m6 = KXZ" << EidosTerminate(nullptr);
@@ -2323,13 +2306,13 @@ EidosValue_SP SLiMSim::ExecuteMethod_NARIntegrate(EidosGlobalStringID p_method_I
 	// aZ 0, Kz 1, bZ 2, Kxz 3, Xstart 4, Xstop 5, nXZ 6, nZ 7
 	// Lambdas for AUC and ODE system
 	// Declare/define a lambda which defines the ODE system - this is going to be very ugly
-	auto ODESystem = [&aZ, &KZ, &bZ, &KXZ, &Xstart, &Xstop, &nXZ, &nZ](const asc::state_t &val, asc::state_t &dxdt, double t)
+	auto ODESystem = [&EV_data, &Xstart, &Xstop, &nXZ, &nZ](const asc::state_t &val, asc::state_t &dxdt, double t)
 	{
 		// dX <- bX * (t > Xstart && t <= Xstop) * 1/(1 + X^nXZ) - aX*X
-		dxdt[0] = bZ * (t > Xstart && t <= Xstop) * 1.0 / (1.0 + pow(val[0], nXZ)) - aZ * val[0];
+		dxdt[0] = EV_data[2] * (t > Xstart && t <= Xstop) * 1.0 / (1.0 + pow(val[0], nXZ)) - EV_data[0] * val[0];
 
 		// dZ <- bZ * X^nXZ/(KXZ^nXZ + X^nXZ) * (KZ^nZ/(Kz^nZ+Z^nZ)) - aZ*Z
-		dxdt[1] = bZ * pow(val[0], nXZ) / (pow(KXZ, nXZ) + pow(val[0], nXZ)) * (pow(KZ, nZ)/pow(KZ, nZ) + pow(val[1], nZ)) - aZ * val[1];
+		dxdt[1] = EV_data[2] * pow(val[0], nXZ) / (pow(EV_data[3], nXZ) + pow(val[0], nXZ)) * (pow(EV_data[1], nZ)/pow(EV_data[1], nZ) + pow(val[1], nZ)) - EV_data[0] * val[1];
 	};
 
 	// Set up the initial state
@@ -2362,7 +2345,8 @@ EidosValue_SP SLiMSim::ExecuteMethod_NARIntegrate(EidosGlobalStringID p_method_I
 
 	// Check that z is > 0
 	z = (z >= 0) ? z : 0.0; 
-
+	out.emplace_back(z);
+	}
 
 	// Initialise an Eidos vector to return our calculations
 	return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float_vector{out});

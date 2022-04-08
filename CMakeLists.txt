@@ -65,6 +65,9 @@ set(Boost_USE_MULTITHREADED ON)
 set(Boost_USE_STATIC_RUNTIME OFF) 
 find_package(Boost REQUIRED)
 
+# Find Ascent
+find_package(ascent REQUIRED)
+
 # Make a Release build by default
 if(NOT CMAKE_BUILD_TYPE) 
     set(CMAKE_BUILD_TYPE Release)
@@ -189,8 +192,8 @@ set(TARGET_NAME slim)
 file(GLOB_RECURSE SLIM_SOURCES ${PROJECT_SOURCE_DIR}/core/*.cpp ${PROJECT_SOURCE_DIR}/eidos/*.cpp)
 add_executable(${TARGET_NAME} ${SLIM_SOURCES})
 target_include_directories(${TARGET_NAME} PRIVATE ${GSL_INCLUDES} "${PROJECT_SOURCE_DIR}/core" "${PROJECT_SOURCE_DIR}/eidos" PUBLIC "${Boost_INCLUDE_DIRS}")
-target_include_directories(${TARGET_NAME} PUBLIC "${PROJECT_SOURCE_DIR}/include/ascent")
-target_link_libraries(${TARGET_NAME} PUBLIC gsl eidos_zlib tables)
+target_link_libraries(${TARGET_NAME} PUBLIC gsl eidos_zlib tables ascent::ascent)
+
 if(WIN32)
     set_source_files_properties(${SLIM_SOURCES} PROPERTIES COMPILE_FLAGS "-include config.h")
     set_source_files_properties(${GNULIB_NAMESPACE_SOURCES} TARGET_DIRECTORY slim PROPERTIES COMPILE_FLAGS "-include config.h -DGNULIB_NAMESPACE=gnulib")
@@ -202,8 +205,8 @@ set(TARGET_NAME eidos)
 file(GLOB_RECURSE EIDOS_SOURCES  ${PROJECT_SOURCE_DIR}/eidos/*.cpp  ${PROJECT_SOURCE_DIR}/eidostool/*.cpp)
 add_executable(${TARGET_NAME} ${EIDOS_SOURCES})
 target_include_directories(${TARGET_NAME} PRIVATE ${GSL_INCLUDES} "${PROJECT_SOURCE_DIR}/eidos" PUBLIC "${Boost_INCLUDE_DIRS}")
-target_include_directories(${TARGET_NAME} PUBLIC "${PROJECT_SOURCE_DIR}/include/ascent")
-target_link_libraries(${TARGET_NAME} PUBLIC gsl eidos_zlib tables)
+target_link_libraries(${TARGET_NAME} PUBLIC gsl eidos_zlib tables ascent::ascent)
+
 
 if(WIN32)
     set_source_files_properties(${EIDOS_SOURCES} PROPERTIES COMPILE_FLAGS "-include config.h")
