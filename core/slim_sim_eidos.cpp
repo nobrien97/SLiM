@@ -27,6 +27,7 @@
 #include "log_file.h"
 #include "boost/numeric/odeint.hpp"
 #include "matrixClass.h"
+#include "odePar.h"
 #include "ascent/Ascent.h"
 
 #include <iostream>
@@ -2284,19 +2285,38 @@ EidosValue_SP SLiMSim::ExecuteMethod_NARIntegrate(EidosGlobalStringID p_method_I
 	const double nXZ = 8.0;
 	const double nZ = 8.0;
 
+	// TODO: Stop recalculating phenotypes that are common between individuals - 
+	// i.e. if they have the same values for each mutation type
+	// Need to check the combination against a list of saved combinations 
+
+	// Store saved combinations in a vector of ODEPars
+	std::unique_ptr<std::vector<ODEPar>> uniqueODEs = std::make_unique<std::vector<ODEPar>>(inds_count); 
+
+	// Lambda to compare combination to ODEPar
+	auto compareODE = [&EV_data](const ODEPar& existing)
+	{
+		return EV_data == existing;
+	}
+
+
 	// Now iterate over individuals to calculate phenotype
 	for (int ind_ex = 0; ind_ex < inds_count; ++ind_ex)
 	{
 		// First, iterate over mutations and calculate NAR parameters
 		// Set up storage of NAR parameters
-		std::vector<double> EV_data(4);
+		ODEPar EV_data();
 		Individual *ind = (Individual *)individuals_value->ObjectElementAtIndex(ind_ex, nullptr);
 		// Get the individual's mutation values
 		for (slim_objectid_t mutType = 0; mutType < 4; ++mutType)
 		{
 			double indVals = ind->productOfMutationsOfType(mutType + 2);
 			indVals *= subData[mutType];
-			EV_data[mutType] = indVals;
+			EV_data.setParValue(mutType, indVals);
+		}
+		// If we match an existing entry in the data frame
+		if (std::any_of(uniqueODEs.begin(), uniqueODEs.end(), compareODE)
+		{
+			out.emplace_back(ODEPar::getODEValFromVector(const EV_data&, const uniqueODEs));
 		}
 
 /*
