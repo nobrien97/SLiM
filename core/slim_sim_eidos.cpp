@@ -2255,9 +2255,9 @@ EidosValue_SP SLiMSim::ExecuteMethod_NARIntegrate(EidosGlobalStringID p_method_I
 	// selection coefficients - we store that in subData
 
 	std::vector<Substitution*> &subs = population_.substitutions_;
-	std::vector<double> subData(8, 1.0);
+	std::vector<double> subData(4, 1.0);
 
-	size_t subType = 2;
+	size_t subType = 3;
 	// Lambda to compare our current subType to the sub's type
 	auto cond = [&subType](Substitution* const &sub)
 	{
@@ -2269,7 +2269,7 @@ EidosValue_SP SLiMSim::ExecuteMethod_NARIntegrate(EidosGlobalStringID p_method_I
 		return i * sub->selection_coeff_ * 2;
 	};
 	// Fill subData with the products of mutations with the same mutationType
-	for (; subType < 8; ++subType)
+	for (; subType < 7; ++subType)
 	{
 		std::vector<Substitution*> curSubs;
 		std::copy_if(subs.begin(), subs.end(), std::back_inserter(curSubs), cond);
@@ -2290,13 +2290,8 @@ EidosValue_SP SLiMSim::ExecuteMethod_NARIntegrate(EidosGlobalStringID p_method_I
 	// Need to check the combination against a list of saved combinations 
 
 	// Store saved combinations in a vector of ODEPars
-	std::unique_ptr<std::vector<ODEPar>> uniqueODEs = std::make_unique<std::vector<ODEPar>>(inds_count); 
+	std::vector<std::unique_ptr<ODEPar>> uniqueODEs; 
 
-	// Lambda to compare combination to ODEPar
-	auto compareODE = [&EV_data](const ODEPar& existing)
-	{
-		return EV_data == existing;
-	}
 
 
 	// Now iterate over individuals to calculate phenotype
@@ -2304,68 +2299,79 @@ EidosValue_SP SLiMSim::ExecuteMethod_NARIntegrate(EidosGlobalStringID p_method_I
 	{
 		// First, iterate over mutations and calculate NAR parameters
 		// Set up storage of NAR parameters
-		ODEPar EV_data();
+		ODEPar EV_data;
 		Individual *ind = (Individual *)individuals_value->ObjectElementAtIndex(ind_ex, nullptr);
 		// Get the individual's mutation values
 		for (slim_objectid_t mutType = 0; mutType < 4; ++mutType)
 		{
-			double indVals = ind->productOfMutationsOfType(mutType + 2);
+			double indVals = ind->productOfMutationsOfType(mutType + 3);
 			indVals *= subData[mutType];
 			EV_data.setParValue(mutType, indVals);
 		}
-		// If we match an existing entry in the data frame
-		if (std::any_of(uniqueODEs.begin(), uniqueODEs.end(), compareODE)
+
+			// Lambda to compare combination to ODEPar
+		auto compareODE = [&EV_data](const std::unique_ptr<ODEPar>& existing)
 		{
-			out.emplace_back(ODEPar::getODEValFromVector(const EV_data&, const uniqueODEs));
+			return EV_data == existing.get();
+		};
+
+		// If we match an existing entry in the data frame - otherwise we need to calculate the AUC
+		if (std::any_of(uniqueODEs.begin(), uniqueODEs.end(), compareODE))
+		{
+			out.emplace_back(ODEPar::getODEValFromVector(EV_data, uniqueODEs));
+			continue;
 		}
 
-/*
-	if (aZ.size() < inds_count || KZ.size() < inds_count || bZ.size() < inds_count || KXZ.size() < inds_count)
-		EIDOS_TERMINATION << "ERROR (SLiMSim_ExecuteMethod_NARIntegrate): function NARIntegrate() requires 4 mutation types for several parameters: m3 = aZ, m4 = KZ, m5 = bZ, m6 = KXZ" << EidosTerminate(nullptr);
-*/	
-	// aZ 0, Kz 1, bZ 2, Kxz 3, Xstart 4, Xstop 5, nXZ 6, nZ 7
-	// Lambdas for AUC and ODE system
-	// Declare/define a lambda which defines the ODE system - this is going to be very ugly
-	auto ODESystem = [&EV_data, &Xstart, &Xstop, &nXZ, &nZ](const asc::state_t &val, asc::state_t &dxdt, double t)
-	{
-		// dX <- bX * (t > Xstart && t <= Xstop) * 1/(1 + X^nXZ) - aX*X
-		dxdt[0] = EV_data[2] * (t > Xstart && t <= Xstop) * 1.0 / (1.0 + pow(val[0], nXZ)) - EV_data[0] * val[0];
+	/*
+		if (aZ.size() < inds_count || KZ.size() < inds_count || bZ.size() < inds_count || KXZ.size() < inds_count)
+			EIDOS_TERMINATION << "ERROR (SLiMSim_ExecuteMethod_NARIntegrate): function NARIntegrate() requires 4 mutation types for several parameters: m3 = aZ, m4 = KZ, m5 = bZ, m6 = KXZ" << EidosTerminate(nullptr);
+	*/	
+		// aZ 0, Kz 1, bZ 2, Kxz 3, Xstart 4, Xstop 5, nXZ 6, nZ 7
+		// Lambdas for AUC and ODE system
+		// Declare/define a lambda which defines the ODE system - this is going to be very ugly
+		auto ODESystem = [&EV_data, &Xstart, &Xstop, &nXZ, &nZ](const asc::state_t &val, asc::state_t &dxdt, double t)
+		{
+			// dX <- bX * (t > Xstart && t <= Xstop) * 1/(1 + X^nXZ) - aX*X
+			dxdt[0] = EV_data.bZ() * (t > Xstart && t <= Xstop) * 1.0 / (1.0 + pow(val[0], nXZ)) - EV_data.aZ() * val[0];
 
-		// dZ <- bZ * X^nXZ/(KXZ^nXZ + X^nXZ) * (KZ^nZ/(Kz^nZ+Z^nZ)) - aZ*Z
-		dxdt[1] = EV_data[2] * pow(val[0], nXZ) / (pow(EV_data[3], nXZ) + pow(val[0], nXZ)) * (pow(EV_data[1], nZ)/pow(EV_data[1], nZ) + pow(val[1], nZ)) - EV_data[0] * val[1];
-	};
+			// dZ <- bZ * X^nXZ/(KXZ^nXZ + X^nXZ) * (KZ^nZ/(Kz^nZ+Z^nZ)) - aZ*Z
+			dxdt[1] = EV_data.bZ() * pow(val[0], nXZ) / (pow(EV_data.KXZ(), nXZ) + pow(val[0], nXZ)) * (pow(EV_data.KZ(), nZ)/pow(EV_data.KZ(), nZ) + pow(val[1], nZ)) - EV_data.aZ() * val[1];
+		};
 
-	// Set up the initial state
-	asc::state_t NARstate = {0.0, 0.0};
-	double t = 0.0;
-	double dt = 0.1;
-	double t_end = 10.0;
+		// Set up the initial state
+		asc::state_t NARstate = {0.0, 0.0};
+		double t = 0.0;
+		double dt = 0.1;
+		double t_end = 10.0;
 
-	asc::RK4 integrator;
-	asc::Recorder recorder;
+		asc::RK4 integrator;
+		asc::Recorder recorder;
 
-	while (t < t_end)
-	{
-		recorder({t, NARstate[0], NARstate[1]});
-		integrator(ODESystem, NARstate, t, dt);
-	}
+		while (t < t_end)
+		{
+			recorder({t, NARstate[0], NARstate[1]});
+			integrator(ODESystem, NARstate, t, dt);
+		}
 
-	// Calculate AUC
-	// std::vector<double> x_auc_a = std::vector<double>(steps);
-	std::vector<double> x_auc_b = std::vector<double>(recorder.history.size());
-	// std::vector<double> x_auc = std::vector<double>(2);
-	for (uint i = 0; i < recorder.history.size()-1; ++i)
-	{
-		// x_auc_a.emplace_back(AUC(0.1, x_vec[i][0], x_vec[i + 1][0]));
-		x_auc_b.emplace_back(AUC(0.1, (double)recorder.history[i][1], (double)recorder.history[i + 1][1]));
-	}
-	// x_auc[0] = std::accumulate(x_auc_a.begin(), x_auc_a.end(), 0.0);
-	double z = std::accumulate(x_auc_b.begin(), x_auc_b.end(), 0.0);
-	//out.emplace_back(x_auc[0]);
+		// Calculate AUC
+		// std::vector<double> x_auc_a = std::vector<double>(steps);
+		std::vector<double> x_auc_b = std::vector<double>(recorder.history.size());
+		// std::vector<double> x_auc = std::vector<double>(2);
+		for (uint i = 0; i < recorder.history.size()-1; ++i)
+		{
+			// x_auc_a.emplace_back(AUC(0.1, x_vec[i][0], x_vec[i + 1][0]));
+			x_auc_b.emplace_back(AUC(0.1, (double)recorder.history[i][2], (double)recorder.history[i + 1][2]));
+		}
+		// x_auc[0] = std::accumulate(x_auc_a.begin(), x_auc_a.end(), 0.0);
+		double z = std::accumulate(x_auc_b.begin(), x_auc_b.end(), 0.0);
+		//out.emplace_back(x_auc[0]);
 
-	// Check that z is > 0
-	z = (z >= 0) ? z : 0.0; 
-	out.emplace_back(z);
+		// Check that z is > 0
+		z = (z >= 0) ? z : 0.0; 
+		out.emplace_back(z);
+
+		// Add this to the list of existing solutions
+		uniqueODEs.emplace_back(std::make_unique<ODEPar>(z, EV_data.aZ(), EV_data.bZ(), EV_data.KZ(), EV_data.KXZ()));
 	}
 
 	// Initialise an Eidos vector to return our calculations
