@@ -2282,8 +2282,8 @@ EidosValue_SP SLiMSim::ExecuteMethod_NARIntegrate(EidosGlobalStringID p_method_I
 	// Iterate over individuals to get input parameter values, store in a series of vectors
 	const double Xstart = 1.0; 
 	const double Xstop = 6.0;
-	const double nXZ = 8.0;
-	const double nZ = 8.0;
+	const double nXZ = 100.0;
+	const double nZ = 100.0;
 
 	// TODO: Stop recalculating phenotypes that are common between individuals - 
 	// i.e. if they have the same values for each mutation type
