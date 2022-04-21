@@ -2219,22 +2219,6 @@ EidosValue_SP SLiMSim::ExecuteMethod_NARIntegrate(EidosGlobalStringID p_method_I
 	EidosValue_SP result_SP(nullptr);
 	EidosValue_Object *individuals_value = (EidosValue_Object *)p_arguments[0].get();
 	
-	// Define observer: https://github.com/headmyshoulder/odeint-v2/blob/master/examples/harmonic_oscillator.cpp
-	struct push_back_state_and_time
-	{
-		std::vector<state_type> &m_states;
-		std::vector<double> &m_times;
-
-		push_back_state_and_time(std::vector<state_type> &states, std::vector<double> &times)
-			: m_states(states), m_times(times) {}
-
-		void operator()(const state_type &x, double t)
-		{
-			m_states.emplace_back(x);
-			m_times.emplace_back(t);
-		}
-	};
-
 	// Lambda to calculate area under the curve via the trapezoid method
 	auto AUC = [](const double &h, const double &a, const double &b)
 	{
@@ -2243,21 +2227,17 @@ EidosValue_SP SLiMSim::ExecuteMethod_NARIntegrate(EidosGlobalStringID p_method_I
 
 	// Iterate over all individuals, calculating their NAR AUC from their parameter set:
 	// First need to actually calculate their parameter set
-	// m3 alphaZ
-	// m4 Kz
-	// m5 betaZ
-	// m6 Kxz
 	int inds_count = p_arguments[0].get()->Count();
 	std::vector<double> out;
 	out.reserve(size_t(inds_count));
 
 	// For each mutation type, get the relevant substitutions and calculate product of
 	// selection coefficients - we store that in subData
-
 	std::vector<Substitution*> &subs = population_.substitutions_;
 	std::vector<double> subData(4, 1.0);
 
 	size_t subType = 3;
+
 	// Lambda to compare our current subType to the sub's type
 	auto cond = [&subType](Substitution* const &sub)
 	{
@@ -2266,7 +2246,7 @@ EidosValue_SP SLiMSim::ExecuteMethod_NARIntegrate(EidosGlobalStringID p_method_I
 	// Lambda to get product of selection coefficients - multiply by 2 because we have two genomes
 	auto subCoef = [](double i, Substitution* const &sub)
 	{
-		return i * sub->selection_coeff_ * 2;
+		return i * (double)sub->selection_coeff_ * 2;
 	};
 	// Fill subData with the products of mutations with the same mutationType
 	for (; subType < 7; ++subType)
@@ -2275,24 +2255,23 @@ EidosValue_SP SLiMSim::ExecuteMethod_NARIntegrate(EidosGlobalStringID p_method_I
 		std::copy_if(subs.begin(), subs.end(), std::back_inserter(curSubs), cond);
 		// If there are substitutions here update the value, otherwise
 		// we can keep it as 1 (which when multiplied means no effect)
+		// Note: the subType is offset by 3 because mutationType for aZ is m3
 		if (curSubs.size())
-			subData[subType] = std::accumulate(begin(curSubs), end(curSubs), 1, subCoef);
+			subData[subType - 3] = std::accumulate(begin(curSubs), end(curSubs), 1.0, subCoef);
 	}
 
 	// Iterate over individuals to get input parameter values, store in a series of vectors
 	const double Xstart = 1.0; 
 	const double Xstop = 6.0;
-	const double nXZ = 100.0;
-	const double nZ = 100.0;
+	const double nXZ = 8.0;
+	const double nZ = 8.0;
 
 	// TODO: Stop recalculating phenotypes that are common between individuals - 
 	// i.e. if they have the same values for each mutation type
 	// Need to check the combination against a list of saved combinations 
 
 	// Store saved combinations in a vector of ODEPars
-	std::vector<std::unique_ptr<ODEPar>> uniqueODEs; 
-
-
+	std::vector<ODEPar> uniqueODEs; 
 
 	// Now iterate over individuals to calculate phenotype
 	for (int ind_ex = 0; ind_ex < inds_count; ++ind_ex)
@@ -2301,18 +2280,19 @@ EidosValue_SP SLiMSim::ExecuteMethod_NARIntegrate(EidosGlobalStringID p_method_I
 		// Set up storage of NAR parameters
 		ODEPar EV_data;
 		Individual *ind = (Individual *)individuals_value->ObjectElementAtIndex(ind_ex, nullptr);
-		// Get the individual's mutation values
-		for (slim_objectid_t mutType = 0; mutType < 4; ++mutType)
+		// Get the individual's mutation values - offset by 3 because we start at m3
+		for (uint mutType = 0; mutType < 4; ++mutType)
 		{
 			double indVals = ind->productOfMutationsOfType(mutType + 3);
 			indVals *= subData[mutType];
 			EV_data.setParValue(mutType, indVals);
 		}
 
+
 			// Lambda to compare combination to ODEPar
-		auto compareODE = [&EV_data](const std::unique_ptr<ODEPar>& existing)
+		auto compareODE = [&EV_data](const ODEPar& existing)
 		{
-			return EV_data == existing.get();
+			return EV_data == existing;
 		};
 
 		// If we match an existing entry in the data frame - otherwise we need to calculate the AUC
@@ -2322,24 +2302,19 @@ EidosValue_SP SLiMSim::ExecuteMethod_NARIntegrate(EidosGlobalStringID p_method_I
 			continue;
 		}
 
-	/*
-		if (aZ.size() < inds_count || KZ.size() < inds_count || bZ.size() < inds_count || KXZ.size() < inds_count)
-			EIDOS_TERMINATION << "ERROR (SLiMSim_ExecuteMethod_NARIntegrate): function NARIntegrate() requires 4 mutation types for several parameters: m3 = aZ, m4 = KZ, m5 = bZ, m6 = KXZ" << EidosTerminate(nullptr);
-	*/	
-		// aZ 0, Kz 1, bZ 2, Kxz 3, Xstart 4, Xstop 5, nXZ 6, nZ 7
 		// Lambdas for AUC and ODE system
 		// Declare/define a lambda which defines the ODE system - this is going to be very ugly
-		auto ODESystem = [&EV_data, &Xstart, &Xstop, &nXZ, &nZ](const asc::state_t &val, asc::state_t &dxdt, double t)
+		auto NAR = [&EV_data, &Xstart, &Xstop, &nXZ, &nZ](const asc::state_t &val, asc::state_t &dxdt, double t)
 		{
 			// dX <- bX * (t > Xstart && t <= Xstop) * 1/(1 + X^nXZ) - aX*X
 			dxdt[0] = EV_data.bZ() * (t > Xstart && t <= Xstop) * 1.0 / (1.0 + pow(val[0], nXZ)) - EV_data.aZ() * val[0];
 
 			// dZ <- bZ * X^nXZ/(KXZ^nXZ + X^nXZ) * (KZ^nZ/(Kz^nZ+Z^nZ)) - aZ*Z
-			dxdt[1] = EV_data.bZ() * pow(val[0], nXZ) / (pow(EV_data.KXZ(), nXZ) + pow(val[0], nXZ)) * (pow(EV_data.KZ(), nZ)/pow(EV_data.KZ(), nZ) + pow(val[1], nZ)) - EV_data.aZ() * val[1];
+			dxdt[1] = EV_data.bZ() * pow(val[0], nXZ) / (pow(EV_data.KXZ(), nXZ) + pow(val[0], nXZ)) * (pow(EV_data.KZ(), nZ)/(pow(EV_data.KZ(), nZ) + pow(val[1], nZ))) - EV_data.aZ() * val[1];
 		};
 
 		// Set up the initial state
-		asc::state_t NARstate = {0.0, 0.0};
+		asc::state_t state = { 0.0, 0.0 };
 		double t = 0.0;
 		double dt = 0.1;
 		double t_end = 10.0;
@@ -2349,29 +2324,25 @@ EidosValue_SP SLiMSim::ExecuteMethod_NARIntegrate(EidosGlobalStringID p_method_I
 
 		while (t < t_end)
 		{
-			recorder({t, NARstate[0], NARstate[1]});
-			integrator(ODESystem, NARstate, t, dt);
+			recorder({t, state[0], state[1]});
+			integrator(NAR, state, t, dt);
 		}
 
 		// Calculate AUC
-		// std::vector<double> x_auc_a = std::vector<double>(steps);
-		std::vector<double> x_auc_b = std::vector<double>(recorder.history.size());
-		// std::vector<double> x_auc = std::vector<double>(2);
+		std::vector<double> z_auc = std::vector<double>(recorder.history.size());
 		for (uint i = 0; i < recorder.history.size()-1; ++i)
 		{
-			// x_auc_a.emplace_back(AUC(0.1, x_vec[i][0], x_vec[i + 1][0]));
-			x_auc_b.emplace_back(AUC(0.1, (double)recorder.history[i][2], (double)recorder.history[i + 1][2]));
+			z_auc.emplace_back(AUC(0.1, (double)recorder.history[i][2], (double)recorder.history[i + 1][2]));
 		}
-		// x_auc[0] = std::accumulate(x_auc_a.begin(), x_auc_a.end(), 0.0);
-		double z = std::accumulate(x_auc_b.begin(), x_auc_b.end(), 0.0);
-		//out.emplace_back(x_auc[0]);
+		
+		double z = std::accumulate(z_auc.begin(), z_auc.end(), 0.0);
 
 		// Check that z is > 0
 		z = (z >= 0) ? z : 0.0; 
 		out.emplace_back(z);
 
 		// Add this to the list of existing solutions
-		uniqueODEs.emplace_back(std::make_unique<ODEPar>(z, EV_data.aZ(), EV_data.bZ(), EV_data.KZ(), EV_data.KXZ()));
+		uniqueODEs.emplace_back(ODEPar(z, EV_data.aZ(), EV_data.bZ(), EV_data.KZ(), EV_data.KXZ()));
 	}
 
 	// Initialise an Eidos vector to return our calculations

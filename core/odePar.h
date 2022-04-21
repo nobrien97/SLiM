@@ -4,36 +4,36 @@
 class ODEPar
 {
 private:
-    double _AUC;
-    double _aZ;
-	double _bZ;
-	double _KZ;
-	double _KXZ;
+    double _AUC = 0.627;
+    double _aZ = 1.0;
+	double _bZ = 1.0;
+	double _KZ = 1.0;
+	double _KXZ = 1.0;
 
 public:
     ODEPar(double AUC, double aZ, double bZ, double KZ, double KXZ) : 
             _AUC(AUC), _aZ(aZ), _bZ(bZ), _KZ(KZ), _KXZ(KXZ) {};
     ODEPar();
     ~ODEPar();
-    bool operator==(const ODEPar* rhs) const 
+    bool operator==(const ODEPar rhs) const 
     {
         return 
-            _aZ == rhs->_aZ &&
-            _bZ == rhs->_bZ &&
-            _KZ == rhs->_KZ &&
-            _KXZ == rhs->_KXZ
+            _aZ == rhs._aZ &&
+            _bZ == rhs._bZ &&
+            _KZ == rhs._KZ &&
+            _KXZ == rhs._KXZ
         ;
     }
     // Set a given value
     void setParValue(size_t i, double val);
 
     // Get an ODEPar from a vector of ODEPars
-    static double getODEValFromVector(const ODEPar& target, const std::vector<std::unique_ptr<ODEPar>>& vec)
+    static double getODEValFromVector(const ODEPar& target, const std::vector<ODEPar>& vec)
     {
         for (const auto& ODE : vec)
         {
-            if (target == ODE.get())
-                return ODE->AUC();
+            if (target == ODE)
+                return ODE.AUC();
         }
         return 0;
     } 
