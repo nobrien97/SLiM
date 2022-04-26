@@ -1,6 +1,6 @@
 #include <vector>
 #include <memory>
-
+#pragma once
 class ODEPar
 {
 private:
@@ -15,6 +15,7 @@ public:
             _AUC(AUC), _aZ(aZ), _bZ(bZ), _KZ(KZ), _KXZ(KXZ) {};
     ODEPar();
     ~ODEPar();
+
     bool operator==(const ODEPar rhs) const 
     {
         return 
@@ -28,15 +29,10 @@ public:
     void setParValue(size_t i, double val);
 
     // Get an ODEPar from a vector of ODEPars
-    static double getODEValFromVector(const ODEPar& target, const std::vector<ODEPar>& vec)
-    {
-        for (const auto& ODE : vec)
-        {
-            if (target == ODE)
-                return ODE.AUC();
-        }
-        return 0;
-    } 
+    static double getODEValFromVector(const ODEPar& target, const std::vector<std::unique_ptr<ODEPar>>& vec);
+
+    // Get all the values from an ODEPar
+    std::vector<double> getPars();
 
     const double& AUC() const { return _AUC; }
     const double& aZ() const { return _aZ; }
@@ -53,36 +49,3 @@ public:
     void setAUC(double val) { _AUC = val; }
 
 };
-
-ODEPar::ODEPar(/* args */)
-{
-}
-
-ODEPar::~ODEPar()
-{
-}
-
-void ODEPar::setParValue(size_t i, double val)
-{
-    switch (i)
-    {
-    case 0:
-        _aZ = val;
-        break;
-    case 1:
-        _KZ = val;
-        break;
-    case 2:
-        _bZ = val;
-        break;
-    case 3:
-        _KXZ = val;
-        break;
-    default:
-        break;
-    }
-
-    return;
-}
-
-

@@ -3992,6 +3992,7 @@ EidosValue_SP Subpopulation::ExecuteInstanceMethod(EidosGlobalStringID p_method_
 		case gID_outputVCFSample:
 		case gID_outputSample:			return ExecuteMethod_outputXSample(p_method_id, p_arguments, p_interpreter);
 		case gID_configureDisplay:		return ExecuteMethod_configureDisplay(p_method_id, p_arguments, p_interpreter);
+		case gID_getMedianODEPar:		return ExecuteMethod_getMedianODEPar(p_method_id, p_arguments, p_interpreter);
 			
 		default:						return super::ExecuteInstanceMethod(p_method_id, p_arguments, p_interpreter);
 	}
@@ -6833,6 +6834,68 @@ EidosValue_SP Subpopulation::ExecuteMethod_spatialMapValue(EidosGlobalStringID p
 
 #undef SLiMClampCoordinate
 
+// Function for hashing string to int so we can switch it
+auto hashStr(std::string str)
+{
+	int hashCode = 0;
+	for (uint i = 0; i < str.length(); ++i)
+	{
+		hashCode += str[i] * pow(31, i); // 31 is a prime
+	}
+	return hashCode;
+}
+
+
+// **********************	- (float)getMedianODEPar(s$ medianBase = "AUC", l$ returnPars = T)
+// Find the median phenotype in the population and return its ODE parameter values
+EidosValue_SP Subpopulation::ExecuteMethod_getMedianODEPar(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter)
+{
+
+	// Get method arguments
+	std::string parType = p_arguments[0].get()->StringAtIndex(0, nullptr);
+	bool returnPars = p_arguments[1].get()->LogicalAtIndex(0, nullptr);
+
+	// Lambda for sorting individuals by a ODEPar parameter
+	auto sortAUC = [&parType](const Individual* ind1, const Individual* ind2)
+	{
+		if (hashStr(parType) == hashStr("aZ"))
+			return ( ind1->phenoPars.get()->AUC() < ind2->phenoPars.get()->aZ() );
+
+		if (hashStr(parType) == hashStr("aZ"))
+			return ( ind1->phenoPars.get()->AUC() < ind2->phenoPars.get()->bZ() );
+
+		if (hashStr(parType) == hashStr("aZ"))
+			return ( ind1->phenoPars.get()->AUC() < ind2->phenoPars.get()->KZ() );
+
+		if (hashStr(parType) == hashStr("aZ"))
+			return ( ind1->phenoPars.get()->AUC() < ind2->phenoPars.get()->KXZ() );
+		
+		// Otherwise we assume we've got an AUC
+		return ( ind1->phenoPars.get()->AUC() < ind2->phenoPars.get()->AUC() );
+
+	};
+
+	int ind_count = parent_subpop_size_;
+	std::vector<Individual*> inds = parent_individuals_;
+	std::sort(inds.begin(), inds.end(), sortAUC);
+
+	// Note: doing integer division here - if we have an even number of individuals, we'll get the 
+	// left-centre individual (e.g. with 10 inds, we'll get individual 4)
+	Individual* median = inds[ind_count / 2];
+
+
+	if (returnPars)
+	{
+		std::vector<double> vals = median->phenoPars.get()->getPars();
+		return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float_vector(vals));
+	}
+
+	return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float_vector(std::vector<double>( { median->phenoPars.get()->AUC() } )));
+}
+
+
+
+
 //	*********************	– (void)outputMSSample(integer$ sampleSize, [logical$ replace = T], [string$ requestedSex = "*"], [Ns$ filePath = NULL], [logical$ append=F], [logical$ filterMonomorphic = F])
 //	*********************	– (void)outputSample(integer$ sampleSize, [logical$ replace = T], [string$ requestedSex = "*"], [Ns$ filePath = NULL], [logical$ append=F])
 //	*********************	– (void)outputVCFSample(integer$ sampleSize, [logical$ replace = T], [string$ requestedSex = "*"], [logical$ outputMultiallelics = T], [Ns$ filePath = NULL], [logical$ append=F], [logical$ simplifyNucleotides = F], [logical$ outputNonnucleotides = T])
@@ -7134,7 +7197,7 @@ const std::vector<EidosMethodSignature_CSP> *Subpopulation_Class::Methods(void) 
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_outputVCFSample, kEidosValueMaskVOID))->AddInt_S("sampleSize")->AddLogical_OS("replace", gStaticEidosValue_LogicalT)->AddString_OS("requestedSex", gStaticEidosValue_StringAsterisk)->AddLogical_OS("outputMultiallelics", gStaticEidosValue_LogicalT)->AddString_OSN(gEidosStr_filePath, gStaticEidosValueNULL)->AddLogical_OS("append", gStaticEidosValue_LogicalF)->AddLogical_OS("simplifyNucleotides", gStaticEidosValue_LogicalF)->AddLogical_OS("outputNonnucleotides", gStaticEidosValue_LogicalT));
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_outputSample, kEidosValueMaskVOID))->AddInt_S("sampleSize")->AddLogical_OS("replace", gStaticEidosValue_LogicalT)->AddString_OS("requestedSex", gStaticEidosValue_StringAsterisk)->AddString_OSN(gEidosStr_filePath, gStaticEidosValueNULL)->AddLogical_OS("append", gStaticEidosValue_LogicalF));
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_configureDisplay, kEidosValueMaskVOID))->AddFloat_ON("center", gStaticEidosValueNULL)->AddFloat_OSN("scale", gStaticEidosValueNULL)->AddString_OSN("color", gStaticEidosValueNULL));
-		
+		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_getMedianODEPar, kEidosValueMaskFloat))->AddString_S("medianBase")->AddLogical_OS("returnPars", gStaticEidosValue_LogicalT));
 		std::sort(methods->begin(), methods->end(), CompareEidosCallSignatures);
 	}
 	

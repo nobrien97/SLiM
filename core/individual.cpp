@@ -409,6 +409,18 @@ EidosValue_SP Individual::GetProperty(EidosGlobalStringID p_property_id)
 				default:							return static_sex_string_O;
 			}
 		}
+		case gID_ODEPars:
+		{
+			EidosValue_Float_vector *vec = (new (gEidosValuePool->AllocateChunk()) EidosValue_Float_vector())->resize_no_initialize(5);
+			
+			vec->set_float_no_check(phenoPars.get()->AUC(), 0);
+			vec->set_float_no_check(phenoPars.get()->aZ(), 1);
+			vec->set_float_no_check(phenoPars.get()->bZ(), 2);
+			vec->set_float_no_check(phenoPars.get()->KZ(), 3);
+			vec->set_float_no_check(phenoPars.get()->KXZ(), 4);
+
+			return EidosValue_SP(vec);
+		}
 #ifdef SLIM_NONWF_ONLY
 		case gID_age:				// ACCELERATED
 		{
@@ -818,7 +830,6 @@ EidosValue *Individual::GetProperty_Accelerated_phenotype(EidosObject **p_values
 	
 	return float_result;
 }
-
 
 EidosValue *Individual::GetProperty_Accelerated_migrant(EidosObject **p_values, size_t p_values_size)
 {
@@ -1700,6 +1711,7 @@ const std::vector<EidosPropertySignature_CSP> *Individual_Class::Properties(void
 		properties->emplace_back((EidosPropertySignature *)(new EidosPropertySignature(gStr_tagF,					false,	kEidosValueMaskFloat | kEidosValueMaskSingleton))->DeclareAcceleratedGet(Individual::GetProperty_Accelerated_tagF)->DeclareAcceleratedSet(Individual::SetProperty_Accelerated_tagF));
 		properties->emplace_back((EidosPropertySignature *)(new EidosPropertySignature(gStr_phenotype,				false,	kEidosValueMaskFloat | kEidosValueMaskSingleton))->DeclareAcceleratedGet(Individual::GetProperty_Accelerated_phenotype)->DeclareAcceleratedSet(Individual::SetProperty_Accelerated_phenotype));
 		properties->emplace_back((EidosPropertySignature *)(new EidosPropertySignature(gStr_phenotype4,				false,	kEidosValueMaskFloat | kEidosValueMaskSingleton)));
+		properties->emplace_back((EidosPropertySignature *)(new EidosPropertySignature(gStr_ODEPars,				true,	kEidosValueMaskFloat)));
 		properties->emplace_back((EidosPropertySignature *)(new EidosPropertySignature(gStr_migrant,				true,	kEidosValueMaskLogical | kEidosValueMaskSingleton))->DeclareAcceleratedGet(Individual::GetProperty_Accelerated_migrant));
 		properties->emplace_back((EidosPropertySignature *)(new EidosPropertySignature(gStr_fitnessScaling,			false,	kEidosValueMaskFloat | kEidosValueMaskSingleton))->DeclareAcceleratedGet(Individual::GetProperty_Accelerated_fitnessScaling)->DeclareAcceleratedSet(Individual::SetProperty_Accelerated_fitnessScaling));
 		properties->emplace_back((EidosPropertySignature *)(new EidosPropertySignature(gEidosStr_x,					false,	kEidosValueMaskFloat | kEidosValueMaskSingleton))->DeclareAcceleratedGet(Individual::GetProperty_Accelerated_x)->DeclareAcceleratedSet(Individual::SetProperty_Accelerated_x));

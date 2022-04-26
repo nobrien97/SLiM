@@ -38,6 +38,7 @@
 
 
 #include "genome.h"
+#include "odePar.h"
 
 
 class Subpopulation;
@@ -89,6 +90,7 @@ public:
 	double tagF_value_;					// a user-defined tag value of float type
 	double phenotype_value_ = 0.0;		// a user-defined phenotype: float
 	std::vector<double> phenotype4_value_;				// a user-defined phenotype for models with 4 traits
+	std::unique_ptr<ODEPar> phenoPars;					// The parameters feeding the ODE function
 	
 	double fitness_scaling_ = 1.0;		// the fitnessScaling property value
 	double cached_fitness_UNSAFE_;		// the last calculated fitness value for this individual; NaN for new offspring, 1.0 for new subpops
@@ -223,7 +225,8 @@ public:
 	EidosValue_SP ExecuteMethod_relatedness(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter);
 	static EidosValue_SP ExecuteMethod_Accelerated_sumOfMutationsOfType(EidosObject **p_values, size_t p_values_size, EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter);
 	EidosValue_SP ExecuteMethod_uniqueMutationsOfType(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter);
-	
+
+
 	// Accelerated property access; see class EidosObject for comments on this mechanism
 	static EidosValue *GetProperty_Accelerated_index(EidosObject **p_values, size_t p_values_size);
 	static EidosValue *GetProperty_Accelerated_pedigreeID(EidosObject **p_values, size_t p_values_size);

@@ -655,6 +655,7 @@ extern const std::string &gStr_tag;
 extern const std::string &gStr_tagF;
 extern const std::string &gStr_phenotype;
 extern const std::string &gStr_phenotype4;
+extern const std::string &gStr_ODEPars;
 extern const std::string &gStr_migrant;
 extern const std::string &gStr_fitnessScaling;
 extern const std::string &gStr_firstMaleIndex;
@@ -784,6 +785,7 @@ extern const std::string &gStr_outputVCFSample;
 extern const std::string &gStr_outputSample;
 extern const std::string &gStr_outputMS;
 extern const std::string &gStr_outputVCF;
+extern const std::string &gStr_getMedianODEPar;
 extern const std::string &gStr_output;
 extern const std::string &gStr_evaluate;
 extern const std::string &gStr_distance;
@@ -1002,6 +1004,7 @@ enum _SLiMGlobalStringID : int {
 	gID_tagF,
 	gID_phenotype,
 	gID_phenotype4,
+	gID_ODEPars,
 	gID_migrant,
 	gID_fitnessScaling,
 	gID_firstMaleIndex,
@@ -1132,6 +1135,7 @@ enum _SLiMGlobalStringID : int {
 	gID_outputMS,
 	gID_outputVCF,
 	gID_output,
+	gID_getMedianODEPar,
 	gID_evaluate,
 	gID_distance,
 	gID_localPopulationDensity,
