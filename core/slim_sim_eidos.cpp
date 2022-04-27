@@ -2236,12 +2236,12 @@ EidosValue_SP SLiMSim::ExecuteMethod_NARIntegrate(EidosGlobalStringID p_method_I
 	std::vector<Substitution*> &subs = population_.substitutions_;
 	std::vector<double> subData(4, 1.0);
 
-	size_t subType = 3;
-
+	size_t subType = 0;
 	// Lambda to compare our current subType to the sub's type
+	// Note: the subType is offset by 3 because mutationType for aZ is m3
 	auto cond = [&subType](Substitution* const &sub)
 	{
-		return ((size_t)(sub->mutation_type_ptr_->mutation_type_id_) == subType);
+		return ((size_t)(sub->mutation_type_ptr_->mutation_type_id_) == (subType + 3));
 	};
 	// Lambda to get product of selection coefficients - Two chromosomes, so raise to power of 2
 	auto subCoef = [](double i, Substitution* const &sub)
@@ -2249,15 +2249,14 @@ EidosValue_SP SLiMSim::ExecuteMethod_NARIntegrate(EidosGlobalStringID p_method_I
 		return i * (double)sub->selection_coeff_ * (double)sub->selection_coeff_;
 	};
 	// Fill subData with the products of mutations with the same mutationType
-	for (; subType < 7; ++subType)
+	for (; subType < 4; ++subType)
 	{
 		std::vector<Substitution*> curSubs;
 		std::copy_if(subs.begin(), subs.end(), std::back_inserter(curSubs), cond);
 		// If there are substitutions here update the value, otherwise
 		// we can keep it as 1 (which when multiplied means no effect)
-		// Note: the subType is offset by 3 because mutationType for aZ is m3
 		if (curSubs.size())
-			subData[subType - 3] = std::accumulate(begin(curSubs), end(curSubs), 1.0, subCoef);
+			subData[subType] = std::accumulate(begin(curSubs), end(curSubs), 1.0, subCoef);
 	}
 
 	// Iterate over individuals to get input parameter values, store in a series of vectors
@@ -2276,13 +2275,14 @@ EidosValue_SP SLiMSim::ExecuteMethod_NARIntegrate(EidosGlobalStringID p_method_I
 		// First, iterate over mutations and calculate NAR parameters
 		// Set up storage of NAR parameters
 		ODEPar EV_data;
-		Individual *ind = (Individual *)individuals_value->ObjectElementAtIndex(ind_ex, nullptr);
-		// Get the individual's mutation values - offset by 3 because we start at m3
+		Individual *ind __attribute__((used)) = (Individual *)individuals_value->ObjectElementAtIndex(ind_ex, nullptr);
+		// Get the individual's mutation values - offset by 3 because mutation types start at m3
+		// Setting EV_data value offset by 1 because value 0 means setting AUC
 		for (uint mutType = 0; mutType < 4; ++mutType)
 		{
 			double indVals = ind->productOfMutationsOfType(mutType + 3);
 			indVals *= subData[mutType];
-			EV_data.setParValue(mutType, indVals);
+			EV_data.setParValue((mutType + 1), indVals);
 		}
 
 
@@ -2295,7 +2295,10 @@ EidosValue_SP SLiMSim::ExecuteMethod_NARIntegrate(EidosGlobalStringID p_method_I
 		// If we match an existing entry in the data frame - otherwise we need to calculate the AUC
 		if (std::any_of(uniqueODEs.begin(), uniqueODEs.end(), compareODE))
 		{
-			out.emplace_back(ODEPar::getODEValFromVector(EV_data, uniqueODEs));
+			double curAUC = ODEPar::getODEValFromVector(EV_data, uniqueODEs);
+			out.emplace_back(curAUC);
+			EV_data.setParValue(0, curAUC);
+			ind->phenoPars.get()->setParValue(EV_data.getPars());
 			continue;
 		}
 
@@ -2336,12 +2339,16 @@ EidosValue_SP SLiMSim::ExecuteMethod_NARIntegrate(EidosGlobalStringID p_method_I
 		// Check that z is > 0
 		z = (z >= 0) ? z : 0.0; 
 		out.emplace_back(z);
-
-		// Update the individual's phenoPars value
-		ind->phenoPars = std::make_unique<ODEPar>(z, EV_data.aZ(), EV_data.bZ(), EV_data.KZ(), EV_data.KXZ());
-
+		
 		// Add this to the list of existing solutions
 		uniqueODEs.emplace_back(std::make_unique<ODEPar>(z, EV_data.aZ(), EV_data.bZ(), EV_data.KZ(), EV_data.KXZ()));
+		// Update the individual's phenoPars values
+		ind->phenoPars.get()->setParValue(uniqueODEs.back().get()->getPars());
+
+		for (int i = 0; i < 2; ++i)
+		{
+			out.back();
+		}
 	}
 
 	// Initialise an Eidos vector to return our calculations

@@ -4,7 +4,7 @@
 class ODEPar
 {
 private:
-    double _AUC = 0.627;
+    double _AUC = 2.5353073611315153; // default value when all parameters are 1
     double _aZ = 1.0;
 	double _bZ = 1.0;
 	double _KZ = 1.0;
@@ -27,6 +27,9 @@ public:
     }
     // Set a given value
     void setParValue(size_t i, double val);
+
+    // Set all values
+    void setParValue(std::vector<double> vals);
 
     // Get an ODEPar from a vector of ODEPars
     static double getODEValFromVector(const ODEPar& target, const std::vector<std::unique_ptr<ODEPar>>& vec);

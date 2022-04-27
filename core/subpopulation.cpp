@@ -6859,16 +6859,16 @@ EidosValue_SP Subpopulation::ExecuteMethod_getMedianODEPar(EidosGlobalStringID p
 	auto sortAUC = [&parType](const Individual* ind1, const Individual* ind2)
 	{
 		if (hashStr(parType) == hashStr("aZ"))
-			return ( ind1->phenoPars.get()->AUC() < ind2->phenoPars.get()->aZ() );
+			return ( ind1->phenoPars.get()->aZ() < ind2->phenoPars.get()->aZ() );
 
-		if (hashStr(parType) == hashStr("aZ"))
-			return ( ind1->phenoPars.get()->AUC() < ind2->phenoPars.get()->bZ() );
+		if (hashStr(parType) == hashStr("bZ"))
+			return ( ind1->phenoPars.get()->bZ() < ind2->phenoPars.get()->bZ() );
 
-		if (hashStr(parType) == hashStr("aZ"))
-			return ( ind1->phenoPars.get()->AUC() < ind2->phenoPars.get()->KZ() );
+		if (hashStr(parType) == hashStr("KZ"))
+			return ( ind1->phenoPars.get()->KZ() < ind2->phenoPars.get()->KZ() );
 
-		if (hashStr(parType) == hashStr("aZ"))
-			return ( ind1->phenoPars.get()->AUC() < ind2->phenoPars.get()->KXZ() );
+		if (hashStr(parType) == hashStr("KXZ"))
+			return ( ind1->phenoPars.get()->KXZ() < ind2->phenoPars.get()->KXZ() );
 		
 		// Otherwise we assume we've got an AUC
 		return ( ind1->phenoPars.get()->AUC() < ind2->phenoPars.get()->AUC() );
@@ -7197,7 +7197,7 @@ const std::vector<EidosMethodSignature_CSP> *Subpopulation_Class::Methods(void) 
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_outputVCFSample, kEidosValueMaskVOID))->AddInt_S("sampleSize")->AddLogical_OS("replace", gStaticEidosValue_LogicalT)->AddString_OS("requestedSex", gStaticEidosValue_StringAsterisk)->AddLogical_OS("outputMultiallelics", gStaticEidosValue_LogicalT)->AddString_OSN(gEidosStr_filePath, gStaticEidosValueNULL)->AddLogical_OS("append", gStaticEidosValue_LogicalF)->AddLogical_OS("simplifyNucleotides", gStaticEidosValue_LogicalF)->AddLogical_OS("outputNonnucleotides", gStaticEidosValue_LogicalT));
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_outputSample, kEidosValueMaskVOID))->AddInt_S("sampleSize")->AddLogical_OS("replace", gStaticEidosValue_LogicalT)->AddString_OS("requestedSex", gStaticEidosValue_StringAsterisk)->AddString_OSN(gEidosStr_filePath, gStaticEidosValueNULL)->AddLogical_OS("append", gStaticEidosValue_LogicalF));
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_configureDisplay, kEidosValueMaskVOID))->AddFloat_ON("center", gStaticEidosValueNULL)->AddFloat_OSN("scale", gStaticEidosValueNULL)->AddString_OSN("color", gStaticEidosValueNULL));
-		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_getMedianODEPar, kEidosValueMaskFloat))->AddString_S("medianBase")->AddLogical_OS("returnPars", gStaticEidosValue_LogicalT));
+		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_getMedianODEPar, kEidosValueMaskFloat))->AddString_OS("medianBase", gStaticEidosValue_StringAsterisk)->AddLogical_OS("returnPars", gStaticEidosValue_LogicalT));
 		std::sort(methods->begin(), methods->end(), CompareEidosCallSignatures);
 	}
 	

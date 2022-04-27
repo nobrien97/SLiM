@@ -90,7 +90,7 @@ public:
 	double tagF_value_;					// a user-defined tag value of float type
 	double phenotype_value_ = 0.0;		// a user-defined phenotype: float
 	std::vector<double> phenotype4_value_;				// a user-defined phenotype for models with 4 traits
-	std::unique_ptr<ODEPar> phenoPars;					// The parameters feeding the ODE function
+	std::unique_ptr<ODEPar> phenoPars = std::make_unique<ODEPar>();	// The parameters feeding the ODE function
 	
 	double fitness_scaling_ = 1.0;		// the fitnessScaling property value
 	double cached_fitness_UNSAFE_;		// the last calculated fitness value for this individual; NaN for new offspring, 1.0 for new subpops

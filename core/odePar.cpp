@@ -13,22 +13,35 @@ void ODEPar::setParValue(size_t i, double val)
     switch (i)
     {
     case 0:
-        _aZ = val;
+        _AUC = val;
         break;
     case 1:
-        _KZ = val;
+        _aZ = val;
         break;
     case 2:
         _bZ = val;
         break;
     case 3:
-        _KXZ = val;
+        _KZ = val;
         break;
+    case 4:
+        _KXZ = val;
     default:
         break;
     }
 
     return;
+}
+
+void ODEPar::setParValue(std::vector<double> vals)
+{
+    if (vals.size() != 5)
+        return;
+    
+    for (uint i = 0; i < 5; ++i)
+    {
+        setParValue(i, vals[i]);
+    }
 }
 
 std::vector<double> ODEPar::getPars()
