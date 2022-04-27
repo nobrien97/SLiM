@@ -38,7 +38,7 @@ void ODEPar::setParValue(std::vector<double> vals)
     if (vals.size() != 5)
         return;
     
-    for (uint i = 0; i < 5; ++i)
+    for (int i = 0; i < 5; ++i)
     {
         setParValue(i, vals[i]);
     }

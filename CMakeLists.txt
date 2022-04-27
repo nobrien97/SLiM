@@ -66,6 +66,8 @@ set(Boost_USE_STATIC_RUNTIME OFF)
 find_package(Boost REQUIRED)
 
 # Find Ascent
+# HPC setup - HACK
+# set(ascent_DIR "/home/564/nb9894/.local/bin/share/ascent/cmake")
 find_package(ascent REQUIRED)
 
 # Make a Release build by default

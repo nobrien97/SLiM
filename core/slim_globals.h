@@ -785,7 +785,7 @@ extern const std::string &gStr_outputVCFSample;
 extern const std::string &gStr_outputSample;
 extern const std::string &gStr_outputMS;
 extern const std::string &gStr_outputVCF;
-extern const std::string &gStr_getMedianODEPar;
+extern const std::string &gStr_getQuantileODEPar;
 extern const std::string &gStr_output;
 extern const std::string &gStr_evaluate;
 extern const std::string &gStr_distance;
@@ -1135,7 +1135,7 @@ enum _SLiMGlobalStringID : int {
 	gID_outputMS,
 	gID_outputVCF,
 	gID_output,
-	gID_getMedianODEPar,
+	gID_getQuantileODEPar,
 	gID_evaluate,
 	gID_distance,
 	gID_localPopulationDensity,

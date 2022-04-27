@@ -3992,7 +3992,7 @@ EidosValue_SP Subpopulation::ExecuteInstanceMethod(EidosGlobalStringID p_method_
 		case gID_outputVCFSample:
 		case gID_outputSample:			return ExecuteMethod_outputXSample(p_method_id, p_arguments, p_interpreter);
 		case gID_configureDisplay:		return ExecuteMethod_configureDisplay(p_method_id, p_arguments, p_interpreter);
-		case gID_getMedianODEPar:		return ExecuteMethod_getMedianODEPar(p_method_id, p_arguments, p_interpreter);
+		case gID_getQuantileODEPar:		return ExecuteMethod_getQuantileODEPar(p_method_id, p_arguments, p_interpreter);
 			
 		default:						return super::ExecuteInstanceMethod(p_method_id, p_arguments, p_interpreter);
 	}
@@ -6846,51 +6846,112 @@ auto hashStr(std::string str)
 }
 
 
-// **********************	- (float)getMedianODEPar(s$ medianBase = "AUC", l$ returnPars = T)
+// **********************	- (float)getQuantileODEPar(f probs, s$ quantileBase = "AUC", l$ returnPars = T)
 // Find the median phenotype in the population and return its ODE parameter values
-EidosValue_SP Subpopulation::ExecuteMethod_getMedianODEPar(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter)
+EidosValue_SP Subpopulation::ExecuteMethod_getQuantileODEPar(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter)
 {
-
-	// Get method arguments
-	std::string parType = p_arguments[0].get()->StringAtIndex(0, nullptr);
-	bool returnPars = p_arguments[1].get()->LogicalAtIndex(0, nullptr);
-
-	// Lambda for sorting individuals by a ODEPar parameter
-	auto sortAUC = [&parType](const Individual* ind1, const Individual* ind2)
-	{
-		if (hashStr(parType) == hashStr("aZ"))
-			return ( ind1->phenoPars.get()->aZ() < ind2->phenoPars.get()->aZ() );
-
-		if (hashStr(parType) == hashStr("bZ"))
-			return ( ind1->phenoPars.get()->bZ() < ind2->phenoPars.get()->bZ() );
-
-		if (hashStr(parType) == hashStr("KZ"))
-			return ( ind1->phenoPars.get()->KZ() < ind2->phenoPars.get()->KZ() );
-
-		if (hashStr(parType) == hashStr("KXZ"))
-			return ( ind1->phenoPars.get()->KXZ() < ind2->phenoPars.get()->KXZ() );
-		
-		// Otherwise we assume we've got an AUC
-		return ( ind1->phenoPars.get()->AUC() < ind2->phenoPars.get()->AUC() );
-
-	};
+	// Get method arguments and setup output ptr
+	EidosValue_SP result_SP(nullptr);
+	EidosValue *probs_value = p_arguments[0].get();
+	std::string parType = p_arguments[1].get()->StringAtIndex(0, nullptr);
+	bool returnPars = p_arguments[2].get()->LogicalAtIndex(0, nullptr);
 
 	int ind_count = parent_subpop_size_;
+	int probs_count = probs_value->Count();
+
+	// get the probabilities; this is mostly so we don't have to special-case NULL below, but we also pre-check the probabilities here
+	std::vector<double> probs;
+	
+	if (probs_value->Type() == EidosValueType::kValueNULL)
+	{
+		probs.emplace_back(0.0);
+		probs.emplace_back(0.25);
+		probs.emplace_back(0.50);
+		probs.emplace_back(0.75);
+		probs.emplace_back(1.0);
+		probs_count = 5;
+	}
+	else
+	{
+		for (int probs_index = 0; probs_index < probs_count; ++probs_index)
+		{
+			double prob = probs_value->FloatAtIndex(probs_index, nullptr);
+			
+			if ((prob < 0.0) || (prob > 1.0))
+				EIDOS_TERMINATION << "ERROR (Subpopulation::ExecuteMethod_getQuantileODEPar): function getQuantileODEPar() requires probabilities to be in [0, 1]." << EidosTerminate(nullptr);
+			
+			probs.emplace_back(prob);
+		}
+	}
+	// Set the size of the vector according to if returnPars is set or not
+	EidosValue_Float_vector *float_result = (new (gEidosValuePool->AllocateChunk()) EidosValue_Float_vector())->resize_no_initialize(probs_count + ((int)returnPars * probs_count * 4));
+
+	result_SP = EidosValue_SP(float_result);
+	
 	std::vector<Individual*> inds = parent_individuals_;
-	std::sort(inds.begin(), inds.end(), sortAUC);
+	
+	// Lambda for sorting individuals by a ODEPar parameter
+	auto sortAUC = [&parType, &inds](int64_t i1, int64_t i2)
+	{
+		if (hashStr(parType) == hashStr("aZ"))
+			return ( inds[i1]->phenoPars.get()->aZ() < inds[i2]->phenoPars.get()->aZ() );
 
-	// Note: doing integer division here - if we have an even number of individuals, we'll get the 
-	// left-centre individual (e.g. with 10 inds, we'll get individual 4)
-	Individual* median = inds[ind_count / 2];
+		if (hashStr(parType) == hashStr("bZ"))
+			return ( inds[i1]->phenoPars.get()->bZ() < inds[i2]->phenoPars.get()->bZ() );
 
+		if (hashStr(parType) == hashStr("KZ"))
+			return ( inds[i1]->phenoPars.get()->KZ() < inds[i2]->phenoPars.get()->KZ() );
 
+		if (hashStr(parType) == hashStr("KXZ"))
+			return ( inds[i1]->phenoPars.get()->KXZ() < inds[i2]->phenoPars.get()->KXZ() );
+		
+		// Otherwise we assume we've got an AUC
+		return ( inds[i1]->phenoPars.get()->AUC() < inds[i2]->phenoPars.get()->AUC() );
+	};
+
+	
+	// initialize original index locations - sequence from 0 to inds.size() - 1
+	std::vector<int64_t> order(inds.size());
+	std::iota(order.begin(), order.end(), 0);
+	// Sort indexes by the ODEPar values
+	std::sort(order.begin(), order.end(), sortAUC);
+
+	// Now loop over the requested probabilities and calculate them
+	// Note: this doesn't get the average of the high and low indices, just the low one is returned
+	// This is so we are sure our values are actually seen in the population - they are real
+	// Do this and fill all parameter values if we want to return that
 	if (returnPars)
 	{
-		std::vector<double> vals = median->phenoPars.get()->getPars();
-		return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float_vector(vals));
+		int probs_index = 0;
+		for (int vec_index = 0; vec_index < (probs_count * 5); vec_index += 5)
+		{
+			double prob = probs[probs_index];
+			double index = (ind_count - 1) * prob;
+			int64_t lo = (int64_t)std::floor(index); 
+			
+			Individual* quantile = inds[order[lo]];
+			std::vector<double> ODEPars = quantile->phenoPars.get()->getPars();
+			for (int i = 0; i < 5; ++i)
+			{
+				float_result->set_float_no_check(ODEPars[i], vec_index + i);
+			}
+			++probs_index;
+		}
+
+		return result_SP;
 	}
 
-	return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float_vector(std::vector<double>( { median->phenoPars.get()->AUC() } )));
+	// In the case where we just want to return the AUC, do that loop 
+	for (int probs_index = 0; probs_index < probs_count; ++probs_index)
+	{
+		double prob = probs[probs_index];
+		double index = (ind_count - 1) * prob;
+		int64_t lo = (int64_t)std::floor(index); 
+		
+		Individual* quantile = inds[order[lo]];
+		float_result->set_float_no_check(quantile->phenoPars.get()->AUC(), probs_index);
+	}
+	return result_SP;
 }
 
 
@@ -7197,7 +7258,7 @@ const std::vector<EidosMethodSignature_CSP> *Subpopulation_Class::Methods(void) 
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_outputVCFSample, kEidosValueMaskVOID))->AddInt_S("sampleSize")->AddLogical_OS("replace", gStaticEidosValue_LogicalT)->AddString_OS("requestedSex", gStaticEidosValue_StringAsterisk)->AddLogical_OS("outputMultiallelics", gStaticEidosValue_LogicalT)->AddString_OSN(gEidosStr_filePath, gStaticEidosValueNULL)->AddLogical_OS("append", gStaticEidosValue_LogicalF)->AddLogical_OS("simplifyNucleotides", gStaticEidosValue_LogicalF)->AddLogical_OS("outputNonnucleotides", gStaticEidosValue_LogicalT));
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_outputSample, kEidosValueMaskVOID))->AddInt_S("sampleSize")->AddLogical_OS("replace", gStaticEidosValue_LogicalT)->AddString_OS("requestedSex", gStaticEidosValue_StringAsterisk)->AddString_OSN(gEidosStr_filePath, gStaticEidosValueNULL)->AddLogical_OS("append", gStaticEidosValue_LogicalF));
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_configureDisplay, kEidosValueMaskVOID))->AddFloat_ON("center", gStaticEidosValueNULL)->AddFloat_OSN("scale", gStaticEidosValueNULL)->AddString_OSN("color", gStaticEidosValueNULL));
-		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_getMedianODEPar, kEidosValueMaskFloat))->AddString_OS("medianBase", gStaticEidosValue_StringAsterisk)->AddLogical_OS("returnPars", gStaticEidosValue_LogicalT));
+		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_getQuantileODEPar, kEidosValueMaskFloat))->AddFloat_ON("probs", gStaticEidosValueNULL)->AddString_OS("quantileBase", gStaticEidosValue_StringAsterisk)->AddLogical_OS("returnPars", gStaticEidosValue_LogicalT));
 		std::sort(methods->begin(), methods->end(), CompareEidosCallSignatures);
 	}
 	
