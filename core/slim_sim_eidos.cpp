@@ -2226,7 +2226,7 @@ EidosValue_SP SLiMSim::ExecuteMethod_NARIntegrate(EidosGlobalStringID p_method_I
 	};
 
 	// Iterate over all individuals, calculating their NAR AUC from their parameter set:
-	// First need to actually calculate their parameter set
+	// First need to actually get the individuals and reserve some space for each individual's result
 	int inds_count = p_arguments[0].get()->Count();
 	std::vector<double> out;
 	out.reserve(size_t(inds_count));
@@ -2256,7 +2256,7 @@ EidosValue_SP SLiMSim::ExecuteMethod_NARIntegrate(EidosGlobalStringID p_method_I
 		// If there are substitutions here update the value, otherwise
 		// we can keep it as 1 (which when multiplied means no effect)
 		if (curSubs.size())
-			subData[subType] = std::accumulate(begin(curSubs), end(curSubs), 1.0, subCoef);
+			subData[subType] = std::accumulate(curSubs.begin(), curSubs.begin(), 1.0, subCoef);
 	}
 
 	// Iterate over individuals to get input parameter values, store in a series of vectors
@@ -2266,8 +2266,8 @@ EidosValue_SP SLiMSim::ExecuteMethod_NARIntegrate(EidosGlobalStringID p_method_I
 	const double nZ = 8.0;
 	int X = 0;
 
-	// Store saved combinations in a vector of ODEPars
-	std::vector<std::unique_ptr<ODEPar>> uniqueODEs; 
+	// Store saved combinations in the simulation's ongoing record vector of ODEPars
+	//std::vector<std::unique_ptr<ODEPar>> uniqueODEs;
 
 	// Now iterate over individuals to calculate phenotype
 	for (int ind_ex = 0; ind_ex < inds_count; ++ind_ex)
@@ -2293,9 +2293,9 @@ EidosValue_SP SLiMSim::ExecuteMethod_NARIntegrate(EidosGlobalStringID p_method_I
 		};
 
 		// If we match an existing entry in the data frame - otherwise we need to calculate the AUC
-		if (std::any_of(uniqueODEs.begin(), uniqueODEs.end(), compareODE))
+		if (std::any_of(this->pastCombos.begin(), this->pastCombos.end(), compareODE))
 		{
-			double curAUC = ODEPar::getODEValFromVector(EV_data, uniqueODEs);
+			double curAUC = ODEPar::getODEValFromVector(EV_data, this->pastCombos);
 			out.emplace_back(curAUC);
 			EV_data.setParValue(0, curAUC);
 			ind->phenoPars.get()->setParValue(EV_data.getPars());
@@ -2341,9 +2341,9 @@ EidosValue_SP SLiMSim::ExecuteMethod_NARIntegrate(EidosGlobalStringID p_method_I
 		out.emplace_back(z);
 		
 		// Add this to the list of existing solutions
-		uniqueODEs.emplace_back(std::make_unique<ODEPar>(z, EV_data.aZ(), EV_data.bZ(), EV_data.KZ(), EV_data.KXZ()));
+		this->pastCombos.emplace_back(std::make_unique<ODEPar>(z, EV_data.aZ(), EV_data.bZ(), EV_data.KZ(), EV_data.KXZ()));
 		// Update the individual's phenoPars values
-		ind->phenoPars.get()->setParValue(uniqueODEs.back().get()->getPars());
+		ind->phenoPars.get()->setParValue(this->pastCombos.back().get()->getPars());
 
 		for (int i = 0; i < 2; ++i)
 		{

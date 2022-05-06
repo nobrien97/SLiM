@@ -9,6 +9,7 @@ private:
 	double _bZ = 1.0;
 	double _KZ = 1.0;
 	double _KXZ = 1.0;
+    uint count = 0; // Count the number of instances in the population that this exists: needs to be reset to 0 every generation! 
 
 public:
     ODEPar(double AUC, double aZ, double bZ, double KZ, double KXZ) : 

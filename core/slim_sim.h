@@ -44,6 +44,7 @@
 #include "eidos_functions.h"
 #include "slim_eidos_block.h"
 #include "interaction_type.h"
+#include "odePar.h"
 
 //TREE SEQUENCE
 //INCLUDE JEROME's TABLES API
@@ -502,6 +503,9 @@ private:
 	std::string treeseq_time_unit_;				// set in initializeTreeSeq(), written out to .trees; has no effect on the simulation, just user data
 	
 public:
+
+	// Past ODEPars saved here so we can refer back to the list 
+	std::vector<std::unique_ptr<ODEPar>> pastCombos;
 	
 	// optimization of the pure neutral case; this is set to false if (a) a non-neutral mutation is added by the user, (b) a genomic element type is configured to use a
 	// non-neutral mutation type, (c) an already existing mutation type (assumed to be in use) is set to a non-neutral DFE, or (d) a mutation's selection coefficient is

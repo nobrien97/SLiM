@@ -46,6 +46,7 @@
 #include <unordered_map>
 #include <float.h>
 #include <ctime>
+#include "odePar.h"
 
 #include "eidos_globals.h"
 #if EIDOS_ROBIN_HOOD_HASHING
@@ -3788,6 +3789,16 @@ bool SLiMSim::_RunOneGenerationWF(void)
 		if (gEidosProfilingClientCount)
 			CollectSLiMguiMemoryUsageProfileInfo();
 #endif
+
+		// Keep only the 100 most frequent ODEPars in the vector, purge the rest
+			// Sort vector by count, then purge everything after index 99
+
+			
+		// Reset ODEPar counts so the next generation can start clean
+		for (auto& ODE : this->pastCombos)
+		{
+			ODE.get()->count = 0;
+		}
 		
 		// Decide whether the simulation is over.  We need to call EstimatedLastGeneration() every time; we can't
 		// cache it, because it can change based upon changes in script registration / deregistration.
