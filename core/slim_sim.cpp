@@ -3792,12 +3792,22 @@ bool SLiMSim::_RunOneGenerationWF(void)
 
 		// Keep only the 100 most frequent ODEPars in the vector, purge the rest
 			// Sort vector by count, then purge everything after index 99
+		if (pastCombos.size() > 100)
+		{
+			auto sortByCount = [](const std::unique_ptr<ODEPar>& ODE1, const std::unique_ptr<ODEPar>& ODE2)
+			{
+				return (ODE1.get()->count > ODE2.get()->count);
+			};
+
+			std::sort(pastCombos.begin(), pastCombos.end(), sortByCount);
+			pastCombos.erase(pastCombos.begin() + 100, pastCombos.end());
+		}
 
 			
 		// Reset ODEPar counts so the next generation can start clean
 		for (auto& ODE : this->pastCombos)
 		{
-			ODE.get()->count = 0;
+			ODE.get()->count = 1;
 		}
 		
 		// Decide whether the simulation is over.  We need to call EstimatedLastGeneration() every time; we can't

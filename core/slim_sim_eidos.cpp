@@ -2295,7 +2295,7 @@ EidosValue_SP SLiMSim::ExecuteMethod_NARIntegrate(EidosGlobalStringID p_method_I
 		// If we match an existing entry in the data frame - otherwise we need to calculate the AUC
 		if (std::any_of(this->pastCombos.begin(), this->pastCombos.end(), compareODE))
 		{
-			double curAUC = ODEPar::getODEValFromVector(EV_data, this->pastCombos);
+			double curAUC = ODEPar::getODEValFromVector(EV_data, this->pastCombos, true);
 			out.emplace_back(curAUC);
 			EV_data.setParValue(0, curAUC);
 			ind->phenoPars.get()->setParValue(EV_data.getPars());
@@ -2345,10 +2345,6 @@ EidosValue_SP SLiMSim::ExecuteMethod_NARIntegrate(EidosGlobalStringID p_method_I
 		// Update the individual's phenoPars values
 		ind->phenoPars.get()->setParValue(this->pastCombos.back().get()->getPars());
 
-		for (int i = 0; i < 2; ++i)
-		{
-			out.back();
-		}
 	}
 
 	// Initialise an Eidos vector to return our calculations

@@ -9,7 +9,6 @@ private:
 	double _bZ = 1.0;
 	double _KZ = 1.0;
 	double _KXZ = 1.0;
-    uint count = 0; // Count the number of instances in the population that this exists: needs to be reset to 0 every generation! 
 
 public:
     ODEPar(double AUC, double aZ, double bZ, double KZ, double KXZ) : 
@@ -26,6 +25,11 @@ public:
             _KXZ == rhs._KXZ
         ;
     }
+
+    void operator ++ (){  
+        ++count;  
+    }  
+    
     // Set a given value
     void setParValue(size_t i, double val);
 
@@ -33,7 +37,7 @@ public:
     void setParValue(std::vector<double> vals);
 
     // Get an ODEPar from a vector of ODEPars
-    static double getODEValFromVector(const ODEPar& target, const std::vector<std::unique_ptr<ODEPar>>& vec);
+    static double getODEValFromVector(const ODEPar& target, const std::vector<std::unique_ptr<ODEPar>>& vec, bool incrementCount = false);
 
     // Get all the values from an ODEPar
     std::vector<double> getPars();
@@ -49,6 +53,8 @@ public:
     double& bZ() { return _bZ; }
     double& KZ() { return _KZ; }
     double& KXZ() { return _KXZ; }
+
+    unsigned int count = 1; // Count the number of instances in the population that this exists: needs to be reset to 1 every generation! 
 
     void setAUC(double val) { _AUC = val; }
 

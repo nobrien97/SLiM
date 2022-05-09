@@ -50,12 +50,17 @@ std::vector<double> ODEPar::getPars()
 } 
 
 // Get an ODEPar from a vector of ODEPars
-double ODEPar::getODEValFromVector(const ODEPar& target, const std::vector<std::unique_ptr<ODEPar>>& vec)
+double ODEPar::getODEValFromVector(const ODEPar& target, const std::vector<std::unique_ptr<ODEPar>>& vec, bool incrementCount)
 {
-    for (const auto& ODE : vec)
+    for (auto& ODE : vec)
     {
         if (target == *ODE.get())
+        {
+            if (incrementCount) 
+                ++*ODE;
+
             return ODE->AUC();
+        }
     }
     return 0;
 } 
