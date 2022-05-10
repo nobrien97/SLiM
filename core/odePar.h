@@ -27,7 +27,7 @@ public:
     }
 
     void operator ++ (){  
-        ++count;  
+        count++;  
     }  
     
     // Set a given value

@@ -2267,6 +2267,7 @@ EidosValue_SP SLiMSim::ExecuteMethod_NARIntegrate(EidosGlobalStringID p_method_I
 	int X = 0;
 
 	// Store saved combinations in the simulation's ongoing record vector of ODEPars
+	// NOTE: Now stored in SLiMSim::pastCombos
 	//std::vector<std::unique_ptr<ODEPar>> uniqueODEs;
 
 	// Now iterate over individuals to calculate phenotype
