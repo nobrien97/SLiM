@@ -2364,7 +2364,7 @@ EidosValue_SP SLiMSim::ExecuteMethod_pairwiseR2(EidosGlobalStringID p_method_id,
 	
 	// Store the MAFs, mutation positions, and mutation ID in a vector
 	// [0] = MAF; [1] = pos; [2] = ID
-	std::vector<std::tuple<double, int, int>> mutFreqMAFs(genomelength);
+	std::vector<std::tuple<double, int, MutationIndex>> mutFreqMAFs(genomelength);
 
 	// Get all mutations in a std::vector
 	slim_refcount_t *refcount_block_ptr = gSLiM_Mutation_Refcounts;
@@ -2372,7 +2372,9 @@ EidosValue_SP SLiMSim::ExecuteMethod_pairwiseR2(EidosGlobalStringID p_method_id,
 
 	int registry_size;
 	const MutationIndex *registry = population_.MutationRegistry(&registry_size);
-	std::unique_ptr<std::vector<Mutation *>> allMuts(new std::vector<Mutation *>);
+//	std::vector<Mutation*> allMuts;
+	std::vector<Mutation *> allMuts;
+
 
 	if (registry_size)
 	{
@@ -2387,11 +2389,11 @@ EidosValue_SP SLiMSim::ExecuteMethod_pairwiseR2(EidosGlobalStringID p_method_id,
 
 	for (int n = 0; n < genomelength; ++n)
 	{
-		std::vector<Mutation *> iMuts;
+		std::vector<Mutation*> iMuts;
 		std::copy_if(allMuts->begin(), allMuts->end(), std::back_inserter( iMuts ), ([n]( Mutation*& mut ) { return mut->position_ == n; }));
 		if (!iMuts.size()) // If there's no mutation at this point, fill it in empty
 		{
-			mutFreqMAFs[n] = std::tuple<double, int, int>{0.0, -1, -1};
+			mutFreqMAFs[n] = std::tuple<double, int, MutationIndex>{0.0, -1, -1};
 			continue;
 		}
 		// Get each mutation's frequency
@@ -2407,11 +2409,17 @@ EidosValue_SP SLiMSim::ExecuteMethod_pairwiseR2(EidosGlobalStringID p_method_id,
 
 			mutAllFreq.emplace_back(freq, mut);
 		}
+
+		// Get the minor allele frequency
+//		std::pair<double, Mutation*> MAF = *std::min_element(mutAllFreq.begin(), mutAllFreq.end(), [](const auto& lhs, const auto& rhs) { return lhs.first < rhs.first; });
 		std::pair<double, Mutation *> MAF = std::min_element(mutAllFreq.cbegin(), mutAllFreq.cend())[0];
+		mutAllFreq.size();
 		mutAllFreq.clear();
+
+		// Set mutFreqMAFs tuple values according to MAF values
 		std::get<0>(mutFreqMAFs[n]) = (MAF.first > singletonFreq) ? MAF.first : 0.0;
 		std::get<1>(mutFreqMAFs[n]) = (MAF.first > singletonFreq) ? MAF.second->position_ : -1;
-		std::get<2>(mutFreqMAFs[n]) = (MAF.first > singletonFreq) ? MAF.second->mutation_id_ : -1;
+		std::get<2>(mutFreqMAFs[n]) = (MAF.first > singletonFreq) ? MAF.second->BlockIndex() : -1;
 	}
 	// Then, calculate correlations and store in a matrix
 	// Initialise values to 100 so we can check if values have been filled
@@ -2451,7 +2459,7 @@ EidosValue_SP SLiMSim::ExecuteMethod_pairwiseR2(EidosGlobalStringID p_method_id,
 			// Stolyarova et al. 2021
 				ABFreq = sharedMutFreq(genomes, std::get<2>(mutFreqMAFs[i]), std::get<2>(mutFreqMAFs[j]));
 				}
-			(*corTable)(i, j) = ( (ABFreq - (mutFreqA * mutFreqB) ) * (ABFreq - (mutFreqA * mutFreqB) ) ) / (mutFreqA * (1 - mutFreqA) * mutFreqB * (1 - mutFreqB));	
+			(*corTable)(i, j) = ( pow(ABFreq - (mutFreqA * mutFreqB), 2) ) / ( mutFreqA * (1 - mutFreqA) * mutFreqB * (1 - mutFreqB) );	
 		}
 	
 	}	
@@ -4125,7 +4133,7 @@ EidosValue_SP SLiMSim::ExecuteMethod_treeSeqOutput(EidosGlobalStringID p_method_
 
 
 // Helper Function for pairwiseR2 - gets the shared frequency between mutations
-double SLiMSim::sharedMutFreq(std::vector<Genome*>& genomes, int& mut1, int& mut2) {
+double SLiMSim::sharedMutFreq(std::vector<Genome*>& genomes, MutationIndex mut1, MutationIndex mut2) {
 	// Find the frequency of AB: number of genomes with alleles i and j and loci n and m
 	auto containsBothMuts = [mut1, mut2] (Genome* genome) { 
 		return (genome->contains_mutation(mut1)) && (genome->contains_mutation(mut2)); 
@@ -4133,12 +4141,14 @@ double SLiMSim::sharedMutFreq(std::vector<Genome*>& genomes, int& mut1, int& mut
 
 	// Go through each genome, determine if it has both mutations or not, add to counter
 	int validGenomes = 0;
+//	size_t validGenomes = 0;
 	for (Genome* g : genomes)
 	{
 		validGenomes += (containsBothMuts(g)) ? 1 : 0;
+//		validGenomes += (size_t)containsBothMuts(g);
 	}	
-	
 	return (double)validGenomes/genomes.size();
+	//return ((double)validGenomes)/genomes.size();
 }
 
 
