@@ -259,12 +259,12 @@ double Individual::internalSumOfMutationsOfType(const slim_objectid_t &mutType)
 	
 	Genome *genome1 = this->genome1_;
 	Genome *genome2 = this->genome2_;
-	double selcoeff_sum = 1.0;
+	double selcoeff_sum = 0.0;
 		
 	if (!genome1->IsNull())
 	{
 		int mutrun_count = genome1->mutrun_count_;
-			
+		
 		for (int run_index = 0; run_index < mutrun_count; ++run_index)
 		{
 			MutationRun *mutrun = genome1->mutruns_[run_index].get();
@@ -299,7 +299,6 @@ double Individual::internalSumOfMutationsOfType(const slim_objectid_t &mutType)
 			}
 		}
 	}
-
 	return selcoeff_sum;
 }
 

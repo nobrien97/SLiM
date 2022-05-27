@@ -2234,7 +2234,7 @@ EidosValue_SP SLiMSim::ExecuteMethod_NARIntegrate(EidosGlobalStringID p_method_I
 	// For each mutation type, get the relevant substitutions and calculate product of
 	// selection coefficients - we store that in subData
 	std::vector<Substitution*> &subs = population_.substitutions_;
-	std::vector<double> subData(4, 1.0);
+	std::vector<double> subData(4, 0.0);
 
 	size_t subType = 0;
 	// Lambda to compare our current subType to the sub's type
@@ -2243,20 +2243,20 @@ EidosValue_SP SLiMSim::ExecuteMethod_NARIntegrate(EidosGlobalStringID p_method_I
 	{
 		return ((size_t)(sub->mutation_type_ptr_->mutation_type_id_) == (subType + 3));
 	};
-	// Lambda to get product of selection coefficients - Two chromosomes, so multiply by 2 
+	// Lambda to get product of selection coefficients
 	auto subCoef = [](double i, Substitution* const &sub)
 	{
-		return i * (double)sub->selection_coeff_ * 2;
+		return i + (double)sub->selection_coeff_;
 	};
 	// Fill subData with the products of mutations with the same mutationType
 	for (; subType < 4; ++subType)
 	{
 		std::vector<Substitution*> curSubs;
 		std::copy_if(subs.begin(), subs.end(), std::back_inserter(curSubs), cond);
-		// If there are substitutions here update the value, otherwise
-		// we can keep it as 1 (which when multiplied means no effect)
+		// If there are substitutions here update the value
+		// Two chromosomes, so multiply std::accumulate result by 2
 		if (curSubs.size())
-			subData[subType] = std::accumulate(curSubs.begin(), curSubs.begin(), 1.0, subCoef);
+			subData[subType] = 2 * (std::accumulate(curSubs.begin(), curSubs.end(), 0.0, subCoef));
 	}
 
 	// Iterate over individuals to get input parameter values, store in a series of vectors
