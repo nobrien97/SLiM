@@ -3790,17 +3790,20 @@ bool SLiMSim::_RunOneGenerationWF(void)
 			CollectSLiMguiMemoryUsageProfileInfo();
 #endif
 
-		// Keep only ODEPars with a high frequency: count size >= 1
+		// Keep only ODEPars with a high frequency: count size >= 1, 
+		// make sure this doesn't get too large also: store only 50 at a time
 
 		if (pastCombos.size())
 		{
-			auto isRare = [](const std::unique_ptr<ODEPar>& ODE1)
+			if (pastCombos.size() > 50) 
 			{
-				return (ODE1.get()->count < 2);
-			};
+				auto isRare = [](const std::unique_ptr<ODEPar>& ODE1)
+				{
+					return (ODE1.get()->count < 2);
+				};
 
-			pastCombos.erase(std::remove_if(pastCombos.begin(), pastCombos.end(), isRare), pastCombos.end());
-
+				pastCombos.erase(std::remove_if(pastCombos.begin(), pastCombos.end(), isRare), pastCombos.end());
+			}
 			
 		// Reset ODEPar counts so the next generation can start clean: 
 		// this loop should only be over a few pastCombos
