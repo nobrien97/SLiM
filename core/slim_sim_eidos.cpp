@@ -2243,10 +2243,10 @@ EidosValue_SP SLiMSim::ExecuteMethod_NARIntegrate(EidosGlobalStringID p_method_I
 	{
 		return ((size_t)(sub->mutation_type_ptr_->mutation_type_id_) == (subType + 3));
 	};
-	// Lambda to get product of selection coefficients - Two chromosomes, so raise to power of 2
+	// Lambda to get product of selection coefficients - Two chromosomes, so multiply by 2 
 	auto subCoef = [](double i, Substitution* const &sub)
 	{
-		return i * (double)sub->selection_coeff_ * (double)sub->selection_coeff_;
+		return i * (double)sub->selection_coeff_ * 2;
 	};
 	// Fill subData with the products of mutations with the same mutationType
 	for (; subType < 4; ++subType)
@@ -2279,11 +2279,12 @@ EidosValue_SP SLiMSim::ExecuteMethod_NARIntegrate(EidosGlobalStringID p_method_I
 		Individual *ind __attribute__((used)) = (Individual *)individuals_value->ObjectElementAtIndex(ind_ex, nullptr);
 		// Get the individual's mutation values - offset by 3 because mutation types start at m3
 		// Setting EV_data value offset by 1 because value 0 means setting AUC
+		// parameter = e^sumOfMutationsAndSubs
 		for (uint mutType = 0; mutType < 4; ++mutType)
 		{
-			double indVals = ind->productOfMutationsOfType(mutType + 3);
-			indVals *= subData[mutType];
-			EV_data.setParValue((mutType + 1), indVals);
+			double indVals = ind->internalSumOfMutationsOfType(mutType + 3);
+			indVals += subData[mutType];
+			EV_data.setParValue((mutType + 1), exp(indVals));
 		}
 
 
@@ -2355,6 +2356,10 @@ EidosValue_SP SLiMSim::ExecuteMethod_NARIntegrate(EidosGlobalStringID p_method_I
 //	*********************	– (float)pairwiseR2(Nio<Subpopulation> subpops)
 EidosValue_SP SLiMSim::ExecuteMethod_pairwiseR2(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter)
 {
+	// Note: this calculates r2 based on frequencies across all mutation types:
+	// it might be good to be able to choose a mutation type to compare across, so that we can
+	// see how r2 changes depending on MAF of shared mutation types vs different mutation types
+
 	// TODO: This ignores all subpop information, just works over the first one
 	Subpopulation *subpop_value = SLiM_ExtractSubpopulationFromEidosValue_io(p_arguments[0].get(), 0, *this, "pairwiseR2()");
 
