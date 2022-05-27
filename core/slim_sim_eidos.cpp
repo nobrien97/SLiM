@@ -2360,7 +2360,7 @@ EidosValue_SP SLiMSim::ExecuteMethod_pairwiseR2(EidosGlobalStringID p_method_id,
 
 	std::vector<Genome*>& genomes = subpop_value->CurrentGenomes();
 	int genomelength = population_.sim_.TheChromosome().last_position_ + 1;
-	double singletonFreq = (double)(1.0/genomelength);
+	double singletonFreq = (double)(1.0/genomes.size());
 	double denominator = population_.TallyMutationReferences(nullptr, false); // Denominator for freq calc + tally mutations
 	
 	
@@ -2424,13 +2424,16 @@ EidosValue_SP SLiMSim::ExecuteMethod_pairwiseR2(EidosGlobalStringID p_method_id,
 		}
 
 		// Get the minor allele frequency
+
+		std::pair<double, Mutation*> MAF;
+
 		// Return the mutation with the smallest allele frequency at this position and clear mutAllFreq
 		// If we only have one value, then that's the minor allele
 		if (mutAllFreq.size() == 1) 
 		{
-			std::pair<double, Mutation*> MAF = mutAllFreq[0];
+			MAF = mutAllFreq[0];
 		} else {
-			std::pair<double, Mutation*> MAF = *std::min_element(mutAllFreq.begin(), mutAllFreq.end(), [](const auto& lhs, const auto& rhs) { return lhs.first < rhs.first; });
+			MAF = *std::min_element(mutAllFreq.begin(), mutAllFreq.end(), [](const auto& lhs, const auto& rhs) { return lhs.first < rhs.first; });
 		} 
 
 		// Set mutFreqMAFs tuple values according to MAF values: MAF[0] = freq, MAF[1] = pos, MAF[2] = ID
