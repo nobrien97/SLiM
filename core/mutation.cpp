@@ -326,6 +326,8 @@ EidosValue_SP Mutation::GetProperty(EidosGlobalStringID p_property_id)
 			return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Int_singleton(position_));
 		case gID_selectionCoeff:	// ACCELERATED
 			return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float_singleton(selection_coeff_));
+		case gID_molTraitFX:		// ACCELERATED
+			return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float_vector(molTraitFX_));
 			
 			// variables
 		case gID_nucleotide:		// ACCELERATED
@@ -532,6 +534,26 @@ EidosValue *Mutation::GetProperty_Accelerated_selectionCoeff(EidosObject **p_val
 	
 	return float_result;
 }
+
+// Get the molecular trait effects stored at this mutation for a group of individuals
+EidosValue *Mutation::GetProperty_Accelerated_molTraitFX(EidosObject **p_values, size_t p_values_size)
+{
+	size_t p_molTraitCount = (size_t)((Mutation *)(p_values[0])->molTraitFX_.size());
+	EidosValue_Float_vector *float_result = (new (gEidosValuePool->AllocateChunk()) EidosValue_Float_vector())->resize_no_initialize(p_values_size*p_molTraitCount);
+	
+	for (size_t value_index = 0; value_index < p_values_size; ++value_index)
+	{
+		Mutation *value = (Mutation *)(p_values[value_index]);
+		
+		for (size_t molTrait_index = 0; molTrait_index < p_molTraitCount; ++molTrait_index)
+		{
+			float_result->set_float_no_check(value->molTraitFX_[molTrait_index], value_index);
+		}
+	}
+	
+	return float_result;
+}
+
 
 EidosValue *Mutation::GetProperty_Accelerated_mutationType(EidosObject **p_values, size_t p_values_size)
 {

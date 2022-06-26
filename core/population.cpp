@@ -1399,7 +1399,7 @@ void Population::EvolveSubpopulation(Subpopulation &p_subpop, bool p_mate_choice
 							sim_.RecordNewGenome(nullptr, &child_genome_1, &parent_genome_1, nullptr);
 							sim_.RecordNewGenome(nullptr, &child_genome_2, &parent_genome_2, nullptr);
 						}
-						
+						// NO 26/6/22 TODO: I haven't implemented molecular traits into the clonal mutation function yet
 						DoClonalMutation(&source_subpop, child_genome_1, parent_genome_1, child_sex, mutation_callbacks);
 						DoClonalMutation(&source_subpop, child_genome_2, parent_genome_2, child_sex, mutation_callbacks);
 					}
@@ -2766,6 +2766,7 @@ void Population::DoCrossoverMutation(Subpopulation *p_source_subpop, Genome &p_c
 		// Create vector with the mutations to be added
 		MutationRun &mutations_to_add = *MutationRun::NewMutationRun();		// take from shared pool of used objects;
 		
+		// NOTE NO 26/6/22: I haven't added molecular traits to nucleotide models
 		try {
 			if (sim_.IsNucleotideBased() || p_mutation_callbacks)
 			{

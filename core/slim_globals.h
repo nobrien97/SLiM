@@ -968,6 +968,7 @@ enum _SLiMGlobalStringID : int {
 	gID_originGeneration,
 	gID_position,
 	gID_selectionCoeff,
+	gID_molTraitFX,
 	gID_subpopID,
 	gID_convertToSubstitution,
 	gID_distributionType,

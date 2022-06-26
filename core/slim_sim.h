@@ -407,6 +407,9 @@ private:
 	bool pedigrees_enabled_by_user_ = false;		// pedigree tracking was turned on by the user, which is user-visible
 	bool pedigrees_enabled_by_SLiM_ = false;		// pedigree tracking has been forced on by tree-seq recording or SLiMgui, which is not user-visible
 	
+	// ODE model enabled
+	bool molTraits_enabled_ = false;
+
 	// continuous space support
 	int spatial_dimensionality_ = 0;
 	bool periodic_x_ = false;
@@ -652,6 +655,7 @@ public:
 	inline __attribute__((always_inline)) bool PedigreesEnabled(void) const													{ return pedigrees_enabled_; }
 	inline __attribute__((always_inline)) bool PedigreesEnabledByUser(void) const											{ return pedigrees_enabled_by_user_; }
 	inline __attribute__((always_inline)) bool PreventIncidentalSelfing(void) const											{ return prevent_incidental_selfing_; }
+	inline __attribute__((always_inline)) bool MolTraitsEnabled(void) const													{ return molTraits_enabled_; }
 	inline __attribute__((always_inline)) GenomeType ModeledChromosomeType(void) const										{ return modeled_chromosome_type_; }
 	inline __attribute__((always_inline)) int SpatialDimensionality(void) const												{ return spatial_dimensionality_; }
 	inline __attribute__((always_inline)) void SpatialPeriodicity(bool *p_x, bool *p_y, bool *p_z) const

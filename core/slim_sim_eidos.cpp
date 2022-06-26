@@ -1123,7 +1123,7 @@ EidosValue_SP SLiMSim::ExecuteContextFunction_initializeSex(const std::string &p
 	return gStaticEidosValueVOID;
 }
 
-//	*********************	(void)initializeSLiMOptions([logical$ keepPedigrees = F], [string$ dimensionality = ""], [string$ periodicity = ""], [integer$ mutationRuns = 0], [logical$ preventIncidentalSelfing = F], [logical$ nucleotideBased = F])
+//	*********************	(void)initializeSLiMOptions([logical$ keepPedigrees = F], [string$ dimensionality = ""], [string$ periodicity = ""], [integer$ mutationRuns = 0], [logical$ preventIncidentalSelfing = F], [logical$ nucleotideBased = F], [logical$ molecularTraits = F])
 //
 EidosValue_SP SLiMSim::ExecuteContextFunction_initializeSLiMOptions(const std::string &p_function_name, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter)
 {
@@ -1134,6 +1134,7 @@ EidosValue_SP SLiMSim::ExecuteContextFunction_initializeSLiMOptions(const std::s
 	EidosValue *arg_mutationRuns_value = p_arguments[3].get();
 	EidosValue *arg_preventIncidentalSelfing_value = p_arguments[4].get();
 	EidosValue *arg_nucleotideBased_value = p_arguments[5].get();
+	EidosValue *arg_molecularTraits_value = p_arguments[6].get();
 	std::ostream &output_stream = p_interpreter.ExecutionOutputStream();
 	
 	if (num_options_declarations_ > 0)
@@ -1241,6 +1242,13 @@ EidosValue_SP SLiMSim::ExecuteContextFunction_initializeSLiMOptions(const std::s
 		bool nucleotide_based = arg_nucleotideBased_value->LogicalAtIndex(0, nullptr);
 		
 		nucleotide_based_ = nucleotide_based;
+	}
+
+	{
+		// [logical$ molecularTraits = F]
+		bool useMolTraits = arg_molecularTraits_value->LogicalAtIndex(0, nullptr);
+		
+		molTraits_enabled_ = useMolTraits;
 	}
 	
 	if (SLiM_verbosity_level >= 1)

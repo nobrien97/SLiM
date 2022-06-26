@@ -674,6 +674,7 @@ int Chromosome::DrawSortedUniquedMutationPositions(int p_count, IndividualSex p_
 // draw a new mutation, based on the genomic element types present and their mutational proclivities
 MutationIndex Chromosome::DrawNewMutation(std::pair<slim_position_t, GenomicElement *> &p_position, slim_objectid_t p_subpop_index, slim_generation_t p_generation) const
 {
+	bool ode_enabled = sim_.MolTraitsEnabled(); // if we're in an ODE model, we want to sample mol trait fx into a vector instead of selcoeff
 	const GenomicElement &source_element = *(p_position.second);
 	const GenomicElementType &genomic_element_type = *(source_element.genomic_element_type_ptr_);
 	MutationType *mutation_type_ptr = genomic_element_type.DrawMutationType();
