@@ -407,8 +407,9 @@ private:
 	bool pedigrees_enabled_by_user_ = false;		// pedigree tracking was turned on by the user, which is user-visible
 	bool pedigrees_enabled_by_SLiM_ = false;		// pedigree tracking has been forced on by tree-seq recording or SLiMgui, which is not user-visible
 	
-	// ODE model enabled
-	bool molTraits_enabled_ = false;
+	// Molecular trait names
+	std::vector<std::string> molTraits_; 
+	inline __attribute__((always_inline)) const std::vector<std::string>& MolTraits(void) const											{ return molTraits_; }
 
 	// continuous space support
 	int spatial_dimensionality_ = 0;
@@ -655,7 +656,6 @@ public:
 	inline __attribute__((always_inline)) bool PedigreesEnabled(void) const													{ return pedigrees_enabled_; }
 	inline __attribute__((always_inline)) bool PedigreesEnabledByUser(void) const											{ return pedigrees_enabled_by_user_; }
 	inline __attribute__((always_inline)) bool PreventIncidentalSelfing(void) const											{ return prevent_incidental_selfing_; }
-	inline __attribute__((always_inline)) bool MolTraitsEnabled(void) const													{ return molTraits_enabled_; }
 	inline __attribute__((always_inline)) GenomeType ModeledChromosomeType(void) const										{ return modeled_chromosome_type_; }
 	inline __attribute__((always_inline)) int SpatialDimensionality(void) const												{ return spatial_dimensionality_; }
 	inline __attribute__((always_inline)) void SpatialPeriodicity(bool *p_x, bool *p_y, bool *p_z) const
@@ -771,7 +771,9 @@ public:
 	EidosValue_SP ExecuteContextFunction_initializeSLiMOptions(const std::string &p_function_name, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter);
 	EidosValue_SP ExecuteContextFunction_initializeTreeSeq(const std::string &p_function_name, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter);
 	EidosValue_SP ExecuteContextFunction_initializeSLiMModelType(const std::string &p_function_name, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter);
-	
+	EidosValue_SP ExecuteContextFunction_initializeMolTraits(const std::string &p_function_name, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter)
+
+
 	EidosSymbolTable *SymbolsFromBaseSymbols(EidosSymbolTable *p_base_symbols);				// derive a symbol table, adding our own symbols if needed
 	
 	static const std::vector<EidosFunctionSignature_CSP> *ZeroGenerationFunctionSignatures(void);		// all zero-gen functions
