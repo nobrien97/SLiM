@@ -708,6 +708,7 @@ extern const std::string &gStr_containsMarkerMutation;
 extern const std::string &gStr_relatedness;
 extern const std::string &gStr_NARIntegrate;
 extern const std::string &gStr_pairwiseR2;
+extern const std::string &gStr_getMolTraitsAtPosition;
 extern const std::string &gStr_mutationsOfType;
 extern const std::string &gStr_setSpatialPosition;
 extern const std::string &gStr_sumOfMutationsOfType;
@@ -1055,6 +1056,7 @@ enum _SLiMGlobalStringID : int {
 	gID_containsMutations,
 	gID_NARIntegrate,
 	gID_pairwiseR2,
+	gID_getMolTraitsAtPosition
 	gID_countOfMutationsOfType,
 	gID_positionsOfMutationsOfType,
 	gID_containsMarkerMutation,
@@ -1070,6 +1072,7 @@ enum _SLiMGlobalStringID : int {
 	gID_setMutationFractions,
 	gID_setMutationMatrix,
 	gID_setSelectionCoeff,
+	gID_setMolTraitFX,
 	gID_setMutationType,
 	gID_drawSelectionCoefficient,
 	gID_setDistribution,
