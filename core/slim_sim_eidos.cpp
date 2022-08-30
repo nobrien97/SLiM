@@ -81,6 +81,7 @@ EidosValue_SP SLiMSim::ContextDefinedFunctionDispatch(const std::string &p_funct
 	else if (p_function_name.compare(gStr_initializeMutationType) == 0)			return ExecuteContextFunction_initializeMutationType(p_function_name, p_arguments, p_interpreter);
 	else if (p_function_name.compare(gStr_initializeMutationTypeNuc) == 0)		return ExecuteContextFunction_initializeMutationType(p_function_name, p_arguments, p_interpreter);
 	else if (p_function_name.compare(gStr_initializeRecombinationRate) == 0)	return ExecuteContextFunction_initializeRecombinationRate(p_function_name, p_arguments, p_interpreter);
+	else if (p_function_name.compare(gStr_initializeMolTraits) == 0)			return ExecuteContextFunction_initializeMolTraits(p_function_name, p_arguments, p_interpreter);
 	else if (p_function_name.compare(gStr_initializeGeneConversion) == 0)		return ExecuteContextFunction_initializeGeneConversion(p_function_name, p_arguments, p_interpreter);
 	else if (p_function_name.compare(gStr_initializeMutationRate) == 0)			return ExecuteContextFunction_initializeMutationRate(p_function_name, p_arguments, p_interpreter);
 	else if (p_function_name.compare(gStr_initializeHotspotMap) == 0)			return ExecuteContextFunction_initializeHotspotMap(p_function_name, p_arguments, p_interpreter);
@@ -742,6 +743,81 @@ EidosValue_SP SLiMSim::ExecuteContextFunction_initializeRecombinationRate(const 
 	return gStaticEidosValueVOID;
 }
 
+//	*********************	(void)initializeMolTraits(integer positions, string molTraitNames, integer nElems, string locusTypes ...)
+//
+EidosValue_SP SLiMSim::ExecuteContextFunction_initializeMolTraits(const std::string &p_function_name, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter)
+{
+#pragma unused (p_function_name, p_arguments, p_interpreter)
+	EidosValue *pos_value = p_arguments[0].get();
+	EidosValue *names_value = p_arguments[1].get();
+	EidosValue *nElems_value = p_arguments[2].get();
+	std::ostream &output_stream = p_interpreter.ExecutionOutputStream();
+
+	// Each locusTypes argument is a description of one of the numbers in nElems: need to be the same size
+	if (nElems_value->Count() != (p_arguments.size() - 3))
+		EIDOS_TERMINATION << "ERROR (SLiMSim::ExecuteContextFunction_initializeMolTraits): Elements in nElems must equal the number of additional arguments (molecular trait combinations)." << EidosTerminate();
+
+	// We also need to make sure that the sum of nElems is equal to the length of positions
+	int elemSum = 0;
+	for (size_t elem_idx = 0; elem_idx < nElems_value->Count(); ++elem_idx)
+	{
+		elemSum += nElems_value->IntAtIndex(elem_idx, nullptr);
+	}
+
+	if (pos_value->Count() != elemSum)
+		EIDOS_TERMINATION << "ERROR (SLiMSim::ExecuteContextFunction_initializeMolTraits): Must have an equal amount of positions as molecular trait loci to assign" << EidosTerminate();
+
+	// Now we need to fill the molTraits_ name vector
+
+	int names_count = names_value->Count();
+	molTraits_.clear();
+	molTraits_.resize(names_count);
+
+	for (size_t name_idx = 0; name_idx < names_count; ++name_idx)
+	{
+		molTraits_[name_idx] = names_value->StringAtIndex(name_idx, nullptr);
+	}
+
+	// And fill the molTraitPos_ table
+	// We iterate through nElems, setting the appropriate amount of position values
+	// To do that, we keep track of the position index so we can continue getting the right value
+	// then we get the right p_argument, keep a running index which updates after assigning nElems values
+	int pos_idx = 0;
+
+	for (size_t n_idx = 0; n_idx < nElems_value->Count(); ++n_idx)
+	{
+		EidosValue *curTraitList = p_arguments[(3+n_idx)].get();
+		std::vector<std::string> molTraitList = curTraitList->StringVector();
+		std::vector<std::string*> mtlPtrs;
+
+		// Loop through vector to find the indexes of the molTraits_ that we need (so we can point instead of storing the same values all the time)
+		for (int mtl_idx = 0; mtl_idx < molTraitList.size(); ++mtl_idx)
+		{
+			auto it = std::find(molTraits_.begin(), molTraits_.end(), molTraitList[mtl_idx]);
+			mtlPtrs.emplace_back(&molTraits_[(it - molTraits_.begin())]);
+		}
+
+		// If the new vector isn't the same length as molTraitList, something's gone wrong
+		if (mtlPtrs.size() != molTraitList.size())
+			EIDOS_TERMINATION << "ERROR (SLiMSim::ExecuteContextFunction_initializeMolTraits): Invalid element. Make sure all molecular traits named in this element exist in molTraitNames."  << EidosTerminate();
+
+		// Now set the values for the nVal positions to the vector of mol traits
+		int nVal = nElems_value->IntAtIndex(n_idx, nullptr);
+
+		for (pos_idx; pos_idx < (nVal + pos_idx); ++pos_idx)
+		{	
+			int pos = pos_value->IntAtIndex(pos_idx, nullptr);
+			molTraitPos_.emplace(std:pair<int, std::vector<std::string*>>(pos, mtlPtrs));
+		}
+
+	}
+	
+
+	return gStaticEidosValueVOID;
+}
+
+
+
 //	*********************	(void)initializeGeneConversion(numeric$ nonCrossoverFraction, numeric$ meanLength, numeric$ simpleConversionFraction, [numeric$ bias = 0])
 //
 EidosValue_SP SLiMSim::ExecuteContextFunction_initializeGeneConversion(const std::string &p_function_name, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter)
@@ -1123,7 +1199,7 @@ EidosValue_SP SLiMSim::ExecuteContextFunction_initializeSex(const std::string &p
 	return gStaticEidosValueVOID;
 }
 
-//	*********************	(void)initializeSLiMOptions([logical$ keepPedigrees = F], [string$ dimensionality = ""], [string$ periodicity = ""], [integer$ mutationRuns = 0], [logical$ preventIncidentalSelfing = F], [logical$ nucleotideBased = F], [logical$ molecularTraits = F])
+//	*********************	(void)initializeSLiMOptions([logical$ keepPedigrees = F], [string$ dimensionality = ""], [string$ periodicity = ""], [integer$ mutationRuns = 0], [logical$ preventIncidentalSelfing = F], [logical$ nucleotideBased = F])
 //
 EidosValue_SP SLiMSim::ExecuteContextFunction_initializeSLiMOptions(const std::string &p_function_name, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter)
 {
@@ -1134,7 +1210,6 @@ EidosValue_SP SLiMSim::ExecuteContextFunction_initializeSLiMOptions(const std::s
 	EidosValue *arg_mutationRuns_value = p_arguments[3].get();
 	EidosValue *arg_preventIncidentalSelfing_value = p_arguments[4].get();
 	EidosValue *arg_nucleotideBased_value = p_arguments[5].get();
-	EidosValue *arg_molecularTraits_value = p_arguments[6].get();
 	std::ostream &output_stream = p_interpreter.ExecutionOutputStream();
 	
 	if (num_options_declarations_ > 0)
@@ -1244,12 +1319,6 @@ EidosValue_SP SLiMSim::ExecuteContextFunction_initializeSLiMOptions(const std::s
 		nucleotide_based_ = nucleotide_based;
 	}
 
-	{
-		// [logical$ molecularTraits = F]
-		bool useMolTraits = arg_molecularTraits_value->LogicalAtIndex(0, nullptr);
-		
-		molTraits_enabled_ = useMolTraits;
-	}
 	
 	if (SLiM_verbosity_level >= 1)
 	{
@@ -1546,6 +1615,8 @@ const std::vector<EidosFunctionSignature_CSP> *SLiMSim::ZeroGenerationFunctionSi
 									   ->AddIntString_S("id")->AddNumeric_S("dominanceCoeff")->AddString_S("distributionType")->AddEllipsis());
 		sim_0_signatures_.emplace_back((EidosFunctionSignature *)(new EidosFunctionSignature(gStr_initializeRecombinationRate, nullptr, kEidosValueMaskVOID, "SLiM"))
 										->AddNumeric("rates")->AddInt_ON("ends", gStaticEidosValueNULL)->AddString_OS("sex", gStaticEidosValue_StringAsterisk));
+		sim_0_signatures_.emplace_back((EidosFunctionSignature *)(new EidosFunctionSignature(gStr_initializeMolTraits, nullptr, kEidosValueMaskVOID, "SLiM"))
+										->AddString_O("names", gStaticEidosValue_StringAsterisk));
 		sim_0_signatures_.emplace_back((EidosFunctionSignature *)(new EidosFunctionSignature(gStr_initializeGeneConversion, nullptr, kEidosValueMaskVOID, "SLiM"))
 										->AddNumeric_S("nonCrossoverFraction")->AddNumeric_S("meanLength")->AddNumeric_S("simpleConversionFraction")->AddNumeric_OS("bias", gStaticEidosValue_Integer0));
 		sim_0_signatures_.emplace_back((EidosFunctionSignature *)(new EidosFunctionSignature(gStr_initializeMutationRate, nullptr, kEidosValueMaskVOID, "SLiM"))
@@ -1964,6 +2035,7 @@ EidosValue_SP SLiMSim::ExecuteInstanceMethod(EidosGlobalStringID p_method_id, co
 		case gID_mutationsOfType:				return ExecuteMethod_mutationsOfType(p_method_id, p_arguments, p_interpreter);
 		case gID_NARIntegrate:					return ExecuteMethod_NARIntegrate(p_method_id, p_arguments, p_interpreter);
 		case gID_pairwiseR2:					return ExecuteMethod_pairwiseR2(p_method_id, p_arguments, p_interpreter);
+		case gID_getMolTraitsAtPosition:		return ExecuteMethod_getMolTraitsAtPosition(p_method_id, p_arguments, p_interpreter);
 		case gID_countOfMutationsOfType:		return ExecuteMethod_countOfMutationsOfType(p_method_id, p_arguments, p_interpreter);
 		case gID_outputFixedMutations:			return ExecuteMethod_outputFixedMutations(p_method_id, p_arguments, p_interpreter);
 		case gID_outputFull:					return ExecuteMethod_outputFull(p_method_id, p_arguments, p_interpreter);
@@ -2501,6 +2573,34 @@ EidosValue_SP SLiMSim::ExecuteMethod_pairwiseR2(EidosGlobalStringID p_method_id,
 	return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float_vector{corTable->getVec()});
 
 }
+
+
+
+//	*********************	– (string)getMolTraitsAtPosition(integer position)
+EidosValue_SP SLiMSim::ExecuteMethod_getMolTraitsAtPosition(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter)
+{
+#pragma unused (p_method_id, p_interpreter)
+
+	if (molTraitPos_.empty())
+		EIDOS_TERMINATION << "ERROR (SLiMSim::ExecuteMethod_getMolTraitsAtPosition): Molecular traits have not been initialized with initializeMolTraits()" << EidosTerminate();
+
+	
+	EidosValue *positions_value = p_arguments[0].get();
+	std::vector<std::string> result; 
+
+	for (int pos_idx = 0; pos_idx < positions_value->Count(); ++pos_idx)
+	{
+		std::vector<std::string*> curTraitList = molTraitPos_.find(positions_value->IntAtIndex(pos_idx, nullptr))->second();
+		for (int trait_idx = 0; trait_idx < curTraitList.size(); ++trait_idx)
+		{
+			result.emplace_back(*curTraitList[trait_idx]);
+		}
+	}
+
+	return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String_vector{result});
+
+}
+
 
 //	*********************	– (object<Individual>)individualsWithPedigreeIDs(integer pedigreeIDs, [Nio<Subpopulation> subpops = NULL])
 EidosValue_SP SLiMSim::ExecuteMethod_individualsWithPedigreeIDs(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter)
