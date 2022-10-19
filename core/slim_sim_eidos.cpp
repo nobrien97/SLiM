@@ -1956,6 +1956,7 @@ EidosValue_SP SLiMSim::ExecuteInstanceMethod(EidosGlobalStringID p_method_id, co
 		case gID_mutationsOfType:				return ExecuteMethod_mutationsOfType(p_method_id, p_arguments, p_interpreter);
 		case gID_NARIntegrate:					return ExecuteMethod_NARIntegrate(p_method_id, p_arguments, p_interpreter);
 		case gID_pairwiseR2:					return ExecuteMethod_pairwiseR2(p_method_id, p_arguments, p_interpreter);
+		case gID_getHaplos:						return ExecuteMethod_getHaplos(p_method_id, p_arguments, p_interpreter);
 		case gID_countOfMutationsOfType:		return ExecuteMethod_countOfMutationsOfType(p_method_id, p_arguments, p_interpreter);
 		case gID_outputFixedMutations:			return ExecuteMethod_outputFixedMutations(p_method_id, p_arguments, p_interpreter);
 		case gID_outputFull:					return ExecuteMethod_outputFull(p_method_id, p_arguments, p_interpreter);
@@ -2493,6 +2494,91 @@ EidosValue_SP SLiMSim::ExecuteMethod_pairwiseR2(EidosGlobalStringID p_method_id,
 	return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float_vector{corTable->getVec()});
 
 }
+
+//	*********************	– (integer) getHaplos(o<Genome> genomes, i pos)
+EidosValue_SP SLiMSim::ExecuteMethod_getHaplos(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter)
+{
+	EidosValue_Object *genomes_value = (EidosValue_Object *)p_arguments[0].get();
+	EidosValue *pos_value = p_arguments[1].get();
+
+	// Fill std::vector with pos values
+	std::vector<int> pos;
+	int posSize = pos_value->Count();
+
+	for (int i = 0; i < posSize; ++i)
+	{
+		pos.emplace_back(pos_value->IntAtIndex(i, nullptr));
+	}
+
+	int genomesSize = genomes_value->Count();
+	
+	// Get all mutations in a std::vector
+	Mutation *mut_block_ptr = gSLiM_Mutation_Block;
+
+	int registry_size;
+	const MutationIndex *registry = population_.MutationRegistry(&registry_size);
+	std::vector<Mutation*> allMuts;
+
+	if (registry_size)
+	{
+		for (int value_index = 0; value_index < registry_size; ++value_index)
+		{
+			Mutation* mut = mut_block_ptr + registry[value_index];
+			allMuts.emplace_back(mut);
+		}
+	}
+
+	// Take out all mutations we aren't interested in: anything m1 or m2
+	allMuts.erase(std::remove_if(
+		allMuts.begin(), allMuts.end(),
+		[](const Mutation* x) {
+			return x->mutation_type_ptr_->mutation_type_id_ < 3;
+		}), allMuts.end());
+
+	// Take out all multiallelic sites
+	allMuts.erase(std::remove_if(
+			allMuts.begin(), allMuts.end(),
+			[this, allMuts](const Mutation* x) {
+				return !isMultiAllelic(x->position_, allMuts);
+			}), allMuts.end());
+
+	// Get a vector ready for output
+	std::unique_ptr<matrix<int>> result(new matrix<int>(genomesSize, posSize, 0));
+
+	// Iterate over genomes and positions
+	for (int i = 0; i < genomesSize; ++i)
+	{
+		Genome *genome __attribute__((used)) = (Genome *)genomes_value->ObjectElementAtIndex(i, nullptr);
+		// New vector for this genome's mutations
+		std::vector<Mutation*> genMuts;
+		std::copy_if(allMuts.begin(), allMuts.end(), std::back_inserter(genMuts),
+		[genome](const Mutation* mut) {
+			return genome->contains_mutation(mut->BlockIndex());
+		});
+
+		// If we have no valid mutations in this genome, and we have initialised to 0, we
+		// can continue to the next genome
+		if (!genMuts.size()) 
+		{
+			continue;
+		}
+		// Otherwise, iterate through each position and check if we should flip to 1
+		for (int j = 0; j < posSize; ++j)
+		{
+			int thisPos = pos[j]; 
+			// if any of the mutations in the vector occur at pos[j], we should save that as true
+			bool hasMut = std::any_of(genMuts.begin(), genMuts.end(), [thisPos](const Mutation* mut) {
+				return mut->position_ == thisPos;
+			});
+			if (hasMut) {
+				(*result)(i, j) = 1;
+			}
+		}
+	}
+
+	return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Int_vector{result->getVec()});
+}
+
 
 //	*********************	– (object<Individual>)individualsWithPedigreeIDs(integer pedigreeIDs, [Nio<Subpopulation> subpops = NULL])
 EidosValue_SP SLiMSim::ExecuteMethod_individualsWithPedigreeIDs(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter)
@@ -4178,7 +4264,20 @@ double SLiMSim::sharedMutFreq(std::vector<Genome*>& genomes, MutationIndex mut1,
 	//return ((double)validGenomes)/genomes.size();
 }
 
+// Helper function for getHaplos - detects if a site is multiallelic
+bool SLiMSim::isMultiAllelic(int pos, std::vector<Mutation*> muts)
+{
+	// Note: muts assumes it has been culled for m1 and m2 mutations already, only checks position
 
+	// Remove all non matching mutations and check if theres more than one segregating mutation there
+	muts.erase(std::remove_if(muts.begin(), muts.end(), 
+	[pos] (Mutation* mut) {
+		return !(mut->position_ == pos);
+	}), muts.end()); 
+
+	return muts.size() > 1 ? true : false;
+
+}
 
 //
 //	SLiMSim_Class
@@ -4247,6 +4346,7 @@ const std::vector<EidosMethodSignature_CSP> *SLiMSim_Class::Methods(void) const
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_mutationsOfType, kEidosValueMaskObject, gSLiM_Mutation_Class))->AddIntObject_S("mutType", gSLiM_MutationType_Class));
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_NARIntegrate, kEidosValueMaskFloat))->AddIntObject_N("individuals", gSLiM_Individual_Class));
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_pairwiseR2, kEidosValueMaskFloat))->AddIntObject_S("subpop", gSLiM_Subpopulation_Class));
+		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_getHaplos, kEidosValueMaskInt))->AddObject("genomes", gSLiM_Genome_Class)->AddInt("pos"));
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_outputFixedMutations, kEidosValueMaskVOID))->AddString_OSN(gEidosStr_filePath, gStaticEidosValueNULL)->AddLogical_OS("append", gStaticEidosValue_LogicalF));
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_outputFull, kEidosValueMaskVOID))->AddString_OSN(gEidosStr_filePath, gStaticEidosValueNULL)->AddLogical_OS("binary", gStaticEidosValue_LogicalF)->AddLogical_OS("append", gStaticEidosValue_LogicalF)->AddLogical_OS("spatialPositions", gStaticEidosValue_LogicalT)->AddLogical_OS("ages", gStaticEidosValue_LogicalT)->AddLogical_OS("ancestralNucleotides", gStaticEidosValue_LogicalT)->AddLogical_OS("pedigreeIDs", gStaticEidosValue_LogicalF));
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_outputMutations, kEidosValueMaskVOID))->AddObject("mutations", gSLiM_Mutation_Class)->AddString_OSN(gEidosStr_filePath, gStaticEidosValueNULL)->AddLogical_OS("append", gStaticEidosValue_LogicalF));

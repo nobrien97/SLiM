@@ -1220,6 +1220,7 @@ const std::string &gStr_containsMarkerMutation = EidosRegisteredString("contains
 const std::string &gStr_relatedness = EidosRegisteredString("relatedness", gID_relatedness);
 const std::string &gStr_NARIntegrate = EidosRegisteredString("NARIntegrate", gID_NARIntegrate);
 const std::string &gStr_pairwiseR2 = EidosRegisteredString("pairwiseR2", gID_pairwiseR2);
+const std::string &gStr_getHaplos = EidosRegisteredString("getHaplos", gID_getHaplos);
 const std::string &gStr_mutationsOfType = EidosRegisteredString("mutationsOfType", gID_mutationsOfType);
 const std::string &gStr_setSpatialPosition = EidosRegisteredString("setSpatialPosition", gID_setSpatialPosition);
 const std::string &gStr_sumOfMutationsOfType = EidosRegisteredString("sumOfMutationsOfType", gID_sumOfMutationsOfType);
