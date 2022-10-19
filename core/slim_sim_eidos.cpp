@@ -787,7 +787,7 @@ EidosValue_SP SLiMSim::ExecuteContextFunction_initializeMolTraits(const std::str
 	for (size_t n_idx = 0; n_idx < nElems_value->Count(); ++n_idx)
 	{
 		EidosValue *curTraitList = p_arguments[(3+n_idx)].get();
-		std::vector<std::string> molTraitList = curTraitList->StringVector();
+		std::vector<std::string> molTraitList = *curTraitList->StringVector();
 		std::vector<std::string*> mtlPtrs;
 
 		// Loop through vector to find the indexes of the molTraits_ that we need (so we can point instead of storing the same values all the time)
@@ -807,7 +807,7 @@ EidosValue_SP SLiMSim::ExecuteContextFunction_initializeMolTraits(const std::str
 		for (pos_idx; pos_idx < (nVal + pos_idx); ++pos_idx)
 		{	
 			int pos = pos_value->IntAtIndex(pos_idx, nullptr);
-			molTraitPos_.emplace(std:pair<int, std::vector<std::string*>>(pos, mtlPtrs));
+			molTraitPos_.emplace(std::pair<int, std::vector<std::string*>>(pos, mtlPtrs));
 		}
 
 	}
