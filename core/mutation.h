@@ -76,7 +76,7 @@ public:
 	MutationType *mutation_type_ptr_;					// mutation type identifier
 	const slim_position_t position_;					// position on the chromosome
 	slim_selcoeff_t selection_coeff_;					// selection coefficient – not const because it may be changed in script
-	std::vector<slim_selcoeff_t> molTraitFX_;			// vector of ODE parameter effects
+	std::vector<slim_selcoeff_t> molTraitFX_;			// Vector of ODE parameter effects
 	slim_objectid_t subpop_index_;						// subpopulation in which mutation arose (or a user-defined tag value!)
 	const slim_generation_t origin_generation_;			// generation in which mutation arose
 	int8_t state_;										// see MutationState above

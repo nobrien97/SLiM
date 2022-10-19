@@ -563,7 +563,6 @@ extern const std::string &gStr_initializeGeneConversion;
 extern const std::string &gStr_initializeMutationRate;
 extern const std::string &gStr_initializeHotspotMap;
 extern const std::string &gStr_initializeRecombinationRate;
-extern const std::string &gStr_initializeMolTraits;
 extern const std::string &gStr_initializeSex;
 extern const std::string &gStr_initializeSLiMOptions;
 extern const std::string &gStr_initializeTreeSeq;
@@ -913,7 +912,6 @@ enum _SLiMGlobalStringID : int {
 	gID_initializeMutationRate,
 	gID_initializeHotspotMap,
 	gID_initializeRecombinationRate,
-	gID_initializeMolTraits,
 	gID_initializeSex,
 	gID_initializeSLiMOptions,
 	gID_initializeTreeSeq,

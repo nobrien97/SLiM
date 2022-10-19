@@ -327,7 +327,7 @@ EidosValue_SP Mutation::GetProperty(EidosGlobalStringID p_property_id)
 		case gID_selectionCoeff:	// ACCELERATED
 			return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float_singleton(selection_coeff_));
 		case gID_molTraitFX:		// ACCELERATED
-			return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float_vector(std::vector<double>(molTraitFX_.begin(), molTraitFX_.end())));
+			return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float_vector(molTraitFX_));
 			
 			// variables
 		case gID_nucleotide:		// ACCELERATED
@@ -538,11 +538,7 @@ EidosValue *Mutation::GetProperty_Accelerated_selectionCoeff(EidosObject **p_val
 // Get the molecular trait effects stored at this mutation for a group of individuals
 EidosValue *Mutation::GetProperty_Accelerated_molTraitFX(EidosObject **p_values, size_t p_values_size)
 {
-
-	size_t p_molTraitCount = ((Mutation *)(p_values[0]))->molTraitFX_.size();
-	if (!p_molTraitCount)
-		EIDOS_TERMINATION << "ERROR (Mutation::GetProperty_Accelerated_molTraitFX): property molTraitFX is only defined for mutations on molecular traits." << EidosTerminate();
-
+	size_t p_molTraitCount = (size_t)((Mutation *)(p_values[0])->molTraitFX_.size());
 	EidosValue_Float_vector *float_result = (new (gEidosValuePool->AllocateChunk()) EidosValue_Float_vector())->resize_no_initialize(p_values_size*p_molTraitCount);
 	
 	for (size_t value_index = 0; value_index < p_values_size; ++value_index)
@@ -668,7 +664,6 @@ EidosValue_SP Mutation::ExecuteInstanceMethod(EidosGlobalStringID p_method_id, c
 	switch (p_method_id)
 	{
 		case gID_setSelectionCoeff:	return ExecuteMethod_setSelectionCoeff(p_method_id, p_arguments, p_interpreter);
-		case gID_setMolTraitFX:		return ExecuteMethod_setMolTraitFX(p_method_id, p_arguments, p_interpreter);
 		case gID_setMutationType:	return ExecuteMethod_setMutationType(p_method_id, p_arguments, p_interpreter);
 		default:					return super::ExecuteInstanceMethod(p_method_id, p_arguments, p_interpreter);
 	}
@@ -715,45 +710,6 @@ EidosValue_SP Mutation::ExecuteMethod_setSelectionCoeff(EidosGlobalStringID p_me
 	cached_one_plus_dom_sel_ = (slim_selcoeff_t)std::max(0.0, 1.0 + mutation_type_ptr_->dominance_coeff_ * selection_coeff_);
 	cached_one_plus_haploiddom_sel_ = (slim_selcoeff_t)std::max(0.0, 1.0 + mutation_type_ptr_->haploid_dominance_coeff_ * selection_coeff_);
 	
-	return gStaticEidosValueVOID;
-}
-
-//	*********************	- (void)setMolTraitFX(string molTraits, float effects, logical$ clearVector = T)
-//
-EidosValue_SP Mutation::ExecuteMethod_setMolTraitFX(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter)
-{
-#pragma unused (p_method_id, p_arguments, p_interpreter)
-	EidosValue *names_value = p_arguments[0].get();
-	EidosValue *fx_value = p_arguments[1].get();
-	EidosValue *clear_value = p_arguments[2].get();
-	SLiMSim &sim = mutation_type_ptr_->sim_;
-
-	if (names_value->Count() != fx_value->Count())
-		EIDOS_TERMINATION << "ERROR (Mutation::ExecuteMethod_setMolTraitFX): setMolTraitFX() requires equal numbers of molTraits and effects." << EidosTerminate();
-
-	// Get the list of molecular trait names
-	std::vector<std::string> simMolTraits = sim.MolTraits();
-
-	// If this is a new mutation, set the size of the molecular trait vector
-	if (molTraitFX_.empty())
-		molTraitFX_.resize(simMolTraits.size());
-
-	// Clear existing effects if asked to - reset to 0
-	if (clear_value->LogicalAtIndex(0, nullptr))
-		std::fill(molTraitFX_.begin(), molTraitFX_.end(), 0.0);
-
-	for (size_t i; i < names_value->Count(); ++i)
-	{
-		std::string key = names_value->StringAtIndex(i, nullptr);
-		slim_selcoeff_t value = (slim_selcoeff_t)(fx_value->FloatAtIndex(i, nullptr));
-		// Get the location of the key in the sim's initialized list of molecular traits: we need to keep the order consistent for correct solving!
-		auto ordered_idx = std::find(simMolTraits.begin(), simMolTraits.end(), key);
-		if (ordered_idx == simMolTraits.end())
-			EIDOS_TERMINATION << "ERROR (Mutation::ExecuteMethod_setMolTraitFX): Molecular trait key not initialized in initializeMolTraits()." << EidosTerminate();
-		
-		molTraitFX_[ordered_idx - simMolTraits.begin()] = value;
-	}
-
 	return gStaticEidosValueVOID;
 }
 

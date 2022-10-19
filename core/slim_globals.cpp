@@ -1074,7 +1074,6 @@ const std::string &gStr_initializeGeneConversion = EidosRegisteredString("initia
 const std::string &gStr_initializeMutationRate = EidosRegisteredString("initializeMutationRate", gID_initializeMutationRate);
 const std::string &gStr_initializeHotspotMap = EidosRegisteredString("initializeHotspotMap", gID_initializeHotspotMap);
 const std::string &gStr_initializeRecombinationRate = EidosRegisteredString("initializeRecombinationRate", gID_initializeRecombinationRate);
-const std::string &gStr_initializeMolTraits = EidosRegisteredString("initializeMolTraits", gID_initializeMolTraits);
 const std::string &gStr_initializeSex = EidosRegisteredString("initializeSex", gID_initializeSex);
 const std::string &gStr_initializeSLiMOptions = EidosRegisteredString("initializeSLiMOptions", gID_initializeSLiMOptions);
 const std::string &gStr_initializeTreeSeq = EidosRegisteredString("initializeTreeSeq", gID_initializeTreeSeq);
