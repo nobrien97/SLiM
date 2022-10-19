@@ -2333,7 +2333,7 @@ EidosValue_SP SLiMSim::ExecuteMethod_NARIntegrate(EidosGlobalStringID p_method_I
 		std::vector<double> z_auc = std::vector<double>(recorder.history.size());
 		for (uint i = 0; i < recorder.history.size()-1; ++i)
 		{
-			z_auc.emplace_back(AUC(0.1, (double)recorder.history[i][2], (double)recorder.history[i + 1][2]));
+			z_auc[i] = AUC(0.1, (double)recorder.history[i][2], (double)recorder.history[i + 1][2]);
 		}
 		
 		double z = std::accumulate(z_auc.begin(), z_auc.end(), 0.0);
