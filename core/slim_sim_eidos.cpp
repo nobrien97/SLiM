@@ -2528,6 +2528,7 @@ EidosValue_SP SLiMSim::ExecuteMethod_getHaplos(EidosGlobalStringID p_method_id, 
 		}
 	}
 
+	std::vector<double> pogchamp;
 	// Take out all mutations we aren't interested in: anything m1 or m2
 	allMuts.erase(std::remove_if(
 		allMuts.begin(), allMuts.end(),
@@ -2539,7 +2540,7 @@ EidosValue_SP SLiMSim::ExecuteMethod_getHaplos(EidosGlobalStringID p_method_id, 
 	allMuts.erase(std::remove_if(
 			allMuts.begin(), allMuts.end(),
 			[this, allMuts](const Mutation* x) {
-				return !isMultiAllelic(x->position_, allMuts);
+				return isMultiAllelic(x->position_, allMuts);
 			}), allMuts.end());
 
 	// Get a vector ready for output
@@ -2566,7 +2567,7 @@ EidosValue_SP SLiMSim::ExecuteMethod_getHaplos(EidosGlobalStringID p_method_id, 
 		for (int j = 0; j < posSize; ++j)
 		{
 			int thisPos = pos[j]; 
-			// if any of the mutations in the vector occur at pos[j], we should save that as true
+			// if any of the mutations in the vector occur at pos[j], we should save that as 1
 			bool hasMut = std::any_of(genMuts.begin(), genMuts.end(), [thisPos](const Mutation* mut) {
 				return mut->position_ == thisPos;
 			});
