@@ -821,6 +821,7 @@ public:
 	// Extremely unfitting helper function for pairwiseR2 trying its best to fit in with the EidosValue_SP returning methods
 	double sharedMutFreq(std::vector<Genome*>& genomes, MutationIndex mut1, MutationIndex mut2);
 	bool isMultiAllelic(int pos, std::vector<Mutation*> muts);
+	static double AUC(const double &h, const double &a, const double &b);
 };
 
 class SLiMSim_Class : public EidosDictionaryUnretained_Class

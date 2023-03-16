@@ -2209,6 +2209,15 @@ EidosValue_SP SLiMSim::ExecuteMethod_deregisterScriptBlock(EidosGlobalStringID p
 	return gStaticEidosValueVOID;
 }
 
+
+// Calculates area under the curve via the trapezoid method
+#pragma omp declare simd
+double SLiMSim::AUC(const double &h, const double &a, const double &b)
+{
+	return ((a + b) * 0.5) * h;
+}
+
+
 //	*********************	- (float)NARIntegrate(Object<Individual> individuals)
 // Extending this: Switch statement to choose certain ODEs? How do we combine multiple ODEs together?
 //
@@ -2220,13 +2229,6 @@ EidosValue_SP SLiMSim::ExecuteMethod_NARIntegrate(EidosGlobalStringID p_method_I
 	EidosValue_SP result_SP(nullptr);
 	EidosValue_Object *individuals_value = (EidosValue_Object *)p_arguments[0].get();
 	
-	// Lambda to calculate area under the curve via the trapezoid method
-	#pragma omp declare simd
-	auto AUC = [](const double &h, const double &a, const double &b)
-	{
-		return ((a + b) * 0.5) * h;
-	};
-
 	// Iterate over all individuals, calculating their NAR AUC from their parameter set:
 	// First need to actually get the individuals and reserve some space for each individual's result
 	int inds_count = p_arguments[0].get()->Count();
@@ -2286,11 +2288,11 @@ EidosValue_SP SLiMSim::ExecuteMethod_NARIntegrate(EidosGlobalStringID p_method_I
 		{
 			double indVals = ind->internalSumOfMutationsOfType(mutType + 3);
 			indVals += subData[mutType];
-			EV_data.setParValue((mutType + 1), indVals);
+			EV_data.setParValue((mutType + 1), exp(indVals));
 		}
 
 
-			// Lambda to compare combination to ODEPar
+		// Lambda to compare combination to ODEPar
 		auto compareODE = [&EV_data](const std::unique_ptr<ODEPar>& existing)
 		{
 			return EV_data == *existing.get();
@@ -2337,11 +2339,11 @@ EidosValue_SP SLiMSim::ExecuteMethod_NARIntegrate(EidosGlobalStringID p_method_I
 		#pragma omp simd reduction(+:z)
 		for (uint i = 0; i < recorder.history.size()-1; ++i)
 		{
-			z += AUC(0.1, (double)recorder.history[i][2], (double)recorder.history[i + 1][2]);
+			z += SLiMSim::AUC(0.1, (double)recorder.history[i][2], (double)recorder.history[i + 1][2]);
 		}
 		
 		// Check that z is > 0
-		z = (z >= 0) * z; 
+		z = (z >= 0) ? z : 0.0;
 		out.emplace_back(z);
 		
 		// Add this to the list of existing solutions
