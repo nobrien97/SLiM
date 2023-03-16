@@ -52,7 +52,7 @@
 # file has changed.
 
 
-cmake_minimum_required (VERSION 2.8 FATAL_ERROR)
+cmake_minimum_required (VERSION 3.9 FATAL_ERROR)
 
 project(SLiM)
 if(WIN32)
@@ -64,6 +64,7 @@ set(Boost_USE_STATIC_LIBS OFF)
 set(Boost_USE_MULTITHREADED ON)  
 set(Boost_USE_STATIC_RUNTIME OFF) 
 find_package(Boost REQUIRED)
+find_package(OpenMP REQUIRED)
 
 # Find Ascent
 # HPC setup - HACK
@@ -194,7 +195,7 @@ set(TARGET_NAME slim)
 file(GLOB_RECURSE SLIM_SOURCES ${PROJECT_SOURCE_DIR}/core/*.cpp ${PROJECT_SOURCE_DIR}/eidos/*.cpp)
 add_executable(${TARGET_NAME} ${SLIM_SOURCES})
 target_include_directories(${TARGET_NAME} PRIVATE ${GSL_INCLUDES} "${PROJECT_SOURCE_DIR}/core" "${PROJECT_SOURCE_DIR}/eidos" PUBLIC "${Boost_INCLUDE_DIRS}")
-target_link_libraries(${TARGET_NAME} PUBLIC gsl eidos_zlib tables ascent::ascent)
+target_link_libraries(${TARGET_NAME} PUBLIC gsl eidos_zlib tables ascent::ascent OpenMP::OpenMP_CXX)
 
 if(WIN32)
     set_source_files_properties(${SLIM_SOURCES} PROPERTIES COMPILE_FLAGS "-include config.h")
