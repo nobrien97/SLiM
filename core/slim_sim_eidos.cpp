@@ -2221,6 +2221,7 @@ EidosValue_SP SLiMSim::ExecuteMethod_NARIntegrate(EidosGlobalStringID p_method_I
 	EidosValue_Object *individuals_value = (EidosValue_Object *)p_arguments[0].get();
 	
 	// Lambda to calculate area under the curve via the trapezoid method
+	#pragma omp declare simd
 	auto AUC = [](const double &h, const double &a, const double &b)
 	{
 		return ((a + b) * 0.5) * h;
@@ -2285,7 +2286,7 @@ EidosValue_SP SLiMSim::ExecuteMethod_NARIntegrate(EidosGlobalStringID p_method_I
 		{
 			double indVals = ind->internalSumOfMutationsOfType(mutType + 3);
 			indVals += subData[mutType];
-			EV_data.setParValue((mutType + 1), exp(indVals));
+			EV_data.setParValue((mutType + 1), indVals);
 		}
 
 
@@ -2331,16 +2332,16 @@ EidosValue_SP SLiMSim::ExecuteMethod_NARIntegrate(EidosGlobalStringID p_method_I
 		}
 
 		// Calculate AUC
-		std::vector<double> z_auc = std::vector<double>(recorder.history.size());
+		double z = 0;
+
+		#pragma omp simd reduction(+:z)
 		for (uint i = 0; i < recorder.history.size()-1; ++i)
 		{
-			z_auc[i] = AUC(0.1, (double)recorder.history[i][2], (double)recorder.history[i + 1][2]);
+			z += AUC(0.1, (double)recorder.history[i][2], (double)recorder.history[i + 1][2]);
 		}
 		
-		double z = std::accumulate(z_auc.begin(), z_auc.end(), 0.0);
-
 		// Check that z is > 0
-		z = (z >= 0) ? z : 0.0; 
+		z = (z >= 0) * z; 
 		out.emplace_back(z);
 		
 		// Add this to the list of existing solutions
