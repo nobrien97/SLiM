@@ -2288,7 +2288,7 @@ EidosValue_SP SLiMSim::ExecuteMethod_NARIntegrate(EidosGlobalStringID p_method_I
 		{
 			double indVals = ind->internalSumOfMutationsOfType(mutType + 3);
 			indVals += subData[mutType];
-			EV_data.setParValue((mutType + 1), exp(indVals));
+			EV_data.setParValue((mutType + 1), indVals);
 		}
 
 
