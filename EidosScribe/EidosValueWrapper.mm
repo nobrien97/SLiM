@@ -3,7 +3,7 @@
 //  EidosScribe
 //
 //  Created by Ben Haller on 5/31/15.
-//  Copyright (c) 2015-2021 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2015-2023 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -206,7 +206,7 @@
 	
 	if (!italicAttrs)
 	{
-		NSFont *baseFont = [NSFont systemFontOfSize:[NSFont systemFontSizeForControlSize:NSSmallControlSize]];
+		NSFont *baseFont = [NSFont systemFontOfSize:[NSFont systemFontSizeForControlSize:NSControlSizeSmall]];
 		NSFont *italicFont = [[NSFontManager sharedFontManager] convertFont:baseFont toHaveTrait:NSItalicFontMask];
 		
 		italicAttrs = [@{NSFontAttributeName : italicFont} retain];
@@ -221,7 +221,7 @@
 	
 	if (!dimmedAttrs)
 	{
-		NSFont *baseFont = [NSFont systemFontOfSize:[NSFont systemFontSizeForControlSize:NSSmallControlSize]];
+		NSFont *baseFont = [NSFont systemFontOfSize:[NSFont systemFontSizeForControlSize:NSControlSizeSmall]];
 		
 		dimmedAttrs = [@{NSFontAttributeName : baseFont, NSForegroundColorAttributeName : [NSColor colorWithCalibratedWhite:0.5 alpha:1.0]} retain];
 	}
@@ -235,10 +235,10 @@
 	
 	if (!centeredDimmedAttrs)
 	{
-		NSFont *baseFont = [NSFont systemFontOfSize:[NSFont systemFontSizeForControlSize:NSSmallControlSize]];
+		NSFont *baseFont = [NSFont systemFontOfSize:[NSFont systemFontSizeForControlSize:NSControlSizeSmall]];
 		NSMutableParagraphStyle *paragraphStyle = [NSMutableParagraphStyle new];
 		
-		[paragraphStyle setAlignment:NSCenterTextAlignment];
+		[paragraphStyle setAlignment:NSTextAlignmentCenter];
 		
 		centeredDimmedAttrs = [@{NSFontAttributeName : baseFont, NSForegroundColorAttributeName : [NSColor colorWithCalibratedWhite:0.5 alpha:1.0], NSParagraphStyleAttributeName : paragraphStyle} retain];
 		

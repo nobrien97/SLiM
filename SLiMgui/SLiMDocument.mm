@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 1/31/17.
-//  Copyright (c) 2017-2021 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2017-2023 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -43,7 +43,7 @@
 	"}\n"
 	"\n"
 	"// create a population of 500 individuals\n"
-	"1 {\n"
+	"1 early() {\n"
 	"	sim.addSubpop(\"p1\", 500);\n"
 	"}\n"
 	"\n"

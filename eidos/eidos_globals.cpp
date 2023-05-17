@@ -3,7 +3,7 @@
 //  Eidos
 //
 //  Created by Ben Haller on 6/28/15.
-//  Copyright (c) 2015-2021 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2015-2023 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -19,6 +19,7 @@
 
 
 #include "eidos_globals.h"
+#include "eidos_rng.h"
 #include "eidos_script.h"
 #include "eidos_value.h"
 #include "eidos_interpreter.h"
@@ -53,6 +54,7 @@
 #include <iomanip>
 #include <sys/param.h>
 #include <regex>
+#include <signal.h>
 
 // added for Eidos_mkstemps() and Eidos_TemporaryDirectoryExists()
 #include <sys/stat.h>
@@ -82,6 +84,15 @@
 #define gettimeofday gnulib::gettimeofday
 #endif
 
+#ifdef _OPENMP
+#include <stdlib.h>
+#endif
+
+
+// declared in eidos_openmp.h, set in Eidos_WarmUpOpenMP() when parallel
+int gEidosMaxThreads = 1;
+int gEidosNumThreads = 1;
+
 
 // Require 64-bit; apparently there are some issues on 32-bit, and nobody should be doing that anyway
 static_assert(sizeof(char *) == 8, "SLiM must be built for 64-bit, not 32-bit.");
@@ -102,7 +113,7 @@ int gEidosDebugIndent = 0;
 #pragma mark Profiling support
 #pragma mark -
 
-#if (defined(SLIMGUI) && (SLIMPROFILING == 1))
+#if (SLIMPROFILING == 1)
 // PROFILING
 
 int gEidosProfilingClientCount = 0;
@@ -194,7 +205,7 @@ void Eidos_PrepareForProfiling(void)
 	//std::cout << "Profile lag internal to block: " << gEidos_ProfileLag_double << " ticks, " << gEidos_ProfileLagSeconds << " seconds" << std::endl;
 }
 
-#endif	// (defined(SLIMGUI) && (SLIMPROFILING == 1))
+#endif	// (SLIMPROFILING == 1)
 
 
 #pragma mark -
@@ -205,13 +216,88 @@ bool Eidos_GoodSymbolForDefine(std::string &p_symbol_name);
 EidosValue_SP Eidos_ValueForCommandLineExpression(std::string &p_value_expression);
 
 
+#ifdef _OPENMP
+void Eidos_WarmUpOpenMP(std::ostream *outstream, bool changed_max_thread_count, int new_max_thread_count, bool active_threads)
+{
+	// When running under OpenMP, print a log, and also set values for the OpenMP ICV's that we want to guarantee
+	// See http://www.archer.ac.uk/training/course-material/2018/09/openmp-imp/Slides/L10-TipsTricksGotchas.pdf
+	// We set these with overwrite=0 so the user can override them with custom values from the environment
+	// FIXME: This should all be documented somewhere...
+	
+	// "active" encourages idle threads to spin rather than sleep; "active" seems to be much faster, maybe lower lag?
+	// In SLiMgui and EidosScribe, we don't want to use "active", though, as it will pin the CPU usage even when not running a parallel section.
+	const char *wait_policy = active_threads ? "ACTIVE" : "PASSIVE";
+	setenv("OMP_WAIT_POLICY", wait_policy, 0);
+	
+	// "false" == don’t let the runtime deliver fewer threads than you asked for
+	// when this is true, you sometimes get just one thread even in a parallel section, because the system has decided it's busy; no good
+	const char *dynamic_policy = "false";
+	setenv("OMP_DYNAMIC", dynamic_policy, 0);
+	
+	// "true" prevents threads migrating between cores; this generally improves performance, especially with per-thread memory usage
+	const char *bind_policy = "true";
+	setenv("OMP_PROC_BIND", bind_policy, 0);
+	
+	// We do not support nested parallelism; we set the relevant ICVs here to make sure it is off, overriding defaults/environment
+	omp_set_max_active_levels(1);
+	//omp_set_nested(false);		// deprecated in favor of omp_set_max_active_levels()
+	
+	// Set the maximum number of threads to the user's request
+	if (changed_max_thread_count)
+		omp_set_num_threads(new_max_thread_count);		// confusingly, sets the *max* threads as returned by omp_get_max_threads()
+	
+	// Get the maximum number of threads in effect, which might be different from the number requested
+	gEidosMaxThreads = omp_get_max_threads();
+	gEidosNumThreads = gEidosMaxThreads;
+	
+	// Write some diagnostic output about our configuration.  If the verbosity level is 0, outstream will be nullptr.
+	if (outstream)
+	{
+		(*outstream) << "// ********** Running multithreaded with OpenMP (max of " << gEidosMaxThreads << " threads)" << std::endl;
+		(*outstream) << "// ********** OMP_WAIT_POLICY == " << getenv("OMP_WAIT_POLICY") << ", OMP_DYNAMIC == " << getenv("OMP_DYNAMIC") << ", OMP_PROC_BIND == " << getenv("OMP_PROC_BIND") << std::endl;
+		
+		// Look for devices (GPUs, accelerators) that we are able to offload to.
+		// Note that OpenMP offloading to the GPUs on Apple Silicon is not currently supported by any compiler.
+		// Other devices may not be visible unless you build slim_multi with a special build of your compiler;
+		// see https://stackoverflow.com/a/66337011/2752221 for some details.
+		int num_devices = omp_get_num_devices();
+		int default_device = omp_get_default_device();
+		
+		if (num_devices > 0)
+		{
+			(*outstream) << "// ********** OpenMP target device count (GPUs, accelerators): " << num_devices << std::endl;
+			(*outstream) << "// ********** Default target device for OpenMP offloading: " << default_device << std::endl;
+		}
+	}
+	
+#ifdef EIDOS_GUI
+	// The GUI apps don't work well multithreaded.  They have to allow threads to sleep (otherwise they peg the
+	// CPU the whole time they're running), and that is so inefficient that it makes the apps actually run much
+	// slower than if they were just single-threaded, as far as I can tell.  I think the threads fall asleep
+	// whenever they get suspended at all, and then waking them up again is heavyweight.  So running them
+	// multithreaded is really just for my own development/testing work; end users should not do so.
+	if (outstream)
+		(*outstream) << "// ********** RUNNING SLIMGUI / EIDOSSCRIBE WITH OPENMP IS NOT RECOMMENDED!" << std::endl;
+#endif
+	
+	if (outstream)
+		(*outstream) << std::endl;
+}
+#endif
+
 void Eidos_WarmUp(void)
 {
+	THREAD_SAFETY_IN_ANY_PARALLEL("Eidos_WarmUp(): illegal when parallel");
+	
 	static bool been_here = false;
 	
 	if (!been_here)
 	{
 		been_here = true;
+		
+		// Initialize the random number generator with a random-ish seed.  This seed may be overridden by the Context downstream.
+		Eidos_InitializeRNG();
+		Eidos_SetRNGSeed(Eidos_GenerateRNGSeed());
 		
 		// Set up the vector of Eidos constant names
 		gEidosConstantNames.emplace_back(gEidosStr_T);
@@ -257,10 +343,10 @@ void Eidos_WarmUp(void)
 //		std::cout << "sizeof(EidosValue_Object_singleton) == " << sizeof(EidosValue_Object_singleton) << std::endl;
 //		std::cout << "maxEidosValueSize ==                   " << maxEidosValueSize << std::endl;
 		
-		gEidosValuePool = new EidosObjectPool(maxEidosValueSize);
+		gEidosValuePool = new EidosObjectPool("EidosObjectPool(EidosValue)", maxEidosValueSize);
 		
 		// Make the shared EidosASTNode pool
-		gEidosASTNodePool = new EidosObjectPool(sizeof(EidosASTNode));
+		gEidosASTNodePool = new EidosObjectPool("EidosObjectPool(EidosASTNode)", sizeof(EidosASTNode));
 		
 		// Allocate global permanents
 		gStaticEidosValueVOID = EidosValue_VOID::Static_EidosValue_VOID();
@@ -309,6 +395,7 @@ void Eidos_WarmUp(void)
 		gEidosDataFrame_Class =				new EidosDataFrame_Class(				gEidosStr_DataFrame,		gEidosDictionaryRetained_Class);
 		gEidosImage_Class =					new EidosImage_Class(					gEidosStr_Image,			gEidosDictionaryRetained_Class);
 		gEidosTestElement_Class =			new EidosTestElement_Class(				gEidosStr__TestElement,		gEidosDictionaryRetained_Class);
+		gEidosTestElementNRR_Class =		new EidosTestElementNRR_Class(			gEidosStr__TestElementNRR,	gEidosObject_Class);
 		
 		// This has to be allocated after gEidosObject_Class has been initialized above; the other global permanents must be initialized
 		// before that point, however, since properties and method signatures may use some of those global permanent values
@@ -332,9 +419,36 @@ void Eidos_WarmUp(void)
 		if (&gEidosImage_Class->ClassName() != &gEidosStr_Image)
 		{
 			std::cerr << "***** Class name mismatch in Eidos_WarmUp()!";
-			exit(0);
+			exit(EXIT_FAILURE);
 		}
-
+		
+		// Check that EidosDictionaryState_StringKeys and EidosDictionaryState_IntegerKeys have matching layouts
+		// as far as keys_are_integers_ is concerned, so that that flag can distinguish between them
+		// BCH 3/27/2023: we have to actually allocate objects here to avoid getting flagged by UBSan...
+		{
+			EidosDictionaryState_StringKeys *dict_state_ptr_string = new EidosDictionaryState_StringKeys;
+			EidosDictionaryState_IntegerKeys *dict_state_ptr_integer = new EidosDictionaryState_IntegerKeys;
+			
+			uint8_t *flag_addr_string_keys = &((dict_state_ptr_string)->keys_are_integers_);
+			uint8_t *flag_addr_integer_keys = &((dict_state_ptr_integer)->keys_are_integers_);
+			uint8_t *flag_addr_string_contains = &((dict_state_ptr_string)->contains_non_retain_release_objects_);
+			uint8_t *flag_addr_integer_contains = &((dict_state_ptr_integer)->contains_non_retain_release_objects_);
+			
+			size_t string_keys_offset = flag_addr_string_keys - (uint8_t *)dict_state_ptr_string;
+			size_t integer_keys_offset = flag_addr_integer_keys - (uint8_t *)dict_state_ptr_integer;
+			size_t string_contains_offset = flag_addr_string_contains - (uint8_t *)dict_state_ptr_string;
+			size_t integer_contains_offset = flag_addr_integer_contains - (uint8_t *)dict_state_ptr_integer;
+			
+			if ((string_keys_offset != integer_keys_offset) || (string_contains_offset != integer_contains_offset))
+			{
+				std::cerr << "***** EidosDictionaryState layout mismatch in Eidos_WarmUp()!";
+				exit(EXIT_FAILURE);
+			}
+			
+			delete dict_state_ptr_string;
+			delete dict_state_ptr_integer;
+		}
+		
 #if (defined(_MSC_VER) && _MSC_VER <= 1900) || (defined(__MINGW32__) && !defined(_UCRT))
 		// Work around non-conformance of Microsoft's printf %e format specifier,
 		// which uses 3 digits for the exponent instead of 2.
@@ -359,7 +473,7 @@ bool Eidos_GoodSymbolForDefine(std::string &p_symbol_name)
 	
 	// SLiM constants are reserved too; this code belongs in SLiM, but only
 	// SLiM uses this facility right now anyway, so I'm not going to sweat it...
-	if ((p_symbol_name == "sim") || (p_symbol_name == "slimgui"))
+	if ((p_symbol_name == "community") || (p_symbol_name == "sim") || (p_symbol_name == "slimgui"))
 		good_symbol = false;
 	
 	int len = (int)p_symbol_name.length();
@@ -552,7 +666,9 @@ std::ostringstream gEidosTermination;
 bool gEidosTerminated;
 
 
-/** Print a demangled stack backtrace of the caller function to FILE* out. */
+// Print a demangled stack backtrace of the caller function to FILE* out.
+// Note that in Cocoa this works better: NSLog(@"%@", NSThread.callStackSymbols);
+// For a shortened backtrace: NSLog(@"%@", [NSThread.callStackSymbols subarrayWithRange:NSMakeRange(0, MIN(5UL, NSThread.callStackSymbols.count))]);
 void Eidos_PrintStacktrace(FILE *p_out, unsigned int p_max_frames)
 {
 	fprintf(p_out, "stack trace:\n");
@@ -859,6 +975,12 @@ void operator<<(std::ostream& p_out, const EidosTerminate &p_terminator)
 	
 	if (gEidosTerminateThrows)
 	{
+		// BCH 5/14/2023: I used to have a check here for (omp_get_level() > 0), and would do raise(SIGTRAP) in that situation
+		// to get a trap in the debugger for the point when an exception was raised inside a parallel region.  However, we now
+		// have some places in the code where such raises are guarded by try/catch, so they are no longer unambiguously wrong.
+		// So I've deleted that check here.  The throw below will happen, and if no try/catch is in place and we're inside a
+		// parallel region, we will end up with an uncaught C++ exception error.
+		
 		// In this case, EidosTerminate() throws an exception that gets caught by the Context.  That invalidates the simulation object, and
 		// causes the Context to display an error message and ends the simulation run, but it does not terminate the app.
 		throw std::runtime_error("A runtime error occurred in Eidos");
@@ -914,6 +1036,28 @@ std::string Eidos_GetUntrimmedRaiseMessage(void)
 	{
 		return gEidosStr_empty_string;
 	}
+}
+
+
+#pragma mark -
+#pragma mark Debugging support
+#pragma mark -
+
+void CheckLongTermBoundary()
+{
+	THREAD_SAFETY_IN_ANY_PARALLEL("CheckLongTermBoundary(): illegal when parallel");
+	
+	// Right now, EidosDictionary is the only part of Eidos that is smart about long-term
+	// boundaries, so we just need to check its state.  But in future, we could allow the
+	// user to call defineGlobal() with a non-retain-release object as long as they fix
+	// the reference by the next long-term boundary.
+	bool violation = false;
+	
+	if (gEidos_DictionaryNonRetainReleaseReferenceCounter != 0)
+		violation = true;
+	
+	if (violation)
+		EIDOS_TERMINATION << "ERROR (CheckLongTermBoundary): A long-term reference has been kept to an Eidos object that is not under retain-release memory management.  For example, a SLiM Individual or Subpopulation may have been placed in a global dictionary.  This is illegal; only objects that are under retain-release memory management can be kept long-term." << EidosTerminate(nullptr);
 }
 
 
@@ -1042,8 +1186,55 @@ size_t Eidos_GetCurrentRSS(void)
 #endif
 }
 
+/**
+ *This is my own code, patterned after Nadeau's code above
+ *
+ * Returns the current virtual memory use measured
+ * in bytes, or zero if the value cannot be determined on this OS.
+ */
+size_t Eidos_GetVMUsage(void)
+{
+#if defined(_WIN32)
+	/* Windows -------------------------------------------------- */
+	// see https://learn.microsoft.com/en-us/windows/win32/api/psapi/ns-psapi-process_memory_counters
+	PROCESS_MEMORY_COUNTERS info;
+	GetProcessMemoryInfo( GetCurrentProcess( ), &info, sizeof(info) );
+	return (size_t)info.PagefileUsage;
+	
+#elif defined(__APPLE__) && defined(__MACH__)
+	/* OSX ------------------------------------------------------ */
+	struct mach_task_basic_info info;
+	mach_msg_type_number_t infoCount = MACH_TASK_BASIC_INFO_COUNT;
+	if ( task_info( mach_task_self( ), MACH_TASK_BASIC_INFO,
+				   (task_info_t)&info, &infoCount ) != KERN_SUCCESS )
+		return (size_t)0L;		/* Can't access? */
+	return (size_t)info.virtual_size;
+	
+#elif defined(__linux__) || defined(__linux) || defined(linux) || defined(__gnu_linux__)
+	/* Linux ---------------------------------------------------- */
+	// see https://man7.org/linux/man-pages/man5/proc.5.html
+	long vmsize = 0L;
+	FILE* fp = NULL;
+	if ( (fp = fopen( "/proc/self/statm", "r" )) == NULL )
+		return (size_t)0L;		/* Can't open? */
+	if ( fscanf( fp, "%ld", &vmsize ) != 1 )
+	{
+		fclose( fp );
+		return (size_t)0L;		/* Can't read? */
+	}
+	fclose( fp );
+	return (size_t)vmsize * (size_t)sysconf( _SC_PAGESIZE);
+	
+#else
+	/* AIX, BSD, Solaris, and Unknown OS ------------------------ */
+	return (size_t)0L;			/* Unsupported. */
+#endif
+}
+
 size_t Eidos_GetMaxRSS(void)
 {
+	THREAD_SAFETY_IN_ACTIVE_PARALLEL("Eidos_GetMaxRSS(): usage of statics");
+	
 	static bool beenHere = false;
 	static size_t max_rss = 0;
 	
@@ -1052,7 +1243,7 @@ size_t Eidos_GetMaxRSS(void)
 
 #if defined(_WIN32)
 	// Assume unlimited on Windows with warning
-	std::cerr << "Warning: Eidos_GetMaxRSS() does not work properly in Windows, so return assumes no limit, which may be incorrect.";
+	std::cerr << "WARNING: Eidos_GetMaxRSS() does not work properly in Windows, so return assumes no limit, which may be incorrect.";
 	max_rss = 0;
 
 #else
@@ -1097,7 +1288,7 @@ size_t Eidos_GetMaxRSS(void)
 			max_rss = (uint64_t)rlim.rlim_max;
 			
 			// If the claim is that we have more than 1024 TB at our disposal, then we will consider ourselves unlimited :->
-			if (max_rss > 1024L * 1024L * 1024L * 1024L * 1024L)
+			if (max_rss > 1024LL * 1024L * 1024L * 1024L * 1024L)
 				max_rss = 0;
 		}
 		else
@@ -1116,6 +1307,8 @@ size_t Eidos_GetMaxRSS(void)
 
 void Eidos_CheckRSSAgainstMax(std::string p_message1, std::string p_message2)
 {
+	THREAD_SAFETY_IN_ACTIVE_PARALLEL("Eidos_CheckRSSAgainstMax():  usage of statics");
+	
 	static bool beenHere = false;
 	static size_t max_rss = 0;
 	
@@ -1241,6 +1434,8 @@ std::string Eidos_LastPathComponent(const std::string &p_path)
 // Get the current working directory; oddly, C++ has no API for this
 std::string Eidos_CurrentDirectory(void)
 {
+	THREAD_SAFETY_IN_ACTIVE_PARALLEL("Eidos_CurrentDirectory(): usage of statics");
+	
 	// buffer of size MAXPATHLEN * 8 to accommodate relatively long paths
 	static char *path_buffer = nullptr;
 	
@@ -1279,6 +1474,8 @@ std::string Eidos_StripTrailingSlash(const std::string &p_path)
 // Create a directory at the given path if it does not already exist; returns false if an error occurred (which emits a warning)
 bool Eidos_CreateDirectory(const std::string &p_path, std::string *p_error_string)
 {
+	THREAD_SAFETY_IN_ACTIVE_PARALLEL("Eidos_CreateDirectory():  filesystem write");
+	
 	std::string path = Eidos_ResolvedPath(Eidos_StripTrailingSlash(p_path));
 	
 	errno = 0;
@@ -1347,6 +1544,8 @@ std::string Eidos_TemporaryDirectory(void)
 
 bool Eidos_TemporaryDirectoryExists(void)
 {
+	THREAD_SAFETY_IN_ACTIVE_PARALLEL("Eidos_TemporaryDirectoryExists(): usage of statics");
+	
 	// we cache the result for speed, making the assumption that the temporary directory will not change underneath us
 	static bool been_here = false;
 	static bool exists = false;
@@ -1458,6 +1657,8 @@ bool Eidos_TemporaryDirectoryExists(void)
 
 int Eidos_mkstemps(char *p_pattern, int p_suffix_len)
 {
+	THREAD_SAFETY_IN_ACTIVE_PARALLEL("Eidos_mkstemps():  filesystem write");
+	
 	static const char letters[] = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 	static uint64_t value;
 	size_t len = strlen(p_pattern);
@@ -1510,6 +1711,8 @@ int Eidos_mkstemps(char *p_pattern, int p_suffix_len)
 
 int Eidos_mkstemps_directory(char *p_pattern, int p_suffix_len)
 {
+	THREAD_SAFETY_IN_ACTIVE_PARALLEL("Eidos_mkstemps_directory():  filesystem write");
+	
 	static const char letters[] = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 	static uint64_t value;
 	size_t len = strlen(p_pattern);
@@ -1568,9 +1771,11 @@ std::unordered_map<std::string, std::string> gEidosBufferedZipAppendData;
 // This flushes the bytes in outstring to the file at file_path, with gzip append
 bool _Eidos_FlushZipBuffer(const std::string &file_path, const std::string &outstring)
 {
+	THREAD_SAFETY_IN_ACTIVE_PARALLEL("_Eidos_FlushZipBuffer():  filesystem write");
+	
 	//std::cout << "_Eidos_FlushZipBuffer() called for " << file_path << std::endl;
 	
-	gzFile gzf = z_gzopen(file_path.c_str(), "ab");
+	gzFile gzf = gzopen(file_path.c_str(), "ab");
 	
 	if (!gzf)
 		return false;
@@ -1602,6 +1807,8 @@ bool _Eidos_FlushZipBuffer(const std::string &file_path, const std::string &outs
 // This flushes a given file, if it is buffering zip output
 void Eidos_FlushFile(const std::string &p_file_path)
 {
+	THREAD_SAFETY_IN_ACTIVE_PARALLEL("Eidos_FlushFile():  filesystem write");
+	
 #if EIDOS_BUFFER_ZIP_APPENDS
 	auto buffer_iter = gEidosBufferedZipAppendData.find(p_file_path);
 	
@@ -1620,6 +1827,8 @@ void Eidos_FlushFile(const std::string &p_file_path)
 // This flushes all outstanding buffered zip data to the appropriate files
 void Eidos_FlushFiles(void)
 {
+	THREAD_SAFETY_IN_ACTIVE_PARALLEL("Eidos_FlushFiles():  filesystem write");
+	
 #if EIDOS_BUFFER_ZIP_APPENDS
 	// Write out buffered data in gEidosBufferedZipAppendData to the appropriate files, using zlib's gzip append mode
 	for (auto &buffer_pair : gEidosBufferedZipAppendData)
@@ -1639,6 +1848,8 @@ void Eidos_FlushFiles(void)
 
 void Eidos_WriteToFile(const std::string &p_file_path, std::vector<const std::string *> p_contents, bool p_append, bool p_compress, EidosFileFlush p_flush_option)
 {
+	THREAD_SAFETY_IN_ACTIVE_PARALLEL("Eidos_WriteToFile():  filesystem write");
+	
 	// note that we add a newline after the last line in all cases, so that appending new content to a file produces correct line breaks
 	
 	if (p_compress)
@@ -1678,7 +1889,7 @@ void Eidos_WriteToFile(const std::string &p_file_path, std::vector<const std::st
 		{
 			// this code can handle both the append and the non-append case, but the append case may generate very low-quality
 			// compression (potentially even worse than the uncompressed data) due to having an excess of gzip headers
-			gzFile gzf = z_gzopen(p_file_path.c_str(), p_append ? "ab" : "wb");
+			gzFile gzf = gzopen(p_file_path.c_str(), p_append ? "ab" : "wb");
 			
 			if (!gzf)
 				EIDOS_TERMINATION << "#ERROR (Eidos_WriteToFile): could not write to file at path " << p_file_path << "." << EidosTerminate(nullptr);
@@ -1993,6 +2204,8 @@ to be bound by the terms and conditions of this License Agreement.
 
 double Eidos_ExactSum(const double *p_double_vec, int64_t p_vec_length)
 {
+	THREAD_SAFETY_IN_ACTIVE_PARALLEL("Eidos_ExactSum(): usage of statics");
+	
 	// We allocate the partials using malloc() rather than initially using the stack,
 	// and keep the allocated block around forever; simpler if a bit less efficient.
 	static double *p = nullptr;		// partials array
@@ -2349,24 +2562,185 @@ std::string EidosStringForFloat(double p_value)
 	}
 }
 
+int DisplayDigitsForIntegerPart(double x)
+{
+	// This function just uses log10 to give the number of digits needed to display the integer part of a double.
+	// The reason it's split out into a function is that the result, for x==0, is -inf, and we want to return 1.
+	double digits = ceil(log10(floor(x)));
+	
+	if (std::isfinite(digits))
+		return (int)digits;
+	return 1;
+}
+
 bool Eidos_RegexWorks(void)
 {
 	// check whether <regex> works, because on some platforms it doesn't (!); test just once and cache the result
 	static bool beenHere = false;
 	static bool regex_works = false;
 	
-	if (!beenHere)
+#pragma omp critical (Eidos_RegexWorks)
 	{
-		std::regex pattern_regex("cd", std::regex_constants::ECMAScript);
-		std::string x_element = "bcd";
-		std::smatch match_info;
-		bool is_match = std::regex_search(x_element, match_info, pattern_regex);
-		
-		regex_works = is_match;
-		beenHere = true;
+		if (!beenHere)
+		{
+			std::regex pattern_regex("cd", std::regex_constants::ECMAScript);
+			std::string x_element = "bcd";
+			std::smatch match_info;
+			bool is_match = std::regex_search(x_element, match_info, pattern_regex);
+			
+			regex_works = is_match;
+			beenHere = true;
+		}
 	}
 	
 	return regex_works;
+}
+
+// Here are some early explorations into parallelizing sorting.  The speedups
+// here are not particularly impressive.  Parallel sorting is a very deep and
+// complex rabbit hole to go down; see, e.g., Victor Duvanenko's work at
+// https://github.com/DragonSpit/ParallelAlgorithms.  But those algorithms
+// use TBB instead of OpenMP, and require C++17, so they're not easily usable.
+// Wikipedia at https://en.wikipedia.org/wiki/Merge_sort#Parallel_merge_sort
+// also has some very interesting commentary about parallelization of sorting.
+// The code here is also very primitive - integer only, no templates, no
+// client-suppliable comparator, etc. – so it would be hard to integrate into
+// all the ways Eidos presently uses std::sort.  Improving this looks like a
+// good project for somebody in CS.
+
+// This parallel quicksort code is thanks to Ruud van der Pas, modified from
+// https://www.openmp.org/wp-content/uploads/sc16-openmp-booth-tasking-ruud.pdf
+#ifdef _OPENMP
+static void _Eidos_ParallelQuicksort_I(int64_t *values, int64_t lo, int64_t hi)
+{
+	if (lo >= hi)
+		return;
+	
+	if (hi - lo + 1 <= 1000) {
+		// fall over to using std::sort when below a threshold interval size
+		// the larger the threshold, the less time we spend thrashing tasks on small
+		// intervals, which is good; but it also sets a limit on how many threads we
+		// we bring to bear on relatively small sorts, which is bad; 1000 seems fine
+		std::sort(values + lo, values + hi + 1);
+	} else {
+		// choose the middle of three pivots, in an attempt to avoid really bad pivots
+		int64_t pivot1 = *(values + lo);
+		int64_t pivot2 = *(values + hi);
+		int64_t pivot3 = *(values + ((lo + hi) >> 1));
+		int64_t pivot;
+		
+		if (pivot1 > pivot2)
+		{
+			if (pivot2 > pivot3)		pivot = pivot2;
+			else if (pivot1 > pivot3)	pivot = pivot3;
+			else						pivot = pivot1;
+		}
+		else
+		{
+			if (pivot1 > pivot3)		pivot = pivot1;
+			else if (pivot2 > pivot3)	pivot = pivot3;
+			else						pivot = pivot2;
+		}
+		
+		// note that std::partition is not guaranteed to leave the pivot value in position
+		// we do a second partition to exclude all duplicate pivot values, which seems to be one standard strategy
+		// this works particularly well when duplicate values are very common; it helps avoid O(n^2) performance
+		// note the partition is not parallelized; that is apparently a difficult problem for parallel quicksort
+		int64_t *middle1 = std::partition(values + lo, values + hi + 1, [pivot](const int64_t& em) { return em < pivot; });
+		int64_t *middle2 = std::partition(middle1, values + hi + 1, [pivot](const int64_t& em) { return !(pivot < em); });
+		int64_t mid1 = middle1 - values;
+		int64_t mid2 = middle2 - values;
+		#pragma omp task default(none) firstprivate(values, lo, mid1)
+		{ _Eidos_ParallelQuicksort_I(values, lo, mid1 - 1); }	// Left branch
+		#pragma omp task default(none) firstprivate(values, hi, mid2)
+		{ _Eidos_ParallelQuicksort_I(values, mid2, hi); }		// Right branch
+	}
+}
+#endif
+
+void Eidos_ParallelQuicksort_I(int64_t *values, int64_t nelements)
+{
+#ifdef _OPENMP
+	if (nelements > 1000) {
+		#pragma omp parallel default(none) shared(values, nelements)
+		{
+			#pragma omp single nowait
+			{
+				_Eidos_ParallelQuicksort_I(values, 0, nelements - 1);
+			}
+		} // End of parallel region
+	}
+	else
+	{
+		// Use std::sort for small vectors
+		std::sort(values, values + nelements);
+	}
+#else
+	// Use std::sort when not running parallel
+	std::sort(values, values + nelements);
+#endif
+}
+
+// This parallel mergesort code is thanks to Libor Bukata and Jan Dvořák, modified from
+// https://cw.fel.cvut.cz/old/_media/courses/b4m35pag/lab6_slides_advanced_openmp.pdf
+#ifdef _OPENMP
+static void _Eidos_ParallelMergesort_I(int64_t *values, int64_t left, int64_t right)
+{
+	if (left >= right)
+		return;
+	
+	if (right - left <= 1000)
+	{
+		// fall over to using std::sort when below a threshold interval size
+		// the larger the threshold, the less time we spend thrashing tasks on small
+		// intervals, which is good; but it also sets a limit on how many threads we
+		// we bring to bear on relatively small sorts, which is bad; 1000 seems fine
+		std::sort(values + left, values + right + 1);
+	}
+	else
+	{
+		int64_t mid = (left + right) / 2;
+		#pragma omp taskgroup
+		{
+			// the original code had if() limits on task subdivision here, but that
+			// doesn't make sense to me, because we also have the threshold above,
+			// which serves the same purpose but avoids using std::sort on subdivided
+			// regions and then merging them with inplace_merge; if we assume that
+			// std::sort is faster than mergesort when running on one thread, then
+			// merging subdivided std::sort calls only seems like a good strategy
+			// when the std::sort calls happen on separate threads
+			#pragma omp task default(none) firstprivate(values, left, mid) untied
+			_Eidos_ParallelMergesort_I(values, left, mid);
+			#pragma omp task default(none) firstprivate(values, mid, right) untied
+			_Eidos_ParallelMergesort_I(values, mid + 1, right);
+			#pragma omp taskyield
+		}
+		std::inplace_merge(values + left, values + mid + 1, values + right + 1);
+	}
+}
+#endif
+
+void Eidos_ParallelMergesort_I(int64_t *values, int64_t nelements)
+{ 
+#ifdef _OPENMP
+	if (nelements > 1000) {
+		#pragma omp parallel default(none) shared(values, nelements)
+		{
+			#pragma omp single
+			{
+				_Eidos_ParallelMergesort_I(values, 0, nelements - 1);
+			}
+		} // End of parallel region
+	}
+	else
+	{
+		// Use std::sort for small vectors
+		std::sort(values, values + nelements);
+	}
+#else
+	// Use std::sort when not running parallel
+	std::sort(values, values + nelements);
+#endif
 }
 
 
@@ -2633,7 +3007,7 @@ void Eidos_hash_to_string(char string[65], const uint8_t hash[32])
 {
 	size_t i;
 	for (i = 0; i < 32; i++) {
-		string += sprintf(string, "%02x", hash[i]);
+		string += snprintf(string, 65, "%02x", hash[i]);
 	}
 }	
 
@@ -2654,6 +3028,7 @@ const std::string &gEidosStr_executeLambda = EidosRegisteredString("executeLambd
 const std::string &gEidosStr__executeLambda_OUTER = EidosRegisteredString("_executeLambda_OUTER", gEidosID__executeLambda_OUTER);
 const std::string &gEidosStr_ls = EidosRegisteredString("ls", gEidosID_ls);
 const std::string &gEidosStr_rm = EidosRegisteredString("rm", gEidosID_rm);
+const std::string &gEidosStr_usage = EidosRegisteredString("usage", gEidosID_usage);
 
 // mostly language keywords
 const std::string &gEidosStr_if = EidosRegisteredString("if", gEidosID_if);
@@ -2702,9 +3077,11 @@ const std::string &gEidosStr_length = EidosRegisteredString("length", gEidosID_l
 const std::string &gEidosStr_methodSignature = EidosRegisteredString("methodSignature", gEidosID_methodSignature);
 const std::string &gEidosStr_propertySignature = EidosRegisteredString("propertySignature", gEidosID_propertySignature);
 const std::string &gEidosStr_str = EidosRegisteredString("str", gEidosID_str);
+const std::string &gEidosStr_stringRepresentation = EidosRegisteredString("stringRepresentation", gEidosID_stringRepresentation);
 
 // strings for EidosTestElement
 const std::string &gEidosStr__TestElement = EidosRegisteredString("_TestElement", gEidosID__TestElement);
+const std::string &gEidosStr__TestElementNRR = EidosRegisteredString("_TestElementNRR", gEidosID__TestElementNRR);
 const std::string &gEidosStr__yolk = EidosRegisteredString("_yolk", gEidosID__yolk);
 const std::string &gEidosStr__increment = EidosRegisteredString("_increment", gEidosID__increment);
 const std::string &gEidosStr__cubicYolk = EidosRegisteredString("_cubicYolk", gEidosID__cubicYolk);
@@ -2731,6 +3108,7 @@ const std::string &gEidosStr_colNames = EidosRegisteredString("colNames", gEidos
 const std::string &gEidosStr_dim = EidosRegisteredString("dim", gEidosID_dim);
 const std::string &gEidosStr_ncol = EidosRegisteredString("ncol", gEidosID_ncol);
 const std::string &gEidosStr_nrow = EidosRegisteredString("nrow", gEidosID_nrow);
+const std::string &gEidosStr_asMatrix = EidosRegisteredString("asMatrix", gEidosID_asMatrix);
 const std::string &gEidosStr_cbind = EidosRegisteredString("cbind", gEidosID_cbind);
 const std::string &gEidosStr_rbind = EidosRegisteredString("rbind", gEidosID_rbind);
 const std::string &gEidosStr_subset = EidosRegisteredString("subset", gEidosID_subset);
@@ -2803,6 +3181,8 @@ EidosStringRegistry::~EidosStringRegistry(void)
 
 void EidosStringRegistry::_RegisterStringForGlobalID(const std::string &p_string, EidosGlobalStringID p_string_id)
 {
+	THREAD_SAFETY_IN_ANY_PARALLEL("EidosStringRegistry::_RegisterStringForGlobalID(): string registry change");
+	
 	// BCH 13 September 2016: So, this is a tricky issue without a good resolution at the moment.  Eidos explicitly registers
 	// a few strings, using this method, using the function EidosRegisteredString().  And SLiM explicitly registers
 	// a bunch more strings, in SLiM_RegisterGlobalStringsAndIDs().  So far so good.  But Eidos also registers a bunch of
@@ -3660,6 +4040,24 @@ void Eidos_GetColorString(double p_red, double p_green, double p_blue, char *p_s
 	int r_i = (int)round(p_red * 255.0);
 	int g_i = (int)round(p_green * 255.0);
 	int b_i = (int)round(p_blue * 255.0);
+	
+	static char hex[16] = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F'};
+	
+	p_string_buffer[0] = '#';
+	p_string_buffer[1] = hex[r_i / 16];
+	p_string_buffer[2] = hex[r_i % 16];
+	p_string_buffer[3] = hex[g_i / 16];
+	p_string_buffer[4] = hex[g_i % 16];
+	p_string_buffer[5] = hex[b_i / 16];
+	p_string_buffer[6] = hex[b_i % 16];
+	p_string_buffer[7] = 0;
+}
+
+void Eidos_GetColorString(uint8_t p_red, uint8_t p_green, uint8_t p_blue, char *p_string_buffer)
+{
+	int r_i = (int)p_red;
+	int g_i = (int)p_green;
+	int b_i = (int)p_blue;
 	
 	static char hex[16] = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F'};
 	

@@ -3,7 +3,7 @@
 //  Eidos
 //
 //  Created by Ben Haller on 6/28/15.
-//  Copyright (c) 2015-2021 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2015-2023 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -33,7 +33,7 @@
 #include <algorithm>
 #include <unordered_map>
 
-#if (defined(SLIMGUI) && (SLIMPROFILING == 1))
+#if (SLIMPROFILING == 1)
 
 #if defined(__APPLE__) && defined(__MACH__)
 // On macOS we use mach_absolute_time() for profiling (only in SLiMgui when profiling is enabled)
@@ -47,17 +47,23 @@
 
 #endif
 
+#include "eidos_openmp.h"
 #include "eidos_intrusive_ptr.h"
 
 class EidosScript;
 class EidosToken;
 
 
-#define EIDOS_VERSION_STRING	("2.7")
-#define EIDOS_VERSION_FLOAT		(2.7)
+// Eidos version: See also Info.plist
+#define EIDOS_VERSION_STRING	("3.0.1")
+#define EIDOS_VERSION_FLOAT		(3.01)
 
 
 // These should be called once at startup to give Eidos an opportunity to initialize static state
+#ifdef _OPENMP
+void Eidos_WarmUpOpenMP(std::ostream *outstream, bool changed_max_thread_count, int new_max_thread_count, bool active_threads);
+#endif
+
 void Eidos_WarmUp(void);
 
 // This can be called at startup, after Eidos_WarmUp(), to define global constants from the command line
@@ -136,11 +142,15 @@ extern EidosErrorContext gEidosErrorContext;
 
 inline __attribute__((always_inline)) void RestoreErrorPosition(EidosErrorPosition &p_saved_position)
 {
+	THREAD_SAFETY_IN_ACTIVE_PARALLEL("RestoreErrorPosition(): gEidosErrorContext change");
+	
 	gEidosErrorContext.errorPosition = p_saved_position;
 }
 
 inline __attribute__((always_inline)) void ClearErrorPosition(void)
 {
+	THREAD_SAFETY_IN_ACTIVE_PARALLEL("ClearErrorPosition(): gEidosErrorContext change");
+	
 	gEidosErrorContext.errorPosition = EidosErrorPosition{-1, -1, -1, -1};
 }
 
@@ -205,6 +215,15 @@ public:
 };
 #endif
 
+// Eidos defines the concept of "long-term boundaries", which are moments in time when Eidos objects
+// that are not under retain-release memory management could be freed.  Keeping a reference to such
+// an object between long-term boundaries is generally safe; keeping a reference to such an object
+// across a long-term boundary is generally NOT safe.  This function should be called, internally by
+// Eidos and externally by the Context, at such boundaries, and code should not free Eidos objects
+// (except local temporaries) without calling this function first.  This allows internal bookkeeping
+// to check for violations of the long-term boundary conventions.
+void CheckLongTermBoundary();
+
 
 // *******************************************************************************************************************
 //
@@ -217,6 +236,7 @@ public:
 // Memory-monitoring calls.  See the .cpp for comments.  These return a size in bytes.
 size_t Eidos_GetPeakRSS(void);
 size_t Eidos_GetCurrentRSS(void);
+size_t Eidos_GetVMUsage(void);
 
 // Memory limits, retrieved by calling "ulimit -m"; cached internally.  Returns a size in bytes; 0 means "no limit".
 size_t Eidos_GetMaxRSS(void);
@@ -235,7 +255,10 @@ void Eidos_CheckRSSAgainstMax(std::string p_message1, std::string p_message2);
 #pragma mark Profiling support
 #pragma mark -
 
-#if (defined(SLIMGUI) && (SLIMPROFILING == 1))
+// BCH 1/22/2023: Note that profiling can now be enabled for both command-line and GUI builds.  It is enabled
+// when SLIMPROFILING is defined to 1; if it is undefined, 0, or any other value, profiling is disabled.
+
+#if (SLIMPROFILING == 1)
 // PROFILING
 
 extern int gEidosProfilingClientCount;	// if non-zero, profiling is happening in some context
@@ -243,8 +266,8 @@ extern int gEidosProfilingClientCount;	// if non-zero, profiling is happening in
 // Profiling clocks; note that these can overflow, we don't care, only (t2-t1) ever matters and that is overflow-robust
 
 extern uint64_t gEidos_ProfileCounter;			// incremented by Eidos_ProfileTime() every time it is called
-extern double gEidos_ProfileOverheadTicks;		// the overhead in ticks for one profile call, in ticks
-extern double gEidos_ProfileOverheadSeconds;	// the overhead in ticks for one profile call, in seconds
+extern double gEidos_ProfileOverheadTicks;		// the overhead for one profile call, in ticks
+extern double gEidos_ProfileOverheadSeconds;	// the overhead for one profile call, in seconds
 extern double gEidos_ProfileLagTicks;			// the clocked length of an empty profile block, in ticks
 extern double gEidos_ProfileLagSeconds;			// the clocked length of an empty profile block, in seconds
 
@@ -331,7 +354,7 @@ void Eidos_PrepareForProfiling(void);
 		(slim__accumulator) += slim__corrected_ticks;																														\
 	}
 
-#endif	// (defined(SLIMGUI) && (SLIMPROFILING == 1))
+#endif	// (SLIMPROFILING == 1)
 
 
 // *******************************************************************************************************************
@@ -561,9 +584,14 @@ extern int gEidosFloatOutputPrecision;		// precision used for output of float va
 
 std::string EidosStringForFloat(double p_value);
 
+int DisplayDigitsForIntegerPart(double x);	// number of digits needed to display the integer part of a double
+
 // Fisher-Yates Shuffle: choose a random subset of a std::vector, without replacement.
 // see https://stackoverflow.com/questions/9345087/choose-m-elements-randomly-from-a-vector-containing-n-elements
 // see also https://ideone.com/3A3cv for demo code using this
+// Note that this uses random(), not the GSL RNG.  This is actually desirable, because we use this
+// for doing haplotype display stuff; using random() avoids altering the simulation state.  For use
+// in a simulation, see the implementation of sample() for some useful approaches.
 template<class BidiIter>
 BidiIter Eidos_random_unique(BidiIter begin, BidiIter end, size_t num_random)
 {
@@ -583,6 +611,10 @@ BidiIter Eidos_random_unique(BidiIter begin, BidiIter end, size_t num_random)
 
 // The <regex> library does not work on Ubuntu 18.04, annoyingly; probably a very old compiler or something.  So we have to check.
 bool Eidos_RegexWorks(void);
+
+// Parallel sorting; these use std::sort when we are not running parallel, or for small jobs
+void Eidos_ParallelQuicksort_I(int64_t *values, int64_t nelements);
+void Eidos_ParallelMergesort_I(int64_t *values, int64_t nelements);
 
 
 // *******************************************************************************************************************
@@ -835,6 +867,7 @@ extern const std::string &gEidosStr_executeLambda;
 extern const std::string &gEidosStr__executeLambda_OUTER;
 extern const std::string &gEidosStr_ls;
 extern const std::string &gEidosStr_rm;
+extern const std::string &gEidosStr_usage;
 
 extern const std::string &gEidosStr_if;
 extern const std::string &gEidosStr_else;
@@ -878,8 +911,10 @@ extern const std::string &gEidosStr_length;
 extern const std::string &gEidosStr_methodSignature;
 extern const std::string &gEidosStr_propertySignature;
 extern const std::string &gEidosStr_str;
+extern const std::string &gEidosStr_stringRepresentation;
 
 extern const std::string &gEidosStr__TestElement;
+extern const std::string &gEidosStr__TestElementNRR;
 extern const std::string &gEidosStr__yolk;
 extern const std::string &gEidosStr__increment;
 extern const std::string &gEidosStr__cubicYolk;
@@ -903,6 +938,7 @@ extern const std::string &gEidosStr_colNames;
 extern const std::string &gEidosStr_dim;
 extern const std::string &gEidosStr_ncol;
 extern const std::string &gEidosStr_nrow;
+extern const std::string &gEidosStr_asMatrix;
 extern const std::string &gEidosStr_cbind;
 extern const std::string &gEidosStr_rbind;
 extern const std::string &gEidosStr_subset;
@@ -955,6 +991,7 @@ enum _EidosGlobalStringID : uint32_t
 	gEidosID__executeLambda_OUTER,
 	gEidosID_ls,
 	gEidosID_rm,
+	gEidosID_usage,
 
 	gEidosID_if,
 	gEidosID_else,
@@ -998,8 +1035,10 @@ enum _EidosGlobalStringID : uint32_t
 	gEidosID_methodSignature,
 	gEidosID_propertySignature,
 	gEidosID_str,
+	gEidosID_stringRepresentation,
 
 	gEidosID__TestElement,
+	gEidosID__TestElementNRR,
 	gEidosID__yolk,
 	gEidosID__increment,
 	gEidosID__cubicYolk,
@@ -1023,6 +1062,7 @@ enum _EidosGlobalStringID : uint32_t
 	gEidosID_dim,
 	gEidosID_ncol,
 	gEidosID_nrow,
+	gEidosID_asMatrix,
 	gEidosID_cbind,
 	gEidosID_rbind,
 	gEidosID_subset,
@@ -1061,7 +1101,7 @@ enum _EidosGlobalStringID : uint32_t
 	gEidosID_Individual,
 	
 	gEidosID_LastEntry,					// IDs added by the Context should start here
-	gEidosID_LastContextEntry = 430		// IDs added by the Context must end before this value; Eidos reserves the remaining values
+	gEidosID_LastContextEntry = 450		// IDs added by the Context must end before this value; Eidos reserves the remaining values
 };
 
 extern std::vector<std::string> gEidosConstantNames;	// T, F, NULL, PI, E, INF, NAN
@@ -1085,7 +1125,8 @@ extern EidosNamedColor gEidosNamedColors[];
 void Eidos_GetColorComponents(const std::string &p_color_name, float *p_red_component, float *p_green_component, float *p_blue_component);
 void Eidos_GetColorComponents(const std::string &p_color_name, uint8_t *p_red_component, uint8_t *p_green_component, uint8_t *p_blue_component);
 
-void Eidos_GetColorString(double p_red, double p_green, double p_blue, char *p_string_buffer);	// p_string_buffer must have room for 8 chars, including the null
+void Eidos_GetColorString(double p_red, double p_green, double p_blue, char *p_string_buffer);		// p_string_buffer must have room for 8 chars, including the null
+void Eidos_GetColorString(uint8_t p_red, uint8_t p_green, uint8_t p_blue, char *p_string_buffer);	// p_string_buffer must have room for 8 chars, including the null
 
 void Eidos_HSV2RGB(double h, double s, double v, double *p_r, double *p_g, double *p_b);
 void Eidos_RGB2HSV(double r, double g, double b, double *p_h, double *p_s, double *p_v);

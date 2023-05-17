@@ -3,7 +3,7 @@
 //  Eidos
 //
 //  Created by Ben Haller on 4/7/15.
-//  Copyright (c) 2015-2021 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2015-2023 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -19,6 +19,7 @@
 
 #include "eidos_value.h"
 #include "eidos_functions.h"
+#include "eidos_interpreter.h"
 #include "eidos_call_signature.h"
 #include "eidos_property_signature.h"
 #include "json.hpp"
@@ -27,7 +28,6 @@
 #include <utility>
 #include <functional>
 #include <cmath>
-#include "errno.h"
 #include "string.h"
 
 
@@ -580,6 +580,8 @@ EidosValue_SP EidosValue::Subset(std::vector<std::vector<int64_t>> &p_inclusion_
 		// Finally, set the dimensionality of the result, considering dropped dimensions.  This basically follows the structure
 		// of the indexed operand's dimensions, but (a) resizes to match the size of p_inclusion_indices for the given dimension,
 		// and (b) omits any dimension that has a count of exactly 1, if dropping is requested.
+		THREAD_SAFETY_IN_ACTIVE_PARALLEL("EidosValue::Subset(): usage of statics");
+		
 		static int64_t *static_dim_buffer = nullptr;
 		static int static_dim_buffer_size = -1;
 		
@@ -1607,12 +1609,7 @@ std::string EidosValue_Int_vector::StringAtIndex(int p_idx, const EidosToken *p_
 	if ((p_idx < 0) || (p_idx >= (int)size()))
 		EIDOS_TERMINATION << "ERROR (EidosValue_Int_vector::StringAtIndex): subscript " << p_idx << " out of range." << EidosTerminate(p_blame_token);
 	
-	// with C++11, could use std::to_string(values_[p_idx])
-	std::ostringstream ss;
-	
-	ss << values_[p_idx];
-	
-	return ss.str();
+	return std::to_string(values_[p_idx]);		// way faster than std::ostringstream
 }
 
 int64_t EidosValue_Int_vector::IntAtIndex(int p_idx, const EidosToken *p_blame_token) const
@@ -1663,7 +1660,16 @@ void EidosValue_Int_vector::PushValueFromIndexOfEidosValue(int p_idx, const Eido
 void EidosValue_Int_vector::Sort(bool p_ascending)
 {
 	if (p_ascending)
-		std::sort(values_, values_ + count_);
+	{
+		// For the ascending int64_t case specifically, we now have a parallel quicksort
+		// algorithm that gives a little speedup.  This is kind of experimental, but has
+		// been tested and seems to be correct.  I wrote a parallel mergesort algorithm
+		// too; its performance is kind of comparable but quicksort gives a bit more
+		// speed with a small number of threads (2-10 threads), so I chose it for now.
+		// This is the only place that sorting has been parallelized so far.  Note that
+		// this function automatically falls back to std::sort when single-threaded.
+		Eidos_ParallelQuicksort_I(values_, count_);
+	}
 	else
 		std::sort(values_, values_ + count_, std::greater<int64_t>());
 }
@@ -1741,12 +1747,7 @@ std::string EidosValue_Int_singleton::StringAtIndex(int p_idx, const EidosToken 
 	if (p_idx != 0)
 		EIDOS_TERMINATION << "ERROR (EidosValue_Int_singleton::StringAtIndex): subscript " << p_idx << " out of range." << EidosTerminate(p_blame_token);
 	
-	// with C++11, could use std::to_string(value_)
-	std::ostringstream ss;
-	
-	ss << value_;
-	
-	return ss.str();
+	return std::to_string(value_);		// way faster than std::ostringstream
 }
 
 int64_t EidosValue_Int_singleton::IntAtIndex(int p_idx, const EidosToken *p_blame_token) const
@@ -2116,7 +2117,7 @@ void EidosValue_Float_singleton::Sort(bool p_ascending)
 #pragma mark EidosValue_Object
 #pragma mark -
 
-// See comments on EidosValue_Object::EidosValue_Object() below
+// See comments on EidosValue_Object::EidosValue_Object() below.  Note this is shared by all species.
 std::vector<EidosValue_Object *> gEidosValue_Object_Mutation_Registry;
 
 EidosValue_Object::EidosValue_Object(bool p_singleton, const EidosClass *p_class) : EidosValue(EidosValueType::kValueObject, p_singleton), class_(p_class),
@@ -2131,10 +2132,13 @@ EidosValue_Object::EidosValue_Object(bool p_singleton, const EidosClass *p_class
 	// is some way to do this without pushing the hack down into Eidos, but at the moment I'm not seeing it.
 	// On the bright side, this scheme actually seems pretty robust; the only way it fails is if somebody avoids
 	// using the constructor or the destructor for EidosValue_Object, I think, which seems unlikely.
+	// Note this is shared by all species, since the mutation block itself is shared by all species.
 	const std::string *element_type = &(class_->ClassName());
 										
 	if (element_type == &gEidosStr_Mutation)
 	{
+		THREAD_SAFETY_IN_ACTIVE_PARALLEL("EidosValue_Object::EidosValue_Object(): gEidosValue_Object_Mutation_Registry change");
+		
 		gEidosValue_Object_Mutation_Registry.emplace_back(this);
 		registered_for_patching_ = true;
 		
@@ -2151,6 +2155,8 @@ EidosValue_Object::~EidosValue_Object(void)
 	// See comment on EidosValue_Object::EidosValue_Object() above
 	if (registered_for_patching_)
 	{
+		THREAD_SAFETY_IN_ACTIVE_PARALLEL("EidosValue_Object::~EidosValue_Object(): gEidosValue_Object_Mutation_Registry change");
+		
 		auto erase_iter = std::find(gEidosValue_Object_Mutation_Registry.begin(), gEidosValue_Object_Mutation_Registry.end(), this);
 		
 		if (erase_iter != gEidosValue_Object_Mutation_Registry.end())
@@ -2715,12 +2721,14 @@ EidosValue_SP EidosValue_Object_vector::GetPropertyOfElements(EidosGlobalStringI
 	}
 }
 
-void EidosValue_Object_vector::SetPropertyOfElements(EidosGlobalStringID p_property_id, const EidosValue &p_value)
+void EidosValue_Object_vector::SetPropertyOfElements(EidosGlobalStringID p_property_id, const EidosValue &p_value, EidosToken *p_property_token)
 {
 	const EidosPropertySignature *signature = Class()->SignatureForProperty(p_property_id);
 	
+	// BCH 9 Sept. 2022: if the property does not exist, raise an error on the token for the property name.
+	// Note that other errors stemming from this call will refer to whatever the current error range is.
 	if (!signature)
-		EIDOS_TERMINATION << "ERROR (EidosValue_Object_vector::SetPropertyOfElements): property " << EidosStringRegistry::StringForGlobalStringID(p_property_id) << " is not defined for object element type " << ElementType() << "." << EidosTerminate(nullptr);
+		EIDOS_TERMINATION << "ERROR (EidosValue_Object_vector::SetPropertyOfElements): property " << EidosStringRegistry::StringForGlobalStringID(p_property_id) << " is not defined for object element type " << ElementType() << "." << EidosTerminate(p_property_token);
 	
 	bool exact_match = signature->CheckAssignedValue(p_value);
 	
@@ -3350,12 +3358,14 @@ EidosValue_SP EidosValue_Object_singleton::GetPropertyOfElements(EidosGlobalStri
 	return result;
 }
 
-void EidosValue_Object_singleton::SetPropertyOfElements(EidosGlobalStringID p_property_id, const EidosValue &p_value)
+void EidosValue_Object_singleton::SetPropertyOfElements(EidosGlobalStringID p_property_id, const EidosValue &p_value, EidosToken *p_property_token)
 {
 	const EidosPropertySignature *signature = value_->Class()->SignatureForProperty(p_property_id);
 	
+	// BCH 9 Sept. 2022: if the property does not exist, raise an error on the token for the property name.
+	// Note that other errors stemming from this call will refer to whatever the current error range is.
 	if (!signature)
-		EIDOS_TERMINATION << "ERROR (EidosValue_Object_singleton::SetPropertyOfElements): property " << EidosStringRegistry::StringForGlobalStringID(p_property_id) << " is not defined for object element type " << ElementType() << "." << EidosTerminate(nullptr);
+		EIDOS_TERMINATION << "ERROR (EidosValue_Object_singleton::SetPropertyOfElements): property " << EidosStringRegistry::StringForGlobalStringID(p_property_id) << " is not defined for object element type " << ElementType() << "." << EidosTerminate(p_property_token);
 	
 	signature->CheckAssignedValue(p_value);
 	

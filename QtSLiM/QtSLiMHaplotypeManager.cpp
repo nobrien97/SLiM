@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 4/3/2020.
-//  Copyright (c) 2020-2021 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2020-2023 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -22,7 +22,6 @@
 #include "QtSLiMHaplotypeOptions.h"
 #include "QtSLiMHaplotypeProgress.h"
 #include "QtSLiMExtras.h"
-#include "QtSLiMAppDelegate.h"
 
 #include <QOpenGLFunctions>
 #include <QDialog>
@@ -34,6 +33,7 @@
 #include <QMimeData>
 #include <QFileDialog>
 #include <QStandardPaths>
+#include <QLabel>
 #include <QDebug>
 
 #include <vector>
@@ -41,6 +41,7 @@
 
 #include "eidos_globals.h"
 #include "subpopulation.h"
+#include "species.h"
 
 
 
@@ -48,6 +49,7 @@
 // This class method runs a plot options dialog, and then produces a haplotype plot with a progress panel as it is being constructed
 void QtSLiMHaplotypeManager::CreateHaplotypePlot(QtSLiMWindow *controller)
 {
+    Species *displaySpecies = controller->focalDisplaySpecies();
     QtSLiMHaplotypeOptions optionsPanel(controller);
     
     int result = optionsPanel.exec();
@@ -60,7 +62,7 @@ void QtSLiMHaplotypeManager::CreateHaplotypePlot(QtSLiMWindow *controller)
         
         // First generate the haplotype plot data, with a progress panel
         QtSLiMHaplotypeManager *haplotypeManager = new QtSLiMHaplotypeManager(nullptr, clusteringMethod, clusteringOptimization,
-                                                                              controller, genomeSampleSize, true);
+                                                                              controller, displaySpecies, genomeSampleSize, true);
         
         if (haplotypeManager->valid_)
         {
@@ -96,6 +98,14 @@ void QtSLiMHaplotypeManager::CreateHaplotypePlot(QtSLiMWindow *controller)
                 buttonLayout->setMargin(5);
                 buttonLayout->setSpacing(5);
                 topLayout->addLayout(buttonLayout);
+                
+                if (controller->community->all_species_.size() > 1)
+                {
+                    // make our species avatar badge
+                    QLabel *speciesLabel = new QLabel();
+                    speciesLabel->setText(QString::fromStdString(displaySpecies->avatar_));
+                    buttonLayout->addWidget(speciesLabel);
+                }
                 
                 QSpacerItem *rightSpacer = new QSpacerItem(16, 5, QSizePolicy::Expanding, QSizePolicy::Minimum);
                 buttonLayout->addItem(rightSpacer);
@@ -138,13 +148,15 @@ void QtSLiMHaplotypeManager::CreateHaplotypePlot(QtSLiMWindow *controller)
 }
 
 QtSLiMHaplotypeManager::QtSLiMHaplotypeManager(QObject *p_parent, ClusteringMethod clusteringMethod, ClusteringOptimization optimizationMethod,
-                                               QtSLiMWindow *controller, size_t sampleSize, bool showProgress) :
+                                               QtSLiMWindow *controller, Species *displaySpecies, size_t sampleSize, bool showProgress) :
     QObject(p_parent)
 {
     controller_ = controller;
+    focalSpeciesName_ = displaySpecies->name_;
     
-    SLiMSim *sim = controller_->sim;
-    Population &population = sim->population_;
+    Community *community = controller_->community;
+    Species *graphSpecies = focalDisplaySpecies();
+    Population &population = graphSpecies->population_;
     
     clusterMethod = clusteringMethod;
     clusterOptimization = optimizationMethod;
@@ -162,7 +174,7 @@ QtSLiMHaplotypeManager::QtSLiMHaplotypeManager(QObject *p_parent, ClusteringMeth
     
     // Figure out whether we're analyzing / displaying a subrange; gross that we go right into the ChromosomeView, I know...
     
-    controller_->chromosomeSelection(&usingSubrange, &subrangeFirstBase, &subrangeLastBase);
+    controller_->chromosomeSelection(graphSpecies, &usingSubrange, &subrangeFirstBase, &subrangeLastBase);
     
     // Also dig to find out whether we're displaying all mutation types or just a subset; if a subset, each MutationType has a display flag
     displayingMuttypeSubset = (controller_->chromosomeDisplayMuttypes().size() != 0);
@@ -193,7 +205,7 @@ QtSLiMHaplotypeManager::QtSLiMHaplotypeManager(QObject *p_parent, ClusteringMeth
     if (usingSubrange)
         title.append(QString(", positions %1:%2").arg(subrangeFirstBase).arg(subrangeLastBase));
     
-    title.append(QString(", generation %1").arg(sim->generation_));
+    title.append(QString(", tick %1").arg(community->Tick()));
     
     titleString = title;
     subpopCount = static_cast<int>(selected_subpops.size());
@@ -268,6 +280,16 @@ QtSLiMHaplotypeManager::~QtSLiMHaplotypeManager(void)
 	}
 }
 
+Species *QtSLiMHaplotypeManager::focalDisplaySpecies(void)
+{
+    // We look up our focal species object by name every time, since keeping a pointer to it would be unsafe
+    // Before initialize() is done species have not been created, so we return nullptr in that case
+	if (controller_ && controller_->community && (controller_->community->Tick() >= 1))
+		return controller_->community->SpeciesWithName(focalSpeciesName_);
+	
+	return nullptr;
+}
+
 void QtSLiMHaplotypeManager::finishClusteringAnalysis(void)
 {
 	// Work out an approximate best sort order
@@ -294,9 +316,13 @@ void QtSLiMHaplotypeManager::finishClusteringAnalysis(void)
 
 void QtSLiMHaplotypeManager::configureMutationInfoBuffer()
 {
-    SLiMSim *sim = controller_->sim;
-	Population &population = sim->population_;
-	double scalingFactor = 0.8; //controller_->selectionColorScale;
+    Species *graphSpecies = focalDisplaySpecies();
+    
+    if (!graphSpecies)
+        return;
+    
+    Population &population = graphSpecies->population_;
+	double scalingFactor = 0.8; // used to be controller->selectionColorScale;
     int registry_size;
     const MutationIndex *registry = population.MutationRegistry(&registry_size);
 	const MutationIndex *reg_end_ptr = registry + registry_size;
@@ -347,7 +373,7 @@ void QtSLiMHaplotypeManager::configureMutationInfoBuffer()
 	}
 	
 	// Remember the chromosome length
-	mutationLastPosition = sim->chromosome_->last_position_;
+	mutationLastPosition = graphSpecies->chromosome_->last_position_;
 }
 
 void QtSLiMHaplotypeManager::sortGenomes(void)
@@ -456,7 +482,7 @@ void QtSLiMHaplotypeManager::configureDisplayBuffers(void)
 			
 			for (int run_index = 0; run_index < mutrun_count; ++run_index)
 			{
-				MutationRun *mutrun = genome.mutruns_[run_index].get();
+				const MutationRun *mutrun = genome.mutruns_[run_index];
 				const MutationIndex *mut_start_ptr = mutrun->begin_pointer_const();
 				const MutationIndex *mut_end_ptr = mutrun->end_pointer_const();
 				
@@ -486,7 +512,7 @@ void QtSLiMHaplotypeManager::configureDisplayBuffers(void)
 			
 			for (int run_index = 0; run_index < mutrun_count; ++run_index)
 			{
-				MutationRun *mutrun = genome.mutruns_[run_index].get();
+				const MutationRun *mutrun = genome.mutruns_[run_index];
 				const MutationIndex *mut_start_ptr = mutrun->begin_pointer_const();
 				const MutationIndex *mut_end_ptr = mutrun->end_pointer_const();
 				
@@ -849,20 +875,20 @@ int64_t *QtSLiMHaplotypeManager::buildDistanceArray(void)
 		int64_t *distance_column = distances + i;
 		int64_t *distance_row = distances + i * genome_count;
 		int mutrun_count = genome1->mutrun_count_;
-		MutationRun_SP *genome1_mutruns = genome1->mutruns_;
+		const MutationRun **genome1_mutruns = genome1->mutruns_;
 		
 		distance_row[i] = 0;
 		
 		for (size_t j = i + 1; j < genome_count; ++j)
 		{
 			Genome *genome2 = genomes[j];
-			MutationRun_SP *genome2_mutruns = genome2->mutruns_;
+			const MutationRun **genome2_mutruns = genome2->mutruns_;
 			int64_t distance = 0;
 			
 			for (int mutrun_index = 0; mutrun_index < mutrun_count; ++mutrun_index)
 			{
-				MutationRun *genome1_mutrun = genome1_mutruns[mutrun_index].get();
-				MutationRun *genome2_mutrun = genome2_mutruns[mutrun_index].get();
+				const MutationRun *genome1_mutrun = genome1_mutruns[mutrun_index];
+				const MutationRun *genome2_mutrun = genome2_mutruns[mutrun_index];
 				int genome1_mutcount = genome1_mutrun->size();
 				int genome2_mutcount = genome2_mutrun->size();
 				
@@ -936,14 +962,14 @@ int64_t *QtSLiMHaplotypeManager::buildDistanceArrayForSubrange(void)
 		int64_t *distance_row = distances + i * genome_count;
 		slim_position_t mutrun_length = genome1->mutrun_length_;
 		int mutrun_count = genome1->mutrun_count_;
-		MutationRun_SP *genome1_mutruns = genome1->mutruns_;
+		const MutationRun **genome1_mutruns = genome1->mutruns_;
 		
 		distance_row[i] = 0;
 		
 		for (size_t j = i + 1; j < genome_count; ++j)
 		{
 			Genome *genome2 = genomes[j];
-			MutationRun_SP *genome2_mutruns = genome2->mutruns_;
+			const MutationRun **genome2_mutruns = genome2->mutruns_;
 			int64_t distance = 0;
 			
 			for (int mutrun_index = 0; mutrun_index < mutrun_count; ++mutrun_index)
@@ -953,8 +979,8 @@ int64_t *QtSLiMHaplotypeManager::buildDistanceArrayForSubrange(void)
 					continue;
 				
 				// OK, this mutrun intersects with our chosen subrange; proceed
-				MutationRun *genome1_mutrun = genome1_mutruns[mutrun_index].get();
-				MutationRun *genome2_mutrun = genome2_mutruns[mutrun_index].get();
+				const MutationRun *genome1_mutrun = genome1_mutruns[mutrun_index];
+				const MutationRun *genome2_mutrun = genome2_mutruns[mutrun_index];
 				
 				if (genome1_mutrun == genome2_mutrun)
 					;										// identical runs have no differences
@@ -1036,20 +1062,20 @@ int64_t *QtSLiMHaplotypeManager::buildDistanceArrayForSubtypes(void)
 		int64_t *distance_column = distances + i;
 		int64_t *distance_row = distances + i * genome_count;
 		int mutrun_count = genome1->mutrun_count_;
-		MutationRun_SP *genome1_mutruns = genome1->mutruns_;
+		const MutationRun **genome1_mutruns = genome1->mutruns_;
 		
 		distance_row[i] = 0;
 		
 		for (size_t j = i + 1; j < genome_count; ++j)
 		{
 			Genome *genome2 = genomes[j];
-			MutationRun_SP *genome2_mutruns = genome2->mutruns_;
+			const MutationRun **genome2_mutruns = genome2->mutruns_;
 			int64_t distance = 0;
 			
 			for (int mutrun_index = 0; mutrun_index < mutrun_count; ++mutrun_index)
 			{
-				MutationRun *genome1_mutrun = genome1_mutruns[mutrun_index].get();
-				MutationRun *genome2_mutrun = genome2_mutruns[mutrun_index].get();
+				const MutationRun *genome1_mutrun = genome1_mutruns[mutrun_index];
+				const MutationRun *genome2_mutrun = genome2_mutruns[mutrun_index];
 				
 				if (genome1_mutrun == genome2_mutrun)
 					;										// identical runs have no differences
@@ -1132,14 +1158,14 @@ int64_t *QtSLiMHaplotypeManager::buildDistanceArrayForSubrangeAndSubtypes(void)
 		int64_t *distance_row = distances + i * genome_count;
 		slim_position_t mutrun_length = genome1->mutrun_length_;
 		int mutrun_count = genome1->mutrun_count_;
-		MutationRun_SP *genome1_mutruns = genome1->mutruns_;
+		const MutationRun **genome1_mutruns = genome1->mutruns_;
 		
 		distance_row[i] = 0;
 		
 		for (size_t j = i + 1; j < genome_count; ++j)
 		{
 			Genome *genome2 = genomes[j];
-			MutationRun_SP *genome2_mutruns = genome2->mutruns_;
+			const MutationRun **genome2_mutruns = genome2->mutruns_;
 			int64_t distance = 0;
 			
 			for (int mutrun_index = 0; mutrun_index < mutrun_count; ++mutrun_index)
@@ -1149,8 +1175,8 @@ int64_t *QtSLiMHaplotypeManager::buildDistanceArrayForSubrangeAndSubtypes(void)
 					continue;
 				
 				// OK, this mutrun intersects with our chosen subrange; proceed
-				MutationRun *genome1_mutrun = genome1_mutruns[mutrun_index].get();
-				MutationRun *genome2_mutrun = genome2_mutruns[mutrun_index].get();
+				const MutationRun *genome1_mutrun = genome1_mutruns[mutrun_index];
+				const MutationRun *genome2_mutrun = genome2_mutruns[mutrun_index];
 				
 				if (genome1_mutrun == genome2_mutrun)
 					;										// identical runs have no differences
@@ -1474,6 +1500,10 @@ void QtSLiMHaplotypeManager::greedySolve(int64_t *distances, size_t genome_count
 			if (node_groups[node_index] != universal_group)
 				qDebug() << "node of non-matching group seen (group" << node_groups[node_index] << ")";
 		}
+        
+        // suppress "variable set but not used" warnings, since we may want these bookkeeping variables at some point...
+        (void)degree1_count;
+        (void)degree2_count;
 	}
 	
 	if (progressPanel_ && progressPanel_->haplotypeProgressIsCancelled())

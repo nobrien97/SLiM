@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 12/26/14.
-//  Copyright (c) 2014-2021 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2014-2023 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -28,7 +28,7 @@
 #include "eidos_interpreter.h"
 
 
-// SLiM built-in functions; the signatures for these are declared in SLiMSim::SLiMFunctionSignatures()
+// SLiM built-in functions; the signatures for these are declared in Community::SLiMFunctionSignatures()
 
 EidosValue_SP SLiM_ExecuteFunction_codonsToAminoAcids(const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter);
 EidosValue_SP SLiM_ExecuteFunction_mm16To256(const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter);

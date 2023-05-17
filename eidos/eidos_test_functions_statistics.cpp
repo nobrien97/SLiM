@@ -3,7 +3,7 @@
 //  Eidos
 //
 //  Created by Ben Haller on 7/11/20.
-//  Copyright (c) 2020-2021 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2020-2023 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -127,7 +127,9 @@ void _RunFunctionStatisticsTests_a_through_p(void)
 	EidosAssertScriptSuccess_NULL("mean(float(0));");
 	EidosAssertScriptRaise("mean(string(0));", 0, "cannot be type");
 	EidosAssertScriptSuccess_F("mean(rep(1e18, 9));", 1e18);	// stays in integer internally
+#if EIDOS_HAS_OVERFLOW_BUILTINS
 	EidosAssertScriptSuccess_F("mean(rep(1e18, 10));", 1e18);	// overflows to float internally
+#endif
 	EidosAssertScriptSuccess("mean(c(1.0, 5.0, NAN, 2.0));", gStaticEidosValue_FloatNAN);
 	
 	// min()
@@ -393,6 +395,58 @@ void _RunFunctionStatisticsTests_q_through_z(void)
 #pragma mark distributions
 void _RunFunctionDistributionTests(void)
 {
+	// findInterval()
+	EidosAssertScriptRaise("findInterval(c(-1,0,1,9,10,11), integer(0));", 0, "vec to be of length > 0");
+	EidosAssertScriptRaise("findInterval(c(-1,0,1,9,10,11), float(0));", 0, "vec to be of length > 0");
+	EidosAssertScriptRaise("findInterval(c(-1,0,1,9,10,11), c(0:10,9));", 0, "non-decreasing order");
+	EidosAssertScriptRaise("findInterval(c(-1,0,1,9,10,11), c(1,0:10));", 0, "non-decreasing order");
+	EidosAssertScriptRaise("findInterval(c(-1,0,1,9,10,11), c(0:10.0,9));", 0, "non-decreasing order");
+	EidosAssertScriptRaise("findInterval(c(-1,0,1,9,10,11), c(1.0,0:10));", 0, "non-decreasing order");
+	
+	EidosAssertScriptSuccess_IV("findInterval(c(-1,0,1,9,10,11), 0:10);", {-1, 0, 1, 9, 10, 10});
+	EidosAssertScriptSuccess_IV("findInterval(c(-1,0,1,9,10,11), 0:10, rightmostClosed=T);", {-1, 0, 1, 9, 9, 10});
+	EidosAssertScriptSuccess_IV("findInterval(c(-1,0,1,9,10,11), 0:10, allInside=T);", {0, 0, 1, 9, 9, 9});
+	EidosAssertScriptSuccess_IV("findInterval(c(-1,0,1,9,10,11), 0:10, rightmostClosed=T, allInside=T);", {0, 0, 1, 9, 9, 9});
+	EidosAssertScriptSuccess_IV("findInterval(c(-1,0,1,9,10,11), repEach(0:10, 2));", {-1, 1, 3, 19, 21, 21});
+	EidosAssertScriptSuccess_IV("findInterval(c(11,10,9,1,0,-1), 0:10);", {10, 10, 9, 1, 0, -1});
+	EidosAssertScriptSuccess_IV("findInterval(c(11,10,9,1,0,-1), 0:10, rightmostClosed=T);", {10, 9, 9, 1, 0, -1});
+	EidosAssertScriptSuccess_IV("findInterval(c(11,10,9,1,0,-1), 0:10, allInside=T);", {9, 9, 9, 1, 0, 0});
+	EidosAssertScriptSuccess_IV("findInterval(c(11,10,9,1,0,-1), 0:10, rightmostClosed=T, allInside=T);", {9, 9, 9, 1, 0, 0});
+	EidosAssertScriptSuccess_IV("findInterval(c(11,10,9,1,0,-1), repEach(0:10, 2));", {21, 21, 19, 3, 1, -1});
+	
+	EidosAssertScriptSuccess_IV("findInterval(c(-1,0,1,9,10,11.0), 0:10.0);", {-1, 0, 1, 9, 10, 10});
+	EidosAssertScriptSuccess_IV("findInterval(c(-1,0,1,9,10,11.0), 0:10.0, rightmostClosed=T);", {-1, 0, 1, 9, 9, 10});
+	EidosAssertScriptSuccess_IV("findInterval(c(-1,0,1,9,10,11.0), 0:10.0, allInside=T);", {0, 0, 1, 9, 9, 9});
+	EidosAssertScriptSuccess_IV("findInterval(c(-1,0,1,9,10,11.0), 0:10.0, rightmostClosed=T, allInside=T);", {0, 0, 1, 9, 9, 9});
+	EidosAssertScriptSuccess_IV("findInterval(c(-1,0,1,9,10,11.0), repEach(0:10.0, 2));", {-1, 1, 3, 19, 21, 21});
+	EidosAssertScriptSuccess_IV("findInterval(c(11,10,9,1,0,-1.0), 0:10.0);", {10, 10, 9, 1, 0, -1});
+	EidosAssertScriptSuccess_IV("findInterval(c(11,10,9,1,0,-1.0), 0:10.0, rightmostClosed=T);", {10, 9, 9, 1, 0, -1});
+	EidosAssertScriptSuccess_IV("findInterval(c(11,10,9,1,0,-1.0), 0:10.0, allInside=T);", {9, 9, 9, 1, 0, 0});
+	EidosAssertScriptSuccess_IV("findInterval(c(11,10,9,1,0,-1.0), 0:10.0, rightmostClosed=T, allInside=T);", {9, 9, 9, 1, 0, 0});
+	EidosAssertScriptSuccess_IV("findInterval(c(11,10,9,1,0,-1.0), repEach(0:10.0, 2));", {21, 21, 19, 3, 1, -1});
+	
+	EidosAssertScriptSuccess_IV("findInterval(c(-1,0,1,9,10,11.0), 0:10);", {-1, 0, 1, 9, 10, 10});
+	EidosAssertScriptSuccess_IV("findInterval(c(-1,0,1,9,10,11.0), 0:10, rightmostClosed=T);", {-1, 0, 1, 9, 9, 10});
+	EidosAssertScriptSuccess_IV("findInterval(c(-1,0,1,9,10,11.0), 0:10, allInside=T);", {0, 0, 1, 9, 9, 9});
+	EidosAssertScriptSuccess_IV("findInterval(c(-1,0,1,9,10,11.0), 0:10, rightmostClosed=T, allInside=T);", {0, 0, 1, 9, 9, 9});
+	EidosAssertScriptSuccess_IV("findInterval(c(-1,0,1,9,10,11.0), repEach(0:10, 2));", {-1, 1, 3, 19, 21, 21});
+	EidosAssertScriptSuccess_IV("findInterval(c(11,10,9,1,0,-1.0), 0:10);", {10, 10, 9, 1, 0, -1});
+	EidosAssertScriptSuccess_IV("findInterval(c(11,10,9,1,0,-1.0), 0:10, rightmostClosed=T);", {10, 9, 9, 1, 0, -1});
+	EidosAssertScriptSuccess_IV("findInterval(c(11,10,9,1,0,-1.0), 0:10, allInside=T);", {9, 9, 9, 1, 0, 0});
+	EidosAssertScriptSuccess_IV("findInterval(c(11,10,9,1,0,-1.0), 0:10, rightmostClosed=T, allInside=T);", {9, 9, 9, 1, 0, 0});
+	EidosAssertScriptSuccess_IV("findInterval(c(11,10,9,1,0,-1.0), repEach(0:10, 2));", {21, 21, 19, 3, 1, -1});
+	
+	EidosAssertScriptSuccess_IV("findInterval(c(-1,0,1,9,10,11), 0:10.0);", {-1, 0, 1, 9, 10, 10});
+	EidosAssertScriptSuccess_IV("findInterval(c(-1,0,1,9,10,11), 0:10.0, rightmostClosed=T);", {-1, 0, 1, 9, 9, 10});
+	EidosAssertScriptSuccess_IV("findInterval(c(-1,0,1,9,10,11), 0:10.0, allInside=T);", {0, 0, 1, 9, 9, 9});
+	EidosAssertScriptSuccess_IV("findInterval(c(-1,0,1,9,10,11), 0:10.0, rightmostClosed=T, allInside=T);", {0, 0, 1, 9, 9, 9});
+	EidosAssertScriptSuccess_IV("findInterval(c(-1,0,1,9,10,11), repEach(0:10.0, 2));", {-1, 1, 3, 19, 21, 21});
+	EidosAssertScriptSuccess_IV("findInterval(c(11,10,9,1,0,-1), 0:10.0);", {10, 10, 9, 1, 0, -1});
+	EidosAssertScriptSuccess_IV("findInterval(c(11,10,9,1,0,-1), 0:10.0, rightmostClosed=T);", {10, 9, 9, 1, 0, -1});
+	EidosAssertScriptSuccess_IV("findInterval(c(11,10,9,1,0,-1), 0:10.0, allInside=T);", {9, 9, 9, 1, 0, 0});
+	EidosAssertScriptSuccess_IV("findInterval(c(11,10,9,1,0,-1), 0:10.0, rightmostClosed=T, allInside=T);", {9, 9, 9, 1, 0, 0});
+	EidosAssertScriptSuccess_IV("findInterval(c(11,10,9,1,0,-1), repEach(0:10.0, 2));", {21, 21, 19, 3, 1, -1});
+	
 	// dmvnorm()
 	EidosAssertScriptRaise("dmvnorm(array(c(1.0,2,3,2,1), c(1,5,1)), c(0.0, 2.0), matrix(c(10,3,3,2), nrow=2));", 0, "requires x to be");
 	EidosAssertScriptSuccess("dmvnorm(float(0), c(0.0, 2.0), matrix(c(10,3,3,2), nrow=2));", gStaticEidosValue_Float_ZeroVec);

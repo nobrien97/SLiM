@@ -3,7 +3,7 @@
 //  Eidos
 //
 //  Created by Ben Haller on 5/8/16.
-//  Copyright (c) 2016-2021 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2016-2023 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -23,6 +23,13 @@
 #include <algorithm>
 #include <utility>
 
+
+EidosTypeTable::EidosTypeTable(const EidosTypeTable &originalTable)
+{
+	// Construct a derived table that copies all symbols from an original table
+	// This is useful for setting up scoping, where the local scope's type table is based on the global scope
+	hash_symbols_ = originalTable.hash_symbols_;
+}
 
 EidosTypeTable::EidosTypeTable(void)
 {
@@ -85,7 +92,7 @@ void EidosTypeTable::SetTypeForSymbol(EidosGlobalStringID p_symbol_name, EidosTy
 	// kEidosValueMaskNone, providing the user with the option of completing the statement as "z = z", which is dumb.
 	// Note that we do this whether the variable has been previously defined or not, so that we don't replace useful
 	// type information with useless garbage information; for example, in "x = sim; x = " we want to know that x is
-	// of type SLiMSim, not replace that knowledge with junk.  This means that variables will retain their previous
+	// of type Species, not replace that knowledge with junk.  This means that variables will retain their previous
 	// type whenever they are set to kEidosValueMaskNone, even when that might be legitimate; that's OK, I think,
 	// particularly since there presently really aren't any "legitimate" uses of kEidosValueMaskNone – it always
 	// represents some kind of parse error, misuse of operators, unknown functions/methods, etc.

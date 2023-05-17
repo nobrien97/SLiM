@@ -3,7 +3,7 @@
 //  Eidos
 //
 //  Created by Ben Haller on 12/13/14.
-//  Copyright (c) 2014-2021 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2014-2023 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -20,87 +20,241 @@
 
 #include "eidos_rng.h"
 
+#include <stdio.h>
 #include <unistd.h>
+#include <fcntl.h>
 #include <sys/time.h>
 
 
-Eidos_RNG_State gEidos_RNG;
+bool gEidos_RNG_Initialized = false;
+
+#ifndef _OPENMP
+Eidos_RNG_State gEidos_RNG_SINGLE;
+#else
+std::vector<Eidos_RNG_State *> gEidos_RNG_PERTHREAD;
+#endif
 
 
-unsigned long int Eidos_GenerateSeedFromPIDAndTime(void)
+static unsigned long int _Eidos_GenerateRNGSeed(void)
 {
+#ifdef _WIN32
+	// on Windows, we continue to hash together the PID and the time; I think there is a
+	// Windows API for cryptographic random numbers, though.  FIXME
 	static long int hereCounter = 0;
-	pid_t pid = getpid();
-	struct timeval te; 
+	long long milliseconds;
 	
-	gettimeofday(&te, NULL); // get current time
-	
-	long long milliseconds = te.tv_sec*1000LL + te.tv_usec/1000;	// calculate milliseconds
-	
-	milliseconds += (pid * (long long)10000000);		// try to make the pid matter a lot, to separate runs made on different cores close in time
-	milliseconds += (hereCounter++);
+#pragma omp critical (Eidos_GenerateRNGSeed)
+	{
+		pid_t pid = getpid();
+		struct timeval te;
+		
+		gettimeofday(&te, NULL); // get current time
+		
+		milliseconds = te.tv_sec*1000LL + te.tv_usec/1000;	// calculate milliseconds
+		milliseconds += (pid * (long long)10000000);		// try to make the pid matter a lot, to separate runs made on different cores close in time
+		milliseconds += (hereCounter * (long long)100000);	// make successive calls to this function be widely separated in their seeds
+		hereCounter++;
+	}
 	
 	return (unsigned long int)milliseconds;
+#else
+	// on other platforms, we now use /dev/urandom as a source of seeds, which is more reliably random
+	// thanks to https://security.stackexchange.com/a/184211/288172 for the basis of this code
+	// chose urandom rather than random to avoid stalls if the random pool's entropy is low;
+	// semi-pseudorandom seeds should be good enough for our purposes here
+	unsigned long int seed;
+	
+#pragma omp critical (Eidos_GenerateRNGSeed)
+	{
+		int fd = open("/dev/urandom", O_RDONLY);
+		read(fd, &seed, sizeof(seed));
+		close(fd);
+	}
+	
+	return seed;
+#endif
+}
+
+unsigned long int Eidos_GenerateRNGSeed(void)
+{
+	// We impose an extra restriction that _Eidos_GenerateRNGSeed() does not worry about: we require
+	// that the seed be greater than zero, as an int64_t.  We achieve that by just forcing it to be
+	// true; if _Eidos_GenerateRNGSeed() is generating cryptographically secure seeds, that ought
+	// to be harmless.  We do this so that the seed reported to the user always matches the seed
+	// value generated (otherwise a discrepancy is visible in SLiMgui).
+	int64_t seed_i64;
+	
+	do
+	{
+		unsigned long int seed = _Eidos_GenerateRNGSeed();
+		unsigned long int clipped_seed = (seed & INT64_MAX);	// shave off the top bit
+		
+		seed_i64 = (int64_t)clipped_seed;
+	} while (seed_i64 == 0);
+	
+	return (unsigned long int)seed_i64;
+}
+
+void _Eidos_InitializeOneRNG(Eidos_RNG_State &r)
+{
+	// Note that this is now called from each thread, when running parallel
+	r.rng_last_seed_ = 0;
+	
+	r.gsl_rng_ = gsl_rng_alloc(gsl_rng_taus2);	// the assumption of taus2 is hard-coded in eidos_rng.h
+	
+	r.mt_rng_.mt_ = (uint64_t *)malloc(Eidos_MT64_NN * sizeof(uint64_t));
+	r.mt_rng_.mti_ = Eidos_MT64_NN + 1;				// mti==NN+1 means mt[NN] is not initialized
+	
+	r.random_bool_bit_counter_ = 0;
+	r.random_bool_bit_buffer_ = 0;
+	
+	if (!r.gsl_rng_ || !r.mt_rng_.mt_)
+		EIDOS_TERMINATION << "ERROR (_Eidos_InitializeOneRNG): allocation failed; you may need to raise the memory limit for SLiM." << EidosTerminate(nullptr);
 }
 
 void Eidos_InitializeRNG(void)
 {
+	THREAD_SAFETY_IN_ANY_PARALLEL("Eidos_InitializeRNG(): RNG change");
+	
 	// Allocate the RNG if needed
-	if (!gEidos_RNG.gsl_rng_)
-		gEidos_RNG.gsl_rng_ = gsl_rng_alloc(gsl_rng_taus2);	// the assumption of taus2 is hard-coded in eidos_rng.h
+	if (gEidos_RNG_Initialized)
+		EIDOS_TERMINATION << "ERROR (Eidos_InitializeRNG): (internal error) the Eidos random number generator has already been allocated." << EidosTerminate(nullptr);
 	
-	if (!gEidos_RNG.mt_)
+#ifndef _OPENMP
+	//std::cout << "***** Initializing one single-threaded RNG" << std::endl;
+	
+	_Eidos_InitializeOneRNG(gEidos_RNG_SINGLE);
+#else
+	//std::cout << "***** Initializing " << gEidosMaxThreads << " independent RNGs" << std::endl;
+	
+	gEidos_RNG_PERTHREAD.resize(gEidosMaxThreads);
+	
+	// We want to try to guarantee that every thread sets up its RNG, even if OMP_DYNAMIC is true
+	int old_dynamic = omp_get_dynamic();
+	omp_set_dynamic(false);
+	
+	// Check that each RNG was initialized by a different thread, as intended below;
+	// this is not required, but it improves memory locality throughout the run
+	bool threadObserved[gEidosMaxThreads];
+	
+#pragma omp parallel default(none) shared(gEidos_RNG_PERTHREAD, threadObserved) num_threads(gEidosMaxThreads)
 	{
-		gEidos_RNG.mt_ = (uint64_t *)malloc(Eidos_MT64_NN * sizeof(uint64_t));
-		gEidos_RNG.mti_ = Eidos_MT64_NN + 1;				// mti==NN+1 means mt[NN] is not initialized
-	}
+		// Each thread allocates and initializes its own Eidos_RNG_State, for "first touch" optimization
+		int threadnum = omp_get_thread_num();
+		Eidos_RNG_State *rng_state = (Eidos_RNG_State *)calloc(1, sizeof(Eidos_RNG_State));
+		_Eidos_InitializeOneRNG(*rng_state);
+		gEidos_RNG_PERTHREAD[threadnum] = rng_state;
+		threadObserved[threadnum] = true;
+	}	// end omp parallel
 	
-	if (!gEidos_RNG.gsl_rng_ || !gEidos_RNG.mt_)
-		EIDOS_TERMINATION << "ERROR (Eidos_InitializeRNG): allocation failed; you may need to raise the memory limit for SLiM." << EidosTerminate(nullptr);
+	omp_set_dynamic(old_dynamic);
+	
+	for (int threadnum = 0; threadnum < gEidosMaxThreads; ++threadnum)
+		if (!threadObserved[threadnum])
+			std::cerr << "WARNING: parallel RNGs were not correctly initialized on their corresponding threads; this may cause slower random number generation." << std::endl;
+#endif	// end _OPENMP
+	
+	gEidos_RNG_Initialized = true;
 }
 
-void Eidos_FreeRNG(Eidos_RNG_State &p_rng)
+void _Eidos_FreeOneRNG(Eidos_RNG_State &r)
 {
-	if (p_rng.gsl_rng_)
+	THREAD_SAFETY_IN_ANY_PARALLEL("_Eidos_FreeOneRNG(): RNG change");
+	
+	if (r.gsl_rng_)
 	{
-		gsl_rng_free(p_rng.gsl_rng_);
-		p_rng.gsl_rng_ = NULL;
+		gsl_rng_free(r.gsl_rng_);
+		r.gsl_rng_ = NULL;
 	}
 	
-	if (p_rng.mt_)
+	if (r.mt_rng_.mt_)
 	{
-		free(p_rng.mt_);
-		p_rng.mt_ = NULL;
+		free(r.mt_rng_.mt_);
+		r.mt_rng_.mt_ = NULL;
 	}
-	p_rng.mti_ = 0;
+	r.mt_rng_.mti_ = 0;
 	
-	p_rng.random_bool_bit_buffer_ = 0;
-	p_rng.random_bool_bit_counter_ = 0;
+	r.random_bool_bit_buffer_ = 0;
+	r.random_bool_bit_counter_ = 0;
 }
 
-void Eidos_SetRNGSeed(unsigned long int p_seed)
+void Eidos_FreeRNG(void)
 {
+	THREAD_SAFETY_IN_ANY_PARALLEL("Eidos_FreeRNG(): RNG change");
+		
+	if (!gEidos_RNG_Initialized)
+		EIDOS_TERMINATION << "ERROR (Eidos_FreeRNG): (internal error) the Eidos random number generator has not been allocated." << EidosTerminate(nullptr);
+	
+#ifndef _OPENMP
+	//std::cout << "***** Freeing one single-threaded RNG" << std::endl;
+	
+	_Eidos_FreeOneRNG(gEidos_RNG_SINGLE);
+#else
+	//std::cout << "***** Freeing " << gEidosMaxThreads << " independent RNGs" << std::endl;
+	
+	for (int threadIndex = 0; threadIndex < gEidosMaxThreads; ++threadIndex)
+	{
+		Eidos_RNG_State *rng_state = gEidos_RNG_PERTHREAD[threadIndex];
+		_Eidos_FreeOneRNG(*rng_state);
+		gEidos_RNG_PERTHREAD[threadIndex] = nullptr;
+		free(rng_state);
+	}
+	
+	gEidos_RNG_PERTHREAD.resize(0);
+#endif
+	
+	gEidos_RNG_Initialized = false;
+}
+
+void _Eidos_SetOneRNGSeed(Eidos_RNG_State &r, unsigned long int p_seed)
+{
+	THREAD_SAFETY_IN_ANY_PARALLEL("_Eidos_SetOneRNGSeed(): RNG change");
+	
 	// BCH 12 Sept. 2016: it turns out that gsl_rng_taus2 produces exactly the same sequence for seeds 0 and 1.  This is obviously
 	// undesirable; people will often do a set of runs with sequential seeds starting at 0 and counting up, and they will get
 	// identical runs for 0 and 1.  There is no way to re-map the seed space to get rid of the problem altogether; all we can do
 	// is shift it to a place where it is unlikely to cause a problem.  So that's what we do.
 	if ((p_seed > 0) && (p_seed < 10000000000000000000UL))
-		gsl_rng_set(gEidos_RNG.gsl_rng_, p_seed + 1);	// map 1 -> 2, 2-> 3, 3-> 4, etc.
+		gsl_rng_set(r.gsl_rng_, p_seed + 1);	// map 1 -> 2, 2-> 3, 3-> 4, etc.
 	else
-		gsl_rng_set(gEidos_RNG.gsl_rng_, p_seed);		// 0 stays 0
+		gsl_rng_set(r.gsl_rng_, p_seed);		// 0 stays 0
 	
 	// BCH 13 May 2018: set the seed on the MT64 generator as well; we keep them synchronized in their seeding
-	Eidos_MT64_init_genrand64(p_seed);
+	Eidos_MT64_init_genrand64(&r.mt_rng_, p_seed);
+	
+	//std::cout << "***** Setting seed " << p_seed << " on RNG" << std::endl;
 	
 	// remember the seed as part of the RNG state
 	
 	// BCH 12 Sept. 2016: we want to return the user the same seed they requested, if they call getSeed(), so we save the requested
 	// seed, not the seed shifted by one that is actually passed to the GSL above.
-	gEidos_RNG.rng_last_seed_ = p_seed;
+	r.rng_last_seed_ = p_seed;
 	
 	// These need to be zeroed out, too; they are part of our RNG state
-	gEidos_RNG.random_bool_bit_counter_ = 0;
-	gEidos_RNG.random_bool_bit_buffer_ = 0;
+	r.random_bool_bit_counter_ = 0;
+	r.random_bool_bit_buffer_ = 0;
+}
+
+void Eidos_SetRNGSeed(unsigned long int p_seed)
+{
+	THREAD_SAFETY_IN_ANY_PARALLEL("Eidos_SetRNGSeed(): RNG change");
+	
+	if (!gEidos_RNG_Initialized)
+		EIDOS_TERMINATION << "ERROR (Eidos_SetRNGSeed): (internal error) the Eidos random number generator has not been allocated." << EidosTerminate(nullptr);
+	
+#ifndef _OPENMP
+	_Eidos_SetOneRNGSeed(gEidos_RNG_SINGLE, p_seed);
+#else
+	// Each thread's RNG gets a different seed.  We use the user-supplied seed for thread 0, so that non-parallel
+	// code continues to reproduce the same random number sequence.  For other threads, we use system-generated seed
+	// values.  This is non-reproducible, but parallel code involving the RNG is non-reproducible anyway.
+	for (int threadIndex = 0; threadIndex < gEidosMaxThreads; ++threadIndex)
+	{
+		unsigned long int thread_seed = (threadIndex == 0 ? p_seed : Eidos_GenerateRNGSeed());
+		
+		_Eidos_SetOneRNGSeed(*gEidos_RNG_PERTHREAD[threadIndex], thread_seed);
+	}
+#endif
 }
 
 #ifndef USE_GSL_POISSON
@@ -132,42 +286,41 @@ double Eidos_FastRandomPoisson_PRECALCULATE(double p_mu)
 // reproduced in eidos_rng.h.  See eidos_rng.h for further comments on this code; most of the code is there.
 
 /* initializes mt[NN] with a seed */
-void Eidos_MT64_init_genrand64(uint64_t seed)
+void Eidos_MT64_init_genrand64(Eidos_MT_State *r, uint64_t seed)
 {
-	gEidos_RNG.mt_[0] = seed;
-	for (gEidos_RNG.mti_ = 1; gEidos_RNG.mti_ < Eidos_MT64_NN; gEidos_RNG.mti_++) 
-		gEidos_RNG.mt_[gEidos_RNG.mti_] =  (6364136223846793005ULL * (gEidos_RNG.mt_[gEidos_RNG.mti_ - 1] ^ (gEidos_RNG.mt_[gEidos_RNG.mti_ - 1] >> 62)) + gEidos_RNG.mti_);
+	r->mt_[0] = seed;
+	for (r->mti_ = 1; r->mti_ < Eidos_MT64_NN; r->mti_++) 
+		r->mt_[r->mti_] =  (6364136223846793005ULL * (r->mt_[r->mti_ - 1] ^ (r->mt_[r->mti_ - 1] >> 62)) + r->mti_);
 }
 
 /* initialize by an array with array-length */
 /* init_key is the array for initializing keys */
 /* key_length is its length */
-void Eidos_MT64_init_by_array64(uint64_t init_key[],
-					 uint64_t key_length)
+void Eidos_MT64_init_by_array64(Eidos_MT_State *r, uint64_t init_key[], uint64_t key_length)
 {
 	uint64_t i, j, k;
-	Eidos_MT64_init_genrand64(19650218ULL);
+	Eidos_MT64_init_genrand64(r, 19650218ULL);
 	i=1; j=0;
 	k = (Eidos_MT64_NN>key_length ? Eidos_MT64_NN : key_length);
 	for (; k; k--) {
-		gEidos_RNG.mt_[i] = (gEidos_RNG.mt_[i] ^ ((gEidos_RNG.mt_[i-1] ^ (gEidos_RNG.mt_[i-1] >> 62)) * 3935559000370003845ULL))
+		r->mt_[i] = (r->mt_[i] ^ ((r->mt_[i-1] ^ (r->mt_[i-1] >> 62)) * 3935559000370003845ULL))
 		+ init_key[j] + j; /* non linear */
 		i++; j++;
-		if (i>=Eidos_MT64_NN) { gEidos_RNG.mt_[0] = gEidos_RNG.mt_[Eidos_MT64_NN-1]; i=1; }
+		if (i>=Eidos_MT64_NN) { r->mt_[0] = r->mt_[Eidos_MT64_NN-1]; i=1; }
 		if (j>=key_length) j=0;
 	}
 	for (k=Eidos_MT64_NN-1; k; k--) {
-		gEidos_RNG.mt_[i] = (gEidos_RNG.mt_[i] ^ ((gEidos_RNG.mt_[i-1] ^ (gEidos_RNG.mt_[i-1] >> 62)) * 2862933555777941757ULL))
+		r->mt_[i] = (r->mt_[i] ^ ((r->mt_[i-1] ^ (r->mt_[i-1] >> 62)) * 2862933555777941757ULL))
 		- i; /* non linear */
 		i++;
-		if (i>=Eidos_MT64_NN) { gEidos_RNG.mt_[0] = gEidos_RNG.mt_[Eidos_MT64_NN-1]; i=1; }
+		if (i>=Eidos_MT64_NN) { r->mt_[0] = r->mt_[Eidos_MT64_NN-1]; i=1; }
 	}
 	
-	gEidos_RNG.mt_[0] = 1ULL << 63; /* MSB is 1; assuring non-zero initial array */ 
+	r->mt_[0] = 1ULL << 63; /* MSB is 1; assuring non-zero initial array */ 
 }
 
 /* BCH: fill the next Eidos_MT64_NN words; used internally by genrand64_int64() */
-void _Eidos_MT64_fill()
+void _Eidos_MT64_fill(Eidos_MT_State *r)
 {
 	/* generate NN words at one time */
 	/* if init_genrand64() has not been called, */
@@ -178,21 +331,21 @@ void _Eidos_MT64_fill()
 	
 	// In the original code, this would fall back to some default seed value, but we
 	// don't want to allow the RNG to be used without being seeded first.  BCH 5/13/2018
-	if (gEidos_RNG.mti_ == Eidos_MT64_NN+1) 
+	if (r->mti_ == Eidos_MT64_NN+1) 
 		abort(); 
 	
 	for (i=0;i<Eidos_MT64_NN-Eidos_MT64_MM;i++) {
-		x = (gEidos_RNG.mt_[i]&Eidos_MT64_UM)|(gEidos_RNG.mt_[i+1]&Eidos_MT64_LM);
-		gEidos_RNG.mt_[i] = gEidos_RNG.mt_[i+Eidos_MT64_MM] ^ (x>>1) ^ mag01[(int)(x&1ULL)];
+		x = (r->mt_[i]&Eidos_MT64_UM)|(r->mt_[i+1]&Eidos_MT64_LM);
+		r->mt_[i] = r->mt_[i+Eidos_MT64_MM] ^ (x>>1) ^ mag01[(int)(x&1ULL)];
 	}
 	for (;i<Eidos_MT64_NN-1;i++) {
-		x = (gEidos_RNG.mt_[i]&Eidos_MT64_UM)|(gEidos_RNG.mt_[i+1]&Eidos_MT64_LM);
-		gEidos_RNG.mt_[i] = gEidos_RNG.mt_[i+(Eidos_MT64_MM-Eidos_MT64_NN)] ^ (x>>1) ^ mag01[(int)(x&1ULL)];
+		x = (r->mt_[i]&Eidos_MT64_UM)|(r->mt_[i+1]&Eidos_MT64_LM);
+		r->mt_[i] = r->mt_[i+(Eidos_MT64_MM-Eidos_MT64_NN)] ^ (x>>1) ^ mag01[(int)(x&1ULL)];
 	}
-	x = (gEidos_RNG.mt_[Eidos_MT64_NN-1]&Eidos_MT64_UM)|(gEidos_RNG.mt_[0]&Eidos_MT64_LM);
-	gEidos_RNG.mt_[Eidos_MT64_NN-1] = gEidos_RNG.mt_[Eidos_MT64_MM-1] ^ (x>>1) ^ mag01[(int)(x&1ULL)];
+	x = (r->mt_[Eidos_MT64_NN-1]&Eidos_MT64_UM)|(r->mt_[0]&Eidos_MT64_LM);
+	r->mt_[Eidos_MT64_NN-1] = r->mt_[Eidos_MT64_MM-1] ^ (x>>1) ^ mag01[(int)(x&1ULL)];
 	
-	gEidos_RNG.mti_ = 0;
+	r->mti_ = 0;
 }
 
 

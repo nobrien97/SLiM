@@ -1424,6 +1424,105 @@ Cholesky decomposition of the variance-covariance matrix
 \f2 \
 \pard\pardeftab397\li720\fi-446\ri720\sb180\sa60\partightenfactor0
 
+\f1\fs18 \cf2 (integer)findInterval(numeric\'a0x, numeric\'a0vec, [logical$\'a0rightmostClosed\'a0=\'a0F], [logical$\'a0allInside\'a0=\'a0F])\
+\pard\pardeftab397\li547\ri720\sb60\sa60\partightenfactor0
+
+\f3\fs20 \cf2 Returns a vector of 
+\f0\b interval indices
+\f3\b0  for the values in 
+\f1\fs18 x
+\f3\fs20  within a vector of non-decreasing breakpoints 
+\f1\fs18 vec
+\f3\fs20 .  The returned 
+\f1\fs18 integer
+\f3\fs20  vector contains, for each corresponding element of 
+\f1\fs18 x
+\f3\fs20 , the index of the interval in 
+\f1\fs18 vec
+\f3\fs20  within which that element of 
+\f1\fs18 x
+\f3\fs20  is contained.\
+More precisely, if 
+\f1\fs18 i
+\f3\fs20  is the returned 
+\f1\fs18 integer
+\f3\fs20  vector from 
+\f1\fs18 findInterval(x, v)
+\f3\fs20 , and 
+\f1\fs18 N
+\f3\fs20  is 
+\f1\fs18 length(v)
+\f3\fs20 , then for each index 
+\f1\fs18 j
+\f3\fs20  in 
+\f1\fs18 x
+\f3\fs20 , it will be true that 
+\f1\fs18 v[i[j]]
+\f3\fs20  \uc0\u8804  
+\f1\fs18 x[j]
+\f3\fs20  < 
+\f1\fs18 v[i[j]+1]
+\f3\fs20 , treating 
+\f1\fs18 v[-1]
+\f3\fs20  as 
+\f1\fs18 -INF
+\f3\fs20  and 
+\f1\fs18 v[N]
+\f3\fs20  as 
+\f1\fs18 INF
+\f3\fs20 , 
+\f7\i assuming
+\f3\i0  that the two flags 
+\f1\fs18 rightmostClosed
+\f3\fs20  and 
+\f1\fs18 allInside
+\f3\fs20  have their default value of 
+\f1\fs18 F
+\f3\fs20 .  The effects of the flags will be discussed below.  Note that 
+\f1\fs18 vec
+\f3\fs20  must be non-decreasing; in other words, it must be sorted in ascending order, although it may have duplicate values.  The returned vector will thus be equal in length to 
+\f1\fs18 x
+\f3\fs20 , and each of its elements will be in the interval [
+\f1\fs18 -1
+\f3\fs20 , 
+\f1\fs18 N-1
+\f3\fs20 ].\
+The 
+\f1\fs18 rightmostClosed
+\f3\fs20  flag, if 
+\f1\fs18 T
+\f3\fs20 , alters the above behavior to treat the rightmost interval, 
+\f1\fs18 vec[N-2]
+\f3\fs20  .. 
+\f1\fs18 vec[N-1]
+\f3\fs20 , as closed.  This means that if 
+\f1\fs18 x[j]==vec[N-1]
+\f3\fs20  (i.e., equals 
+\f1\fs18 max(vec)
+\f3\fs20 ), the corresponding result 
+\f1\fs18 i[j]
+\f3\fs20  will be 
+\f1\fs18 N-2
+\f3\fs20  as for all other values in the last interval.\
+The 
+\f1\fs18 allInside
+\f3\fs20  flag, if 
+\f1\fs18 T
+\f3\fs20 , alters the above behavior to coerce returned indices into 
+\f1\fs18 0
+\f3\fs20  .. 
+\f1\fs18 N-2
+\f3\fs20 .  In other words, 
+\f1\fs18 -1
+\f3\fs20  is mapped to 
+\f1\fs18 0
+\f3\fs20 , and 
+\f1\fs18 N-1
+\f3\fs20  is mapped to 
+\f1\fs18 N-2
+\f3\fs20 .\
+\pard\pardeftab397\li720\fi-446\ri720\sb180\sa60\partightenfactor0
+
 \f1\fs18 \cf2 \expnd0\expndtw0\kerning0
 (float)pnorm(float\'a0q, [numeric\'a0mean\'a0=\'a00], [numeric\'a0sd\'a0=\'a01])\
 \pard\pardeftab397\li547\ri720\sb60\sa60\partightenfactor0
@@ -3433,7 +3532,7 @@ Note that the semantics of this function differ slightly from the
 \f3\fs20  type, however, 
 \f1\fs18 elementType()
 \f3\fs20  returns the name of the type of element contained by the object, such as 
-\f1\fs18 "SLiMSim"
+\f1\fs18 "Species"
 \f3\fs20  or 
 \f1\fs18 "Mutation"
 \f3\fs20  in the Context of SLiM.  Contrast this with 
@@ -4590,7 +4689,11 @@ The separator between values is supplied by
 \f1\fs18 sep
 \f3\fs20 ; it is a comma by default, but a tab can be used instead by supplying tab (
 \f1\fs18 "\\t"
-\f3\fs20  in Eidos), or another character may also be used.\
+\f3\fs20  in Eidos), or another character may also be used.  If 
+\f1\fs18 sep
+\f3\fs20  is the empty string 
+\f1\fs18 ""
+\f3\fs20 , the separator between values is \'93whitespace\'94, meaning one or more spaces or tabs.  When the separator is whitespace, whitespace at the beginning or the end of a line will be ignored.\
 Similarly, the character used to quote string values is a double quote (
 \f1\fs18 '"'
 \f3\fs20  in Eidos), by default, but another character may be supplied in 
@@ -4811,6 +4914,7 @@ See
 \f3\fs20  will be returned; if not, 
 \f1\fs18 F
 \f3\fs20  will be returned (but at present, an error will result instead).\cf0 \
+\pard\pardeftab543\li547\ri720\sb60\sa60\partightenfactor0
 \cf2 If 
 \f1\fs18 compress
 \f3\fs20  is 
@@ -4928,6 +5032,7 @@ If
 \f3\b0   In SLiM 3.5 and later, use 
 \f1\fs18 colors(n, "cm")
 \f3\fs20  instead.\
+\pard\pardeftab397\li547\ri720\sb60\sa60\partightenfactor0
 \cf5 Generate colors in a \'93cyan-magenta\'94 color palette.\
 \pard\pardeftab397\li720\fi-446\ri720\sb180\sa60\partightenfactor0
 
@@ -5041,6 +5146,7 @@ This function can also be called with a non-singleton vector of color strings in
 \f3\b0   In SLiM 3.5 and later, use 
 \f1\fs18 colors(n, "heat")
 \f3\fs20  instead.\
+\pard\pardeftab397\li547\ri720\sb60\sa60\partightenfactor0
 \cf5 Generate colors in a \'93heat map\'94 color palette.\
 \pard\pardeftab397\li720\fi-446\ri720\sb180\sa60\partightenfactor0
 
@@ -5163,6 +5269,7 @@ This function can also be called with a matrix of RGB values, with three columns
 \f3\b0   In SLiM 3.5 and later, use 
 \f1\fs18 colors(n, "terrain")
 \f3\fs20  instead.\
+\pard\pardeftab397\li547\ri720\sb60\sa60\partightenfactor0
 \cf5 Generate colors in a \'93terrain\'94 color palette.\
 \pard\pardeftab397\ri720\sb360\sa60\partightenfactor0
 
@@ -5354,20 +5461,7 @@ If
 \f1\fs18 symbol
 \f3\fs20  and the value specified by 
 \f1\fs18 value
-\f3\fs20 .  Syntactically, the value may be any value at all; semantically, however, if 
-\f1\fs18 value
-\f3\fs20  is of 
-\f1\fs18 object
-\f3\fs20  type then 
-\f1\fs18 value
-\f3\fs20 \'92s class must be under retain/release memory management internally.  This restriction is necessary because if the Context defines the point in time when a given object ceases to exist (rather than that being governed by retain/release), then a defined constant referencing that object would become invalid, which must be prevented.  At present, among the classes defined by SLiM, only 
-\f1\fs18 Chromosome
-\f3\fs20 , 
-\f1\fs18 Mutation
-\f3\fs20 , and 
-\f1\fs18 Substitution
-\f3\fs20  are under retain/release; all object classes built into Eidos are under retain/release.\
-The name cannot previously be defined in any way (i.e., as either a variable or a constant).  The defined constant acts identically to intrinsic Eidos constants such as 
+\f3\fs20 .  The name cannot previously be defined in any way (i.e., as either a variable or a constant).  The defined constant acts identically to intrinsic Eidos constants such as 
 \f1\fs18 T
 \f3\fs20 , 
 \f1\fs18 NAN
@@ -5379,39 +5473,40 @@ The name cannot previously be defined in any way (i.e., as either a variable or 
 \f1\fs18 apply()
 \f3\fs20 , 
 \f1\fs18 sapply()
-\f3\fs20 , or a Context-defined script block.  Note that defined constants can be undefined by 
-\f1\fs18 rm(removeConstants=T)
-\f3\fs20 , but if you find yourself taking advantage of that feature, you may wish to use 
-\f1\fs18 defineGlobal()
-\f3\fs20  instead.\
+\f3\fs20 , or a Context-defined script block.\
+Syntactically, 
+\f1\fs18 value
+\f3\fs20  may be any value at all; semantically, however, if 
+\f1\fs18 value
+\f3\fs20  is of 
+\f1\fs18 object
+\f3\fs20  type then 
+\f1\fs18 value
+\f3\fs20 \'92s class must be under an internal memory-management scheme called \'93retain-release\'94.  Objects that are not under retain-release can cease to exist whenever the Context is finished using them, and thus a defined constant referencing such an object could become invalid, which must be prevented.  Objects that are under retain-release will not cease to exist if they are referenced by a global constant; the reference to them from the global constant \'93retains\'94 them and keeps them in existence.  All object classes built into Eidos are under retain-release; see the SLiM manual (section \'93SLiM scoping rules\'94) for discussion of which SLiM object classes are under retain-release.\
 \pard\pardeftab397\li720\fi-446\ri720\sb180\sa60\partightenfactor0
 
 \f1\fs18 \cf2 (void)defineGlobal(string$\'a0symbol, *\'a0value)\
-\pard\pardeftab397\li547\ri720\sb60\sa60\partightenfactor0
+\pard\pardeftab720\li547\ri720\sb60\sa60\partightenfactor0
 
 \f0\b\fs20 \cf2 Defines a new global variable
 \f3\b0  with the name 
 \f1\fs18 symbol
 \f3\fs20  and the value specified by 
 \f1\fs18 value
-\f3\fs20 .  Syntactically, the value may be any value at all; semantically, however, if 
+\f3\fs20 .  The name cannot previously be defined as a constant.  The result is similar to a standard variable assignment with operator 
+\f1\fs18 =
+\f3\fs20 , except that the variable is always defined in the global scope (even if the 
+\f1\fs18 defineGlobal()
+\f3\fs20  call is made inside a user-defined function or other locally-scoped block, such as a SLiM event or callback).  This means that the variable will remain defined even after the current scope is exited.  Note that global variables can be hidden by local variables with the same name; unlike defined constants, such scoped masking is allowed.\
+Syntactically, 
+\f1\fs18 value
+\f3\fs20  may be any value at all; semantically, however, if 
 \f1\fs18 value
 \f3\fs20  is of 
 \f1\fs18 object
 \f3\fs20  type then 
 \f1\fs18 value
-\f3\fs20 \'92s class must be under retain/release memory management internally.  This restriction is necessary because if the Context defines the point in time when a given object ceases to exist (rather than that being governed by retain/release), then a defined global variable referencing that object would become invalid, which must be prevented.  At present, among the classes defined by SLiM, only 
-\f1\fs18 Chromosome
-\f3\fs20 , 
-\f1\fs18 Mutation
-\f3\fs20 , and 
-\f1\fs18 Substitution
-\f3\fs20  are under retain/release; all object classes built into Eidos are under retain/release.\
-The name cannot previously be defined as a constant.  The result is similar to a standard variable assignment with operator 
-\f1\fs18 =
-\f3\fs20 , except that the variable is always defined in the global scope (even if the 
-\f1\fs18 defineGlobal()
-\f3\fs20  call is made inside a user-defined function or other locally-scoped block, such as a SLiM event or callback).  This means that the variable will remain defined even after the current scope is exited.  Note that global variables can be hidden by local variables with the same name; unlike defined constants, such scoped masking is allowed.\
+\f3\fs20 \'92s class must be under an internal memory-management scheme called \'93retain-release\'94.  Objects that are not under retain-release can cease to exist whenever the Context is finished using them, and thus a global variable referencing such an object could become invalid, which must be prevented.  Objects that are under retain-release will not cease to exist if they are referenced by a global variable; the reference to them from the global variable \'93retains\'94 them and keeps them in existence.  All object classes built into Eidos are under retain-release; see the SLiM manual (section \'93SLiM scoping rules\'94) for discussion of which SLiM object classes are under retain-release.\
 \pard\pardeftab397\li720\fi-446\ri720\sb180\sa60\partightenfactor0
 
 \f1\fs18 \cf0 (\cf2 \expnd0\expndtw0\kerning0
@@ -5591,7 +5686,50 @@ Returns a
 \f3\fs20  to request full information on the current symbol table chain.  This will show which symbol table a given symbol is defined in, as well as revealing whether there are other symbols with the same name that have been masked by a local definition.  This is mostly useful for debugging.\
 \pard\pardeftab397\li720\fi-446\ri720\sb180\sa60\partightenfactor0
 
-\f1\fs18 \cf2 (void)rm([Ns\'a0variableNames\'a0=\'a0NULL], [logical$\'a0removeConstants\'a0=\'a0F])\
+\f1\fs18 \cf2 (integer$)parallelGetNumThreads(void)\
+\pard\pardeftab397\li547\ri720\sb60\sa60\partightenfactor0
+
+\f0\b\fs20 \cf2 Gets the number of threads
+\f3\b0  that will be used in subsequent parallel (i.e., multithreaded) regions, as set with 
+\f1\fs18 parallelSetNumThreads()
+\f3\fs20 .  If Eidos is not configured to run multithreaded, this function will return 
+\f1\fs18 1
+\f3\fs20 .  See also 
+\f1\fs18 parallelGetMaxThreads()
+\f3\fs20 , which returns the maximum number of threads that can be used.\
+\pard\pardeftab397\li720\fi-446\ri720\sb180\sa60\partightenfactor0
+
+\f1\fs18 \cf2 (integer$)parallelGetMaxThreads(void)\
+\pard\pardeftab397\li547\ri720\sb60\sa60\partightenfactor0
+
+\f0\b\fs20 \cf2 Gets the maximum number of threads
+\f3\b0  that can be used in parallel (i.e., multithreaded) regions.  This is configured externally; it may be OpenMP\'92s default number of threads for the hardware platform being used, or may be set by an environment variable or command-line option).  If Eidos is not configured to run multithreaded, this function will return 
+\f1\fs18 1
+\f3\fs20 .\
+\pard\pardeftab397\li720\fi-446\ri720\sb180\sa60\partightenfactor0
+
+\f1\fs18 \cf2 (void)parallelSetNumThreads([Ni$\'a0numThreads\'a0=\'a0NULL])\
+\pard\pardeftab397\li547\ri720\sb60\sa60\partightenfactor0
+
+\f0\b\fs20 \cf2 Sets the number of threads
+\f3\b0  that will be used in subsequent parallel (i.e., multithreaded) regions.  If Eidos is not configured to run multithreaded, this function will have no effect.  The requested number of threads will be clamped to the interval [
+\f1\fs18 1
+\f3\fs20 , 
+\f1\fs18 maxThreads
+\f3\fs20 ], where 
+\f1\fs18 maxThreads
+\f3\fs20  is the maximum number of threads configured externally (either by OpenMP\'92s default, or by an environment variable or command-line option).  The maximum number of threads (the value of 
+\f1\fs18 maxThreads
+\f3\fs20 ) can be obtained from 
+\f1\fs18 parallelGetMaxThreads()
+\f3\fs20 .  Passing 
+\f1\fs18 NULL
+\f3\fs20  (the default) is equivalent to passing 
+\f1\fs18 maxThreads
+\f3\fs20 , and thus can be used to easily reset Eidos to the number of threads for which it is configured to run.\
+\pard\pardeftab397\li720\fi-446\ri720\sb180\sa60\partightenfactor0
+
+\f1\fs18 \cf2 (void)rm([Ns\'a0variableNames\'a0=\'a0NULL])\
 \pard\pardeftab397\li547\ri720\sb60\sa60\partightenfactor0
 
 \f0\b\fs20 \cf2 Removes variables
@@ -5606,19 +5744,15 @@ Returns a
 \f3\fs20  (the default), 
 \f7\i all
 \f3\i0  variables will be removed (be careful!).\
-If the optional parameter 
+In SLiM 3, there was an optional parameter 
 \f1\fs18 removeConstants
-\f3\fs20  is 
-\f1\fs18 F
-\f3\fs20  (the default), then attempting to remove a constant is an error; if 
-\f1\fs18 removeConstants
-\f3\fs20  is 
+\f3\fs20  that, if 
 \f1\fs18 T
-\f3\fs20 , constants defined with 
-\f1\fs18 defineConstant()
-\f3\fs20  may be removed, but attempting to remove intrinsic Eidos constants is still an error.  However, if you find yourself redefining constants, 
+\f3\fs20 , allowed you to remove defined constants (and then potentially redefine them to have a different value).  The 
+\f1\fs18 removeConstants
+\f3\fs20  parameter was removed in SLiM 4, since the 
 \f1\fs18 defineGlobal()
-\f3\fs20  might be better suited.\
+\f3\fs20  function now provides the ability to define (and redefine) global variables that are not constant.\
 \pard\pardeftab397\li720\fi-446\ri720\sb180\sa60\partightenfactor0
 
 \f1\fs18 \cf0 (*)sapply(*\'a0x, string$\'a0lambdaSource, [string$\'a0simplify\'a0=\'a0"vector"])\
@@ -5657,8 +5791,9 @@ Named
 \f1\fs18 c()
 \f3\fs20  function (including the possibility of type promotion).\
 Since this function can be hard to understand at first, here is an example:\
+\pard\pardeftab397\li547\ri720\sb60\sa60\partightenfactor0
 
-\f1\fs18 sapply(1:10, "if (applyValue % 2) applyValue ^ 2; else NULL;");\
+\f1\fs18 \cf2 sapply(1:10, "if (applyValue % 2) applyValue ^ 2; else NULL;");\
 \pard\pardeftab397\li547\ri720\sb60\sa60\partightenfactor0
 
 \f3\fs20 \cf2 \kerning1\expnd0\expndtw0 This produces the output 
@@ -6044,27 +6179,47 @@ If
 \pard\pardeftab397\li720\fi-446\ri720\sb180\sa60\partightenfactor0
 
 \f1\fs18 \cf2 \expnd0\expndtw0\kerning0
-(float$)usage([logical$\'a0peak\'a0=\'a0F])\
+(float$)usage(\kerning1\expnd0\expndtw0 [ls$\'a0type\'a0=\'a0"rss"]\expnd0\expndtw0\kerning0
+)\
 \pard\pardeftab397\li547\ri720\sb60\sa60\partightenfactor0
 
-\f3\fs20 \cf2 Returns the 
-\f0\b current (or peak) memory usage
+\f3\fs20 \cf2 \kerning1\expnd0\expndtw0 Returns the 
+\f0\b memory usage
 \f3\b0 .  This is the amount of memory used by the current process, in MB (megabytes); multiply by 
 \f1\fs18 1024*1024
-\f3\fs20  to get the usage in bytes.  If 
-\f1\fs18 peak
-\f3\fs20  is 
-\f1\fs18 F
-\f3\fs20  (the default), the current memory usage is returned; if 
-\f1\fs18 peak
-\f3\fs20  is 
-\f1\fs18 T
-\f3\fs20 , the maximum memory usage over the history of the process is returned.  Memory usage is a surprisingly complex topic; the particular metric reported by 
+\f3\fs20  to get the usage in bytes.\
+Memory usage is a surprisingly complex topic.  One metric reported by 
 \f1\fs18 usage()
-\f3\fs20  is the resident set size, or RSS, which includes memory usage from shared libraries, but does not include memory that is swapped out or has never been used.  For most purposes, RSS is a useful metric of memory usage from a practical perspective.  On some platforms (AIX, BSD, Solaris) the memory usage reported may be zero, but it should be correct on both macOS and Linux platforms.\
-This function can be useful for documenting the memory usage of long runs as they are in progress; in SLiM, it could also be used to trigger tree-sequence simplification with a call to 
+\f3\fs20  is the resident set size, or RSS, which includes memory usage from shared libraries, but does not include memory that is swapped out or has never been used.  For most purposes, RSS is a useful metric of memory usage from a practical perspective.  On some platforms (AIX, BSD, Solaris) the memory usage reported may be zero, but it should be correct on both macOS and Linux platforms.  On macOS, memory pages that have not been used for a while may get compressed by the kernel to reduce the RSS of the process; the RSS metric reported by 
+\f1\fs18 usage()
+\f3\fs20  will reflect the compressed size of such pages, not their original size, so surprising decreases in memory usage may be observed when the kernel decides to compress some memory pages.  The RSS is requested with a 
+\f1\fs18 type
+\f3\fs20  of 
+\f1\fs18 "rss"
+\f3\fs20 , which is the default; for historical reasons, it can also be requested with a 
+\f1\fs18 type
+\f3\fs20  of 
+\f1\fs18 F
+\f3\fs20 .\
+Another metric reported by 
+\f1\fs18 usage()
+\f3\fs20  is the peak RSS.  This is just the highest RSS value that has ever been recorded by the kernel.  It should generally mirror the behavior of RSS, except that it ratchets upward monotonically.  The peak RSS is requested with a 
+\f1\fs18 type
+\f3\fs20  of 
+\f1\fs18 "rss_peak"
+\f3\fs20 ; for historical reasons, it can also be requested with a 
+\f1\fs18 type
+\f3\fs20  of 
+\f1\fs18 T
+\f3\fs20 .\
+The third metric currently reported by 
+\f1\fs18 usage()
+\f3\fs20  is the virtual memory usage.  This is essentially the amount of memory used by pages that have been assigned to the process, whether those pages are resident, compressed, or swapped.  It is typically much larger than the RSS, because it includes various types of memory that are not counted in the RSS; indeed, for some system configurations the virtual memory usage can be reported as being the entire memory space of the computer.  Whether it is a useful metric will be platform-dependent; 
+\f7\i caveat emptor
+\f3\i0 .\
+This function can be useful for documenting the memory usage of long runs as they are in progress.  In SLiM, the RSS could also be used to trigger tree-sequence simplification with a call to 
 \f1\fs18 treeSeqSimplify()
-\f3\fs20 , to reduce memory usage when it becomes too large, but keep in mind that the simplification process itself may cause a substantial spike in memory usage.\
+\f3\fs20 , to reduce memory usage when it becomes too large, but keep in mind that the simplification process itself may cause a substantial spike in memory usage, and that page compression and swaps may reduce the RSS even though the memory actually used by tree-sequence recording continues to increase.\
 When running under SLiM, other tools for monitoring memory usage include the 
 \f1\fs18 slim
 \f3\fs20  command-line options 
@@ -6072,10 +6227,13 @@ When running under SLiM, other tools for monitoring memory usage include the
 \f3\fs20  and 
 \f1\fs18 -M[emhist]
 \f3\fs20 , and the 
+\f1\fs18 usage()
+\f3\fs20  and 
 \f1\fs18 outputUsage()
-\f3\fs20  method of 
-\f1\fs18 SLiMSim
-\f3\fs20 ; see the SLiM manual for more information.\
+\f3\fs20  methods of 
+\f1\fs18 Community
+\f3\fs20 ; see the SLiM manual for more information.\expnd0\expndtw0\kerning0
+\
 \pard\pardeftab397\li720\fi-446\ri720\sb180\sa60\partightenfactor0
 
 \f1\fs18 \cf0 \kerning1\expnd0\expndtw0 (float)version(\cf2 \expnd0\expndtw0\kerning0

@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 11/8/17.
-//  Copyright (c) 2017-2021 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2017-2023 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -29,6 +29,8 @@
 #include <algorithm>
 
 #include "eidos_globals.h"
+#include "community.h"
+#include "species.h"
 
 
 @implementation SLiMHaplotypeManager
@@ -41,8 +43,11 @@
 {
 	if (self = [super init])
 	{
-		SLiMSim *sim = controller->sim;
-		Population &population = sim->population_;
+		// Focus permanently on whatever species is the current species in the controller
+		focalSpeciesName = [controller focalDisplaySpecies]->name_;
+		
+		Species *displaySpecies = [self focalDisplaySpeciesWithController:controller];
+		Population &population = displaySpecies->population_;
 		
 		clusterMethod = clusteringMethod;
 		clusterOptimization = optimizationMethod;
@@ -97,7 +102,7 @@
 		if (usingSubrange)
 			title = [title stringByAppendingFormat:@", positions %lld:%lld", (int64_t)subrangeFirstBase, (int64_t)subrangeLastBase];
 		
-		title = [title stringByAppendingFormat:@", generation %d", (int)sim->generation_];
+		title = [title stringByAppendingFormat:@", tick %d", (int)controller->community->Tick()];
 		
 		[self setTitleString:title];
 		[self setSubpopCount:(int)selected_subpops.size()];
@@ -145,6 +150,15 @@
 	}
 	
 	return self;
+}
+
+- (Species *)focalDisplaySpeciesWithController:(SLiMWindowController *)controller
+{
+	// We look up our focal species object by name every time, since keeping a pointer to it would be unsafe
+	if (controller && controller->community)
+		return controller->community->SpeciesWithName(focalSpeciesName);
+	
+	return nullptr;
 }
 
 - (void)finishClusteringAnalysisWithBackgroundController:(SLiMWindowController *)backgroundController
@@ -215,9 +229,9 @@
 
 - (void)configureMutationInfoBufferForController:(SLiMWindowController *)controller
 {
-	SLiMSim *sim = controller->sim;
-	Population &population = sim->population_;
-	double scalingFactor = controller->selectionColorScale;
+	Species *displaySpecies = [self focalDisplaySpeciesWithController:controller];
+	Population &population = displaySpecies->population_;
+	double scalingFactor = 0.8; // used to be controller->selectionColorScale;
 	int registry_size;
 	const MutationIndex *registry = population.MutationRegistry(&registry_size);
 	const MutationIndex *reg_ptr, *reg_end_ptr = registry + registry_size;
@@ -268,7 +282,7 @@
 	}
 	
 	// Remember the chromosome length
-	mutationLastPosition = sim->chromosome_->last_position_;
+	mutationLastPosition = displaySpecies->TheChromosome().last_position_;
 }
 
 // Delegate the genome sorting to the appropriate method based on our configuration
@@ -378,7 +392,7 @@ cancelledExit:
 			
 			for (int run_index = 0; run_index < mutrun_count; ++run_index)
 			{
-				MutationRun *mutrun = genome.mutruns_[run_index].get();
+				const MutationRun *mutrun = genome.mutruns_[run_index];
 				const MutationIndex *mut_start_ptr = mutrun->begin_pointer_const();
 				const MutationIndex *mut_end_ptr = mutrun->end_pointer_const();
 				
@@ -408,7 +422,7 @@ cancelledExit:
 			
 			for (int run_index = 0; run_index < mutrun_count; ++run_index)
 			{
-				MutationRun *mutrun = genome.mutruns_[run_index].get();
+				const MutationRun *mutrun = genome.mutruns_[run_index];
 				const MutationIndex *mut_start_ptr = mutrun->begin_pointer_const();
 				const MutationIndex *mut_end_ptr = mutrun->end_pointer_const();
 				
@@ -901,20 +915,20 @@ static float *glArrayColors = nil;
 		int64_t *distance_column = distances + i;
 		int64_t *distance_row = distances + i * genome_count;
 		int mutrun_count = genome1->mutrun_count_;
-		MutationRun_SP *genome1_mutruns = genome1->mutruns_;
+		const MutationRun **genome1_mutruns = genome1->mutruns_;
 		
 		distance_row[i] = 0;
 		
 		for (int j = i + 1; j < genome_count; ++j)
 		{
 			Genome *genome2 = genomes[j];
-			MutationRun_SP *genome2_mutruns = genome2->mutruns_;
+			const MutationRun **genome2_mutruns = genome2->mutruns_;
 			int64_t distance = 0;
 			
 			for (int mutrun_index = 0; mutrun_index < mutrun_count; ++mutrun_index)
 			{
-				MutationRun *genome1_mutrun = genome1_mutruns[mutrun_index].get();
-				MutationRun *genome2_mutrun = genome2_mutruns[mutrun_index].get();
+				const MutationRun *genome1_mutrun = genome1_mutruns[mutrun_index];
+				const MutationRun *genome2_mutrun = genome2_mutruns[mutrun_index];
 				int genome1_mutcount = genome1_mutrun->size();
 				int genome2_mutcount = genome2_mutrun->size();
 				
@@ -987,14 +1001,14 @@ static float *glArrayColors = nil;
 		int64_t *distance_row = distances + i * genome_count;
 		slim_position_t mutrun_length = genome1->mutrun_length_;
 		int mutrun_count = genome1->mutrun_count_;
-		MutationRun_SP *genome1_mutruns = genome1->mutruns_;
+		const MutationRun **genome1_mutruns = genome1->mutruns_;
 		
 		distance_row[i] = 0;
 		
 		for (int j = i + 1; j < genome_count; ++j)
 		{
 			Genome *genome2 = genomes[j];
-			MutationRun_SP *genome2_mutruns = genome2->mutruns_;
+			const MutationRun **genome2_mutruns = genome2->mutruns_;
 			int64_t distance = 0;
 			
 			for (int mutrun_index = 0; mutrun_index < mutrun_count; ++mutrun_index)
@@ -1004,8 +1018,8 @@ static float *glArrayColors = nil;
 					continue;
 				
 				// OK, this mutrun intersects with our chosen subrange; proceed
-				MutationRun *genome1_mutrun = genome1_mutruns[mutrun_index].get();
-				MutationRun *genome2_mutrun = genome2_mutruns[mutrun_index].get();
+				const MutationRun *genome1_mutrun = genome1_mutruns[mutrun_index];
+				const MutationRun *genome2_mutrun = genome2_mutruns[mutrun_index];
 				
 				if (genome1_mutrun == genome2_mutrun)
 					;										// identical runs have no differences
@@ -1086,20 +1100,20 @@ static float *glArrayColors = nil;
 		int64_t *distance_column = distances + i;
 		int64_t *distance_row = distances + i * genome_count;
 		int mutrun_count = genome1->mutrun_count_;
-		MutationRun_SP *genome1_mutruns = genome1->mutruns_;
+		const MutationRun **genome1_mutruns = genome1->mutruns_;
 		
 		distance_row[i] = 0;
 		
 		for (int j = i + 1; j < genome_count; ++j)
 		{
 			Genome *genome2 = genomes[j];
-			MutationRun_SP *genome2_mutruns = genome2->mutruns_;
+			const MutationRun **genome2_mutruns = genome2->mutruns_;
 			int64_t distance = 0;
 			
 			for (int mutrun_index = 0; mutrun_index < mutrun_count; ++mutrun_index)
 			{
-				MutationRun *genome1_mutrun = genome1_mutruns[mutrun_index].get();
-				MutationRun *genome2_mutrun = genome2_mutruns[mutrun_index].get();
+				const MutationRun *genome1_mutrun = genome1_mutruns[mutrun_index];
+				const MutationRun *genome2_mutrun = genome2_mutruns[mutrun_index];
 				
 				if (genome1_mutrun == genome2_mutrun)
 					;										// identical runs have no differences
@@ -1181,14 +1195,14 @@ static float *glArrayColors = nil;
 		int64_t *distance_row = distances + i * genome_count;
 		slim_position_t mutrun_length = genome1->mutrun_length_;
 		int mutrun_count = genome1->mutrun_count_;
-		MutationRun_SP *genome1_mutruns = genome1->mutruns_;
+		const MutationRun **genome1_mutruns = genome1->mutruns_;
 		
 		distance_row[i] = 0;
 		
 		for (int j = i + 1; j < genome_count; ++j)
 		{
 			Genome *genome2 = genomes[j];
-			MutationRun_SP *genome2_mutruns = genome2->mutruns_;
+			const MutationRun **genome2_mutruns = genome2->mutruns_;
 			int64_t distance = 0;
 			
 			for (int mutrun_index = 0; mutrun_index < mutrun_count; ++mutrun_index)
@@ -1198,8 +1212,8 @@ static float *glArrayColors = nil;
 					continue;
 				
 				// OK, this mutrun intersects with our chosen subrange; proceed
-				MutationRun *genome1_mutrun = genome1_mutruns[mutrun_index].get();
-				MutationRun *genome2_mutrun = genome2_mutruns[mutrun_index].get();
+				const MutationRun *genome1_mutrun = genome1_mutruns[mutrun_index];
+				const MutationRun *genome2_mutrun = genome2_mutruns[mutrun_index];
 				
 				if (genome1_mutrun == genome2_mutrun)
 					;										// identical runs have no differences

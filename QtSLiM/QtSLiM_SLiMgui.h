@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 12/7/2019.
-//  Copyright (c) 2019-2021 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2019-2023 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -44,7 +44,7 @@ private:
 
 public:
 	
-	SLiMSim &sim_;								// We have a reference to our simulation object
+	Community &community_;                      // We have a reference to our community object
 	QtSLiMWindow *controller_;                  // We have a reference to the SLiMgui window controller for our simulation
 	
 	EidosSymbolTableEntry self_symbol_;			// for fast setup of the symbol table
@@ -52,7 +52,7 @@ public:
 	SLiMgui(const SLiMgui&) = delete;					// no copying
 	SLiMgui& operator=(const SLiMgui&) = delete;		// no copying
 	SLiMgui(void) = delete;								// no null construction
-	SLiMgui(SLiMSim &p_sim, QtSLiMWindow *p_controller);
+	SLiMgui(Community &p_community, QtSLiMWindow *p_controller);
 	virtual ~SLiMgui(void) override;
 	
 	

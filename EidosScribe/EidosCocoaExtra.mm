@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 9/11/15.
-//  Copyright (c) 2015-2021 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2015-2023 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -274,7 +274,7 @@
 		[paragraphStyle setDefaultTabInterval:tabInterval];
 		
 		for (int tabStop = 1; tabStop <= 20; ++tabStop)
-			[tabs addObject:[[NSTextTab alloc] initWithTextAlignment:NSLeftTextAlignment location:tabInterval * tabStop options:@{}]];	// @{} suppresses a non-null warning, but should not be necessary; Apple header bug
+			[tabs addObject:[[NSTextTab alloc] initWithTextAlignment:NSTextAlignmentLeft location:tabInterval * tabStop options:@{}]];	// @{} suppresses a non-null warning, but should not be necessary; Apple header bug
 		
 		[paragraphStyle setTabStops:tabs];
 	}
@@ -411,10 +411,6 @@
 @end
 
 
-@interface NSObject (EidosSplitViewExtensions)
-- (void)respondToSizeChangeForSplitView:(NSSplitView *)splitView;
-@end
-
 @implementation NSSplitView (EidosAdditions)
 
 - (void)eidosRestoreAutosavedPositionsWithName:(NSString *)autosaveName
@@ -448,15 +444,6 @@
 				[subView setFrameSize:NSMakeSize(width, subView.frame.size.height)];
 			}
 		}
-	}
-	
-	// Notify our delegate of the resize.  Note that this is not an NSSplitViewDelegate method; we're doing our own thing here
-	NSObject *delegate = [self delegate];
-	
-	if (delegate)
-	{
-		if ([delegate respondsToSelector:@selector(respondToSizeChangeForSplitView:)])
-			[delegate respondToSizeChangeForSplitView:self];
 	}
 }
 

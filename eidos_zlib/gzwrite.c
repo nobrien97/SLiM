@@ -1,5 +1,5 @@
 /* gzwrite.c -- zlib functions for writing gzip files
- * Copyright (C) 2004-2017 Mark Adler
+ * Copyright (C) 2004-2019 Mark Adler
  * For conditions of distribution and use, see copyright notice in zlib.h
  */
 
@@ -18,8 +18,7 @@ local z_size_t gz_write OF((gz_statep, voidpc, z_size_t));
 /* Initialize state for writing a gzip file.  Mark initialization by setting
    state->size to non-zero.  Return -1 on a memory allocation failure, or 0 on
    success. */
-local int gz_init(state)
-    gz_statep state;
+local int gz_init(gz_statep state)	// BCH: rearranged to get rid of prototype warning
 {
     int ret;
     z_streamp strm = &(state->strm);
@@ -74,9 +73,7 @@ local int gz_init(state)
    deflate() flush value.  If flush is Z_FINISH, then the deflate() state is
    reset to start a new gzip stream.  If gz->direct is true, then simply write
    to the output file without compressing, and ignore flush. */
-local int gz_comp(state, flush)
-    gz_statep state;
-    int flush;
+local int gz_comp(gz_statep state, int flush)	// BCH: rearranged to get rid of prototype warning
 {
     int ret, writ;
     unsigned have, put, max = ((unsigned)-1 >> 2) + 1;
@@ -99,6 +96,15 @@ local int gz_comp(state, flush)
             strm->next_in += writ;
         }
         return 0;
+    }
+
+    /* check for a pending reset */
+    if (state->reset) {
+        /* don't start a new gzip member unless there is data to write */
+        if (strm->avail_in == 0)
+            return 0;
+        deflateReset(strm);
+        state->reset = 0;
     }
 
     /* run deflate() on provided input until it produces no more output */
@@ -138,7 +144,7 @@ local int gz_comp(state, flush)
 
     /* if that completed a deflate stream, allow another to start */
     if (flush == Z_FINISH)
-        deflateReset(strm);
+        state->reset = 1;
 
     /* all done, no errors */
     return 0;
@@ -146,9 +152,7 @@ local int gz_comp(state, flush)
 
 /* Compress len zeros to output.  Return -1 on a write error or memory
    allocation failure by gz_comp(), or 0 on success. */
-local int gz_zero(state, len)
-    gz_statep state;
-    z_off64_t len;
+local int gz_zero(gz_statep state, z_off64_t len)	// BCH: rearranged to get rid of prototype warning
 {
     int first;
     unsigned n;
@@ -179,10 +183,7 @@ local int gz_zero(state, len)
 
 /* Write len bytes from buf to file.  Return the number of bytes written.  If
    the returned value is less than len, then there was an error. */
-local z_size_t gz_write(state, buf, len)
-    gz_statep state;
-    voidpc buf;
-    z_size_t len;
+local z_size_t gz_write(gz_statep state, voidpc buf, z_size_t len)	// BCH: rearranged to get rid of prototype warning
 {
     z_size_t put = len;
 
@@ -213,7 +214,7 @@ local z_size_t gz_write(state, buf, len)
                               state->in);
             copy = state->size - have;
             if (copy > len)
-                copy = len;
+                copy = (unsigned)len;
             memcpy(state->in + have, buf, copy);
             state->strm.avail_in += copy;
             state->x.pos += copy;
@@ -233,7 +234,7 @@ local z_size_t gz_write(state, buf, len)
         do {
             unsigned n = (unsigned)-1;
             if (n > len)
-                n = len;
+                n = (unsigned)len;
             state->strm.avail_in = n;
             state->x.pos += n;
             if (gz_comp(state, Z_NO_FLUSH) == -1)
@@ -247,10 +248,7 @@ local z_size_t gz_write(state, buf, len)
 }
 
 /* -- see zlib.h -- */
-int ZEXPORT gzwrite(file, buf, len)
-    gzFile file;
-    voidpc buf;
-    unsigned len;
+int ZEXPORT gzwrite(gzFile file, voidpc buf, unsigned len)	// BCH: rearranged to get rid of prototype warning
 {
     gz_statep state;
 
@@ -275,11 +273,7 @@ int ZEXPORT gzwrite(file, buf, len)
 }
 
 /* -- see zlib.h -- */
-z_size_t ZEXPORT gzfwrite(buf, size, nitems, file)
-    voidpc buf;
-    z_size_t size;
-    z_size_t nitems;
-    gzFile file;
+z_size_t ZEXPORT gzfwrite(voidpc buf, z_size_t size, z_size_t nitems, gzFile file)	// BCH: rearranged to get rid of prototype warning
 {
     z_size_t len;
     gz_statep state;
@@ -305,9 +299,7 @@ z_size_t ZEXPORT gzfwrite(buf, size, nitems, file)
 }
 
 /* -- see zlib.h -- */
-int ZEXPORT gzputc(file, c)
-    gzFile file;
-    int c;
+int ZEXPORT gzputc(gzFile file, int c)	// BCH: rearranged to get rid of prototype warning
 {
     unsigned have;
     unsigned char buf[1];
@@ -353,12 +345,9 @@ int ZEXPORT gzputc(file, c)
 }
 
 /* -- see zlib.h -- */
-int ZEXPORT gzputs(file, str)
-    gzFile file;
-    const char *str;
+int ZEXPORT gzputs(gzFile file, const char *s)	// BCH: rearranged to get rid of prototype warning
 {
-    int ret;
-    z_size_t len;
+    z_size_t len, put;
     gz_statep state;
 
     /* get internal structure */
@@ -371,9 +360,13 @@ int ZEXPORT gzputs(file, str)
         return -1;
 
     /* write string */
-    len = strlen(str);
-    ret = gz_write(state, str, len);
-    return ret == 0 && len != 0 ? -1 : ret;
+    len = strlen(s);
+    if ((int)len < 0 || (unsigned)len != len) {
+        gz_error(state, Z_STREAM_ERROR, "string length does not fit in int");
+        return -1;
+    }
+    put = gz_write(state, s, len);
+    return put < len ? -1 : (int)len;
 }
 
 #if defined(STDC) || defined(Z_HAVE_STDARG_H)
@@ -445,7 +438,7 @@ int ZEXPORTVA gzvprintf(gzFile file, const char *format, va_list va)
         strm->avail_in = state->size;
         if (gz_comp(state, Z_NO_FLUSH) == -1)
             return state->err;
-        memcpy(state->in, state->in + state->size, left);
+        memmove(state->in, state->in + state->size, left);
         strm->next_in = state->in;
         strm->avail_in = left;
     }
@@ -466,7 +459,7 @@ int ZEXPORTVA gzprintf(gzFile file, const char *format, ...)
 #else /* !STDC && !Z_HAVE_STDARG_H */
 
 /* -- see zlib.h -- */
-int ZEXPORTVA gzprintf (file, format, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10,
+int ZEXPORTVA gzprintf(file, format, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10,
                        a11, a12, a13, a14, a15, a16, a17, a18, a19, a20)
     gzFile file;
     const char *format;
@@ -544,7 +537,7 @@ int ZEXPORTVA gzprintf (file, format, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10,
         strm->avail_in = state->size;
         if (gz_comp(state, Z_NO_FLUSH) == -1)
             return state->err;
-        memcpy(state->in, state->in + state->size, left);
+        memmove(state->in, state->in + state->size, left);
         strm->next_in = state->in;
         strm->avail_in = left;
     }
@@ -554,9 +547,7 @@ int ZEXPORTVA gzprintf (file, format, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10,
 #endif
 
 /* -- see zlib.h -- */
-int ZEXPORT gzflush(file, flush)
-    gzFile file;
-    int flush;
+int ZEXPORT gzflush(gzFile file, int flush)	// BCH: rearranged to get rid of prototype warning
 {
     gz_statep state;
 
@@ -586,10 +577,7 @@ int ZEXPORT gzflush(file, flush)
 }
 
 /* -- see zlib.h -- */
-int ZEXPORT gzsetparams(file, level, strategy)
-    gzFile file;
-    int level;
-    int strategy;
+int ZEXPORT gzsetparams(gzFile file, int level, int strategy)	// BCH: rearranged to get rid of prototype warning
 {
     gz_statep state;
     z_streamp strm;
@@ -628,8 +616,7 @@ int ZEXPORT gzsetparams(file, level, strategy)
 }
 
 /* -- see zlib.h -- */
-int ZEXPORT gzclose_w(file)
-    gzFile file;
+int ZEXPORT gzclose_w(gzFile file)	// BCH: rearranged to get rid of prototype warning
 {
     int ret = Z_OK;
     gz_statep state;

@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 12/7/2019.
-//  Copyright (c) 2019-2021 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2019-2023 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -32,8 +32,8 @@
 #pragma mark SLiMGUI
 #pragma mark -
 
-SLiMgui::SLiMgui(SLiMSim &p_sim, QtSLiMWindow *p_controller) :
-	sim_(p_sim),
+SLiMgui::SLiMgui(Community &p_community, QtSLiMWindow *p_controller) :
+	community_(p_community),
 	controller_(p_controller),
 	self_symbol_(gID_slimgui, EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Object_singleton(this, gSLiM_SLiMgui_Class)))
 {

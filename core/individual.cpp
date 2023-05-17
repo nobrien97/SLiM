@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 6/10/16.
-//  Copyright (c) 2016-2021 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2016-2023 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -20,7 +20,8 @@
 
 #include "individual.h"
 #include "subpopulation.h"
-#include "slim_sim.h"
+#include "species.h"
+#include "community.h"
 #include "eidos_property_signature.h"
 #include "eidos_call_signature.h"
 
@@ -44,28 +45,19 @@ bool Individual::s_any_individual_or_genome_tag_set_ = false;
 bool Individual::s_any_individual_fitness_scaling_set_ = false;
 
 
-Individual::Individual(Subpopulation *p_subpopulation, slim_popsize_t p_individual_index, slim_pedigreeid_t p_pedigree_id, Genome *p_genome1, Genome *p_genome2, IndividualSex p_sex, slim_age_t p_age, double p_fitness) :
-	pedigree_id_(p_pedigree_id), pedigree_p1_(-1), pedigree_p2_(-1), pedigree_g1_(-1), pedigree_g2_(-1), pedigree_g3_(-1), pedigree_g4_(-1), reproductive_output_(0),
-	cached_fitness_UNSAFE_(p_fitness), genome1_(p_genome1), genome2_(p_genome2), sex_(p_sex),
-#ifdef SLIM_NONWF_ONLY
-	age_(p_age),
-#endif  // SLIM_NONWF_ONLY
-	index_(p_individual_index), subpopulation_(p_subpopulation), migrant_(false)
-{
-#ifndef SLIM_NONWF_ONLY
-#pragma unused(p_age)
+Individual::Individual(Subpopulation *p_subpopulation, slim_popsize_t p_individual_index, Genome *p_genome1, Genome *p_genome2, IndividualSex p_sex, slim_age_t p_age, double p_fitness, float p_mean_parent_age) :
+	color_set_(false), mean_parent_age_(p_mean_parent_age), pedigree_id_(-1), pedigree_p1_(-1), pedigree_p2_(-1),
+	pedigree_g1_(-1), pedigree_g2_(-1), pedigree_g3_(-1), pedigree_g4_(-1), reproductive_output_(0),
+	migrant_(false), killed_(false), cached_fitness_UNSAFE_(p_fitness),
+#ifdef SLIMGUI
+	cached_unscaled_fitness_(p_fitness),
 #endif
+	genome1_(p_genome1), genome2_(p_genome2), sex_(p_sex), age_(p_age), index_(p_individual_index), subpopulation_(p_subpopulation)
+{
 #if DEBUG
 	if (!p_genome1 || !p_genome2)
 		EIDOS_TERMINATION << "ERROR (Individual::Individual): (internal error) nullptr passed for genome." << EidosTerminate();
 #endif
-	
-	// Make our genomes use the correct pedigree IDs, if we're doing pedigree recording
-	if (p_pedigree_id != -1)
-	{
-		p_genome1->genome_id_ = p_pedigree_id * 2;
-		p_genome2->genome_id_ = p_pedigree_id * 2 + 1;
-	}
 	
 	// Set up the pointers from our genomes to us
 	p_genome1->individual_ = this;
@@ -206,8 +198,8 @@ double Individual::_Relatedness(slim_pedigreeid_t A, slim_pedigreeid_t A_P1, sli
 double Individual::RelatednessToIndividual(Individual &p_ind)
 {
 	// So, the goal is to calculate A and B's relatedness, given pedigree IDs for themselves and (perhaps) for their parents and
-	// grandparents.  Note that a pedigree ID of -1 means "no information"; for a given generation, information should either be
-	// available for everybody, or for nobody (the latter occurs when that generation is prior to the start of forward simulation).
+	// grandparents.  Note that a pedigree ID of -1 means "no information"; for a given cycle, information should either be
+	// available for everybody, or for nobody (the latter occurs when that cycle is prior to the start of forward simulation).
 	// So we have these ancestry trees:
 	//
 	//         G1  G2 G3  G4     G5  G6 G7  G8
@@ -245,7 +237,7 @@ double Individual::RelatednessToIndividual(Individual &p_ind)
 	slim_pedigreeid_t B_G3 = indB.pedigree_g3_;
 	slim_pedigreeid_t B_G4 = indB.pedigree_g4_;
 	
-	GenomeType chrtype = subpopulation_->population_.sim_.ModeledChromosomeType();
+	GenomeType chrtype = subpopulation_->species_.ModeledChromosomeType();
 	
 	return _Relatedness(A, A_P1, A_P2, A_G1, A_G2, A_G3, A_G4, B, B_P1, B_P2, B_G1, B_G2, B_G3, B_G4, indA.sex_, indB.sex_, chrtype);
 }
@@ -271,7 +263,10 @@ const EidosClass *Individual::Class(void) const
 
 void Individual::Print(std::ostream &p_ostream) const
 {
-	p_ostream << Class()->ClassName() << "<p" << subpopulation_->subpopulation_id_ << ":i" << index_ << ">";
+	if (killed_)
+		p_ostream << Class()->ClassName() << "<KILLED>";
+	else
+		p_ostream << Class()->ClassName() << "<p" << subpopulation_->subpopulation_id_ << ":i" << index_ << ">";
 }
 
 EidosValue_SP Individual::GetProperty(EidosGlobalStringID p_property_id)
@@ -282,6 +277,9 @@ EidosValue_SP Individual::GetProperty(EidosGlobalStringID p_property_id)
 			// constants
 		case gID_subpopulation:		// ACCELERATED
 		{
+			if (killed_)
+				EIDOS_TERMINATION << "ERROR (Individual::GetProperty): property subpopulation is not available for individuals that have been killed; they have no subpopulation." << EidosTerminate();
+			
 			return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Object_singleton(subpopulation_, gSLiM_Subpopulation_Class));
 		}
 		case gID_index:				// ACCELERATED
@@ -339,12 +337,15 @@ EidosValue_SP Individual::GetProperty(EidosGlobalStringID p_property_id)
 			static EidosValue_SP static_sex_string_M;
 			static EidosValue_SP static_sex_string_O;
 			
-			if (!static_sex_string_H)
+#pragma omp critical (GetProperty_sex_cache)
 			{
-				static_sex_string_H = EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String_singleton("H"));
-				static_sex_string_F = EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String_singleton("F"));
-				static_sex_string_M = EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String_singleton("M"));
-				static_sex_string_O = EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String_singleton("?"));
+				if (!static_sex_string_H)
+				{
+					static_sex_string_H = EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String_singleton("H"));
+					static_sex_string_F = EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String_singleton("F"));
+					static_sex_string_M = EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String_singleton("M"));
+					static_sex_string_O = EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String_singleton("?"));
+				}
 			}
 			
 			switch (sex_)
@@ -355,7 +356,6 @@ EidosValue_SP Individual::GetProperty(EidosGlobalStringID p_property_id)
 				default:							return static_sex_string_O;
 			}
 		}
-#ifdef SLIM_NONWF_ONLY
 		case gID_age:				// ACCELERATED
 		{
 			if (age_ == -1)
@@ -363,17 +363,23 @@ EidosValue_SP Individual::GetProperty(EidosGlobalStringID p_property_id)
 			
 			return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Int_singleton(age_));
 		}
-#endif  // SLIM_NONWF_ONLY
+		case gID_meanParentAge:
+		{
+			if (mean_parent_age_ == -1)
+				EIDOS_TERMINATION << "ERROR (Individual::GetProperty): property meanParentAge is not available in WF models." << EidosTerminate();
+			
+			return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float_singleton(mean_parent_age_));
+		}
 		case gID_pedigreeID:		// ACCELERATED
 		{
-			if (!subpopulation_->population_.sim_.PedigreesEnabledByUser())
+			if (!subpopulation_->species_.PedigreesEnabledByUser())
 				EIDOS_TERMINATION << "ERROR (Individual::GetProperty): property pedigreeID is not available because pedigree recording has not been enabled." << EidosTerminate();
 			
 			return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Int_singleton(pedigree_id_));
 		}
 		case gID_pedigreeParentIDs:
 		{
-			if (!subpopulation_->population_.sim_.PedigreesEnabledByUser())
+			if (!subpopulation_->species_.PedigreesEnabledByUser())
 				EIDOS_TERMINATION << "ERROR (Individual::GetProperty): property pedigreeParentIDs is not available because pedigree recording has not been enabled." << EidosTerminate();
 			
 			EidosValue_Int_vector *vec = (new (gEidosValuePool->AllocateChunk()) EidosValue_Int_vector())->resize_no_initialize(2);
@@ -385,7 +391,7 @@ EidosValue_SP Individual::GetProperty(EidosGlobalStringID p_property_id)
 		}
 		case gID_pedigreeGrandparentIDs:
 		{
-			if (!subpopulation_->population_.sim_.PedigreesEnabledByUser())
+			if (!subpopulation_->species_.PedigreesEnabledByUser())
 				EIDOS_TERMINATION << "ERROR (Individual::GetProperty): property pedigreeGrandparentIDs is not available because pedigree recording has not been enabled." << EidosTerminate();
 			
 			EidosValue_Int_vector *vec = (new (gEidosValuePool->AllocateChunk()) EidosValue_Int_vector())->resize_no_initialize(4);
@@ -399,16 +405,16 @@ EidosValue_SP Individual::GetProperty(EidosGlobalStringID p_property_id)
 		}
 		case gID_reproductiveOutput:				// ACCELERATED
 		{
-			if (!subpopulation_->population_.sim_.PedigreesEnabledByUser())
+			if (!subpopulation_->species_.PedigreesEnabledByUser())
 				EIDOS_TERMINATION << "ERROR (Individual::GetProperty): property reproductiveOutput is not available because pedigree recording has not been enabled." << EidosTerminate();
 			
 			return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Int_singleton(reproductive_output_));
 		}
 		case gID_spatialPosition:
 		{
-			SLiMSim &sim = subpopulation_->population_.sim_;
+			Species &species = subpopulation_->species_;
 			
-			switch (sim.SpatialDimensionality())
+			switch (species.SpatialDimensionality())
 			{
 				case 0:
 					EIDOS_TERMINATION << "ERROR (Individual::GetProperty): position cannot be accessed in non-spatial simulations." << EidosTerminate();
@@ -424,6 +430,9 @@ EidosValue_SP Individual::GetProperty(EidosGlobalStringID p_property_id)
 		}
 		case gID_uniqueMutations:
 		{
+			if (genome1_->IsDeferred() || genome2_->IsDeferred())
+				EIDOS_TERMINATION << "ERROR (Individual::GetProperty): the mutations of deferred genomes cannot be accessed." << EidosTerminate();
+			
 			// We reserve a vector large enough to hold all the mutations from both genomes; probably usually overkill, but it does little harm
 			int genome1_size = (genome1_->IsNull() ? 0 : genome1_->mutation_count());
 			int genome2_size = (genome2_->IsNull() ? 0 : genome2_->mutation_count());
@@ -442,8 +451,8 @@ EidosValue_SP Individual::GetProperty(EidosGlobalStringID p_property_id)
 			{
 				// We want to interleave mutations from the two genomes, keeping only the uniqued mutations.  For a given position, we take mutations
 				// from g1 first, and then look at the mutations in g2 at the same position and add them if they are not in g1.
-				MutationRun *mutrun1 = (genome1_size ? genome1_->mutruns_[run_index].get() : nullptr);
-				MutationRun *mutrun2 = (genome2_size ? genome2_->mutruns_[run_index].get() : nullptr);
+				const MutationRun *mutrun1 = (genome1_size ? genome1_->mutruns_[run_index] : nullptr);
+				const MutationRun *mutrun2 = (genome2_size ? genome2_->mutruns_[run_index] : nullptr);
 				int g1_size = (mutrun1 ? mutrun1->size() : 0);
 				int g2_size = (mutrun2 ? mutrun2->size() : 0);
 				int g1_index = 0, g2_index = 0;
@@ -551,7 +560,7 @@ EidosValue_SP Individual::GetProperty(EidosGlobalStringID p_property_id)
 				 initializeGenomicElement(g1, 0, 99999);
 				 initializeRecombinationRate(1e-8);
 			 }
-			 1 {
+			 1 early() {
 				sim.addSubpop("p1", 500);
 			 }
 			 1:20000 late() {
@@ -574,7 +583,16 @@ EidosValue_SP Individual::GetProperty(EidosGlobalStringID p_property_id)
 			// variables
 		case gEidosID_color:
 		{
-			return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String_singleton(color_));
+			// as of SLiM 4.0.1, we construct a color string from the RGB values, which will
+			// not necessarily be what the user set, but will represent the same color
+			if (!color_set_)
+				return gStaticEidosValue_StringEmpty;
+			
+			char hex_chars[8];
+			
+			Eidos_GetColorString(colorR_, colorG_, colorB_, hex_chars);
+			
+			return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String_singleton(std::string(hex_chars)));
 		}
 		case gID_tag:				// ACCELERATED
 		{
@@ -645,7 +663,7 @@ EidosValue *Individual::GetProperty_Accelerated_pedigreeID(EidosObject **p_value
 	{
 		Individual *value = (Individual *)(p_values[value_index]);
 		
-		if (!value->subpopulation_->population_.sim_.PedigreesEnabledByUser())
+		if (!value->subpopulation_->species_.PedigreesEnabledByUser())
 			EIDOS_TERMINATION << "ERROR (Individual::GetProperty): property pedigreeID is not available because pedigree recording has not been enabled." << EidosTerminate();
 		
 		int_result->set_int_no_check(value->pedigree_id_, value_index);
@@ -680,10 +698,9 @@ EidosValue *Individual::GetProperty_Accelerated_tag(EidosObject **p_values, size
 	return int_result;
 }
 
-#ifdef SLIM_NONWF_ONLY
 EidosValue *Individual::GetProperty_Accelerated_age(EidosObject **p_values, size_t p_values_size)
 {
-	if ((p_values_size > 0) && (((Individual *)(p_values[0]))->subpopulation_->population_.sim_.ModelType() == SLiMModelType::kModelTypeWF))
+	if ((p_values_size > 0) && (((Individual *)(p_values[0]))->subpopulation_->community_.ModelType() == SLiMModelType::kModelTypeWF))
 		EIDOS_TERMINATION << "ERROR (Individual::GetProperty): property age is not available in WF models." << EidosTerminate();
 	
 	EidosValue_Int_vector *int_result = (new (gEidosValuePool->AllocateChunk()) EidosValue_Int_vector())->resize_no_initialize(p_values_size);
@@ -697,11 +714,10 @@ EidosValue *Individual::GetProperty_Accelerated_age(EidosObject **p_values, size
 	
 	return int_result;
 }
-#endif  // SLIM_NONWF_ONLY
 
 EidosValue *Individual::GetProperty_Accelerated_reproductiveOutput(EidosObject **p_values, size_t p_values_size)
 {
-	if ((p_values_size > 0) && !((Individual *)(p_values[0]))->subpopulation_->population_.sim_.PedigreesEnabledByUser())
+	if ((p_values_size > 0) && !((Individual *)(p_values[0]))->subpopulation_->species_.PedigreesEnabledByUser())
 		EIDOS_TERMINATION << "ERROR (Individual::GetProperty): property reproductiveOutput is not available because pedigree recording has not been enabled." << EidosTerminate();
 	
 	EidosValue_Int_vector *int_result = (new (gEidosValuePool->AllocateChunk()) EidosValue_Int_vector())->resize_no_initialize(p_values_size);
@@ -812,6 +828,9 @@ EidosValue *Individual::GetProperty_Accelerated_subpopulation(EidosObject **p_va
 	{
 		Individual *value = (Individual *)(p_values[value_index]);
 		
+		if (value->killed_)
+			EIDOS_TERMINATION << "ERROR (Individual::GetProperty): property subpopulation is not available for individuals that have been killed; they have no subpopulation." << EidosTerminate();
+		
 		object_result->set_object_element_no_check_NORR(value->subpopulation_, value_index);
 	}
 	
@@ -853,10 +872,16 @@ void Individual::SetProperty(EidosGlobalStringID p_property_id, const EidosValue
 	{
 		case gEidosID_color:		// ACCELERATED
 		{
-			color_ = ((EidosValue_String &)p_value).StringRefAtIndex(0, nullptr);
-			if (!color_.empty())
+			const std::string &color_string = ((EidosValue_String &)p_value).StringRefAtIndex(0, nullptr);
+			
+			if (color_string.empty())
 			{
-				Eidos_GetColorComponents(color_, &color_red_, &color_green_, &color_blue_);
+				color_set_ = false;
+			}
+			else
+			{
+				Eidos_GetColorComponents(color_string, &colorR_, &colorG_, &colorB_);
+				color_set_ = true;
 				s_any_individual_color_set_ = true;		// keep track of the fact that an individual's color has been set
 			}
 			return;
@@ -900,7 +925,6 @@ void Individual::SetProperty(EidosGlobalStringID p_property_id, const EidosValue
 			spatial_z_ = p_value.FloatAtIndex(0, nullptr);
 			return;
 		}
-#ifdef SLIM_NONWF_ONLY
 		case gID_age:				// ACCELERATED
 		{
 			slim_age_t value = SLiMCastToAgeTypeOrRaise(p_value.IntAtIndex(0, nullptr));
@@ -908,7 +932,6 @@ void Individual::SetProperty(EidosGlobalStringID p_property_id, const EidosValue
 			age_ = value;
 			return;
 		}
-#endif  // SLIM_NONWF_ONLY
 			
 			// all others, including gID_none
 		default:
@@ -958,34 +981,66 @@ void Individual::SetProperty_Accelerated_tagF(EidosObject **p_values, size_t p_v
 	}
 }
 
+bool Individual::_SetFitnessScaling_1(double source_value, EidosObject **p_values, size_t p_values_size)
+{
+	if ((source_value < 0.0) || (std::isnan(source_value)))
+		return true;
+	
+	// Note that parallelization here only helps on machines with very high memory bandwidth,
+	// because this loop spends all of its time writing to memory.  It also introduces a
+	// potential race condition if the same Individual is referenced more than once in
+	// p_values; that is considered a bug in the user's script, and we could check for it
+	// in DEBUG mode if we wanted to.
+#pragma omp parallel for simd schedule(simd:static) default(none) shared(p_values_size) firstprivate(p_values, source_value) if(parallel:p_values_size >= EIDOS_OMPMIN_SET_FITNESS_S1)
+	for (size_t value_index = 0; value_index < p_values_size; ++value_index)
+		((Individual *)(p_values[value_index]))->fitness_scaling_ = source_value;
+	
+	return false;
+}
+
+bool Individual::_SetFitnessScaling_N(const double *source_data, EidosObject **p_values, size_t p_values_size)
+{
+	bool saw_error = false;	// deferred raises for OpenMP compliance
+	
+	// Note that parallelization here only helps on machines with very high memory bandwidth,
+	// because this loop spends all of its time writing to memory.  It also introduces a
+	// potential race condition if the same Individual is referenced more than once in
+	// p_values; that is considered a bug in the user's script, and we could check for it
+	// in DEBUG mode if we wanted to.
+#pragma omp parallel for schedule(static) default(none) shared(p_values_size) firstprivate(p_values, source_data) reduction(||: saw_error) if(p_values_size >= EIDOS_OMPMIN_SET_FITNESS_S2)
+	for (size_t value_index = 0; value_index < p_values_size; ++value_index)
+	{
+		double source_value = source_data[value_index];
+		
+		if ((source_value < 0.0) || (std::isnan(source_value)))
+			saw_error = true;
+		
+		((Individual *)(p_values[value_index]))->fitness_scaling_ = source_value;
+	}
+	
+	return saw_error;
+}
+
 void Individual::SetProperty_Accelerated_fitnessScaling(EidosObject **p_values, size_t p_values_size, const EidosValue &p_source, size_t p_source_size)
 {
 	Individual::s_any_individual_fitness_scaling_set_ = true;
+	bool needs_raise = false;
 	
 	if (p_source_size == 1)
 	{
 		double source_value = p_source.FloatAtIndex(0, nullptr);
 		
-		if ((source_value < 0.0) || (std::isnan(source_value)))
-			EIDOS_TERMINATION << "ERROR (Individual::SetProperty_Accelerated_fitnessScaling): property fitnessScaling must be >= 0.0." << EidosTerminate();
-		
-		for (size_t value_index = 0; value_index < p_values_size; ++value_index)
-			((Individual *)(p_values[value_index]))->fitness_scaling_ = source_value;
+		needs_raise = _SetFitnessScaling_1(source_value, p_values, p_values_size);
 	}
 	else
 	{
 		const double *source_data = p_source.FloatVector()->data();
 		
-		for (size_t value_index = 0; value_index < p_values_size; ++value_index)
-		{
-			double source_value = source_data[value_index];
-			
-			if ((source_value < 0.0) || (std::isnan(source_value)))
-				EIDOS_TERMINATION << "ERROR (Individual::SetProperty_Accelerated_fitnessScaling): property fitnessScaling must be >= 0.0." << EidosTerminate();
-			
-			((Individual *)(p_values[value_index]))->fitness_scaling_ = source_value;
-		}
+		needs_raise = _SetFitnessScaling_N(source_data, p_values, p_values_size);
 	}
+	
+	if (needs_raise)
+		EIDOS_TERMINATION << "ERROR (Individual::SetProperty_Accelerated_fitnessScaling): property fitnessScaling must be >= 0.0." << EidosTerminate();
 }
 
 void Individual::SetProperty_Accelerated_x(EidosObject **p_values, size_t p_values_size, const EidosValue &p_source, size_t p_source_size)
@@ -1051,11 +1106,11 @@ void Individual::SetProperty_Accelerated_color(EidosObject **p_values, size_t p_
 		if (source_value.empty())
 		{
 			for (size_t value_index = 0; value_index < p_values_size; ++value_index)
-				((Individual *)(p_values[value_index]))->color_ = source_value;
+				((Individual *)(p_values[value_index]))->color_set_ = false;
 		}
 		else
 		{
-			float color_red, color_green, color_blue;
+			uint8_t color_red, color_green, color_blue;
 			
 			Eidos_GetColorComponents(source_value, &color_red, &color_green, &color_blue);
 			
@@ -1063,10 +1118,10 @@ void Individual::SetProperty_Accelerated_color(EidosObject **p_values, size_t p_
 			{
 				Individual *individual = ((Individual *)(p_values[value_index]));
 				
-				individual->color_ = source_value;
-				individual->color_red_ = color_red;
-				individual->color_green_ = color_green;
-				individual->color_blue_ = color_blue;
+				individual->colorR_ = color_red;
+				individual->colorG_ = color_green;
+				individual->colorB_ = color_blue;
+				individual->color_set_ = true;
 			}
 			
 			s_any_individual_color_set_ = true;		// keep track of the fact that an individual's color has been set
@@ -1081,18 +1136,20 @@ void Individual::SetProperty_Accelerated_color(EidosObject **p_values, size_t p_
 			Individual *individual = ((Individual *)(p_values[value_index]));
 			const std::string &source_value = (*source_data)[value_index];
 			
-			individual->color_ = source_value;
-			
-			if (!source_value.empty())
+			if (source_value.empty())
 			{
-				Eidos_GetColorComponents(source_value, &individual->color_red_, &individual->color_green_, &individual->color_blue_);
+				individual->color_set_ = false;
+			}
+			else
+			{
+				Eidos_GetColorComponents(source_value, &individual->colorR_, &individual->colorG_, &individual->colorB_);
+				individual->color_set_ = true;
 				s_any_individual_color_set_ = true;		// keep track of the fact that an individual's color has been set
 			}
 		}
 	}
 }
 
-#ifdef SLIM_NONWF_ONLY
 void Individual::SetProperty_Accelerated_age(EidosObject **p_values, size_t p_values_size, const EidosValue &p_source, size_t p_source_size)
 {
 	if (p_source_size == 1)
@@ -1111,14 +1168,13 @@ void Individual::SetProperty_Accelerated_age(EidosObject **p_values, size_t p_va
 			((Individual *)(p_values[value_index]))->age_ = SLiMCastToAgeTypeOrRaise(source_data[value_index]);
 	}
 }
-#endif  // SLIM_NONWF_ONLY
 
 EidosValue_SP Individual::ExecuteInstanceMethod(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter)
 {
 	switch (p_method_id)
 	{
 		case gID_containsMutations:			return ExecuteMethod_containsMutations(p_method_id, p_arguments, p_interpreter);
-		case gID_countOfMutationsOfType:	return ExecuteMethod_countOfMutationsOfType(p_method_id, p_arguments, p_interpreter);
+		//case gID_countOfMutationsOfType:	return ExecuteMethod_Accelerated_countOfMutationsOfType(p_method_id, p_arguments, p_interpreter);
 		case gID_relatedness:				return ExecuteMethod_relatedness(p_method_id, p_arguments, p_interpreter);
 		//case gID_sumOfMutationsOfType:	return ExecuteMethod_Accelerated_sumOfMutationsOfType(p_method_id, p_arguments, p_interpreter);
 		case gID_uniqueMutationsOfType:		return ExecuteMethod_uniqueMutationsOfType(p_method_id, p_arguments, p_interpreter);
@@ -1140,8 +1196,20 @@ EidosValue_SP Individual::ExecuteInstanceMethod(EidosGlobalStringID p_method_id,
 EidosValue_SP Individual::ExecuteMethod_containsMutations(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter)
 {
 #pragma unused (p_method_id, p_arguments, p_interpreter)
+	if (genome1_->IsDeferred() || genome2_->IsDeferred())
+		EIDOS_TERMINATION << "ERROR (Individual::ExecuteMethod_containsMutations): the mutations of deferred genomes cannot be accessed." << EidosTerminate();
+	
 	EidosValue *mutations_value = p_arguments[0].get();
 	int mutations_count = mutations_value->Count();
+	
+	// SPECIES CONSISTENCY CHECK
+	if (mutations_count > 0)
+	{
+		Species *species = Community::SpeciesForMutations(mutations_value);
+		
+		if (species != &subpopulation_->species_)
+			EIDOS_TERMINATION << "ERROR (Individual::ExecuteMethod_containsMutations): containsMutations() requires that all mutations belong to the same species as the target individual." << EidosTerminate();
+	}
 	
 	if (mutations_count == 1)
 	{
@@ -1172,60 +1240,90 @@ EidosValue_SP Individual::ExecuteMethod_containsMutations(EidosGlobalStringID p_
 
 //	*********************	- (integer$)countOfMutationsOfType(io<MutationType>$ mutType)
 //
-EidosValue_SP Individual::ExecuteMethod_countOfMutationsOfType(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter)
+EidosValue_SP Individual::ExecuteMethod_Accelerated_countOfMutationsOfType(EidosObject **p_elements, size_t p_elements_size, EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter)
 {
 #pragma unused (p_method_id, p_arguments, p_interpreter)
+	if (p_elements_size == 0)
+		return gStaticEidosValue_Integer_ZeroVec;
+	
+	// SPECIES CONSISTENCY CHECK
+	Species *species = Community::SpeciesForIndividualsVector((Individual **)p_elements, (int)p_elements_size);
+	
+	if (species == nullptr)
+		EIDOS_TERMINATION << "ERROR (Individual::ExecuteMethod_Accelerated_countOfMutationsOfType): countOfMutationsOfType() requires that mutType belongs to the same species as the target individual." << EidosTerminate();
+	
+	species->population_.CheckForDeferralInIndividualsVector((Individual **)p_elements, p_elements_size, "Individual::ExecuteMethod_Accelerated_countOfMutationsOfType");
+	
 	EidosValue *mutType_value = p_arguments[0].get();
-	SLiMSim &sim = subpopulation_->population_.sim_;
-	MutationType *mutation_type_ptr = SLiM_ExtractMutationTypeFromEidosValue_io(mutType_value, 0, sim, "countOfMutationsOfType()");
+	MutationType *mutation_type_ptr = SLiM_ExtractMutationTypeFromEidosValue_io(mutType_value, 0, &species->community_, species, "countOfMutationsOfType()");		// SPECIES CONSISTENCY CHECK
 	
 	// Count the number of mutations of the given type
 	Mutation *mut_block_ptr = gSLiM_Mutation_Block;
-	int match_count = 0;
+	EidosValue_Int_vector *integer_result = (new (gEidosValuePool->AllocateChunk()) EidosValue_Int_vector())->resize_no_initialize(p_elements_size);
 	
-	if (!genome1_->IsNull())
+#pragma omp parallel for schedule(dynamic, 1) default(none) shared(p_elements_size) firstprivate(p_elements, mut_block_ptr, mutation_type_ptr, integer_result) if(p_elements_size >= EIDOS_OMPMIN_I_COUNT_OF_MUTS_OF_TYPE)
+	for (size_t element_index = 0; element_index < p_elements_size; ++element_index)
 	{
-		int mutrun_count = genome1_->mutrun_count_;
-		
-		for (int run_index = 0; run_index < mutrun_count; ++run_index)
+		Individual *element = (Individual *)(p_elements[element_index]);
+		Genome *genome1 = element->genome1_;
+		Genome *genome2 = element->genome2_;
+		int match_count = 0;
+	
+		if (!genome1->IsNull())
 		{
-			MutationRun *mutrun = genome1_->mutruns_[run_index].get();
-			int genome1_count = mutrun->size();
-			const MutationIndex *genome1_ptr = mutrun->begin_pointer_const();
+			int mutrun_count = genome1->mutrun_count_;
 			
-			for (int mut_index = 0; mut_index < genome1_count; ++mut_index)
-				if ((mut_block_ptr + genome1_ptr[mut_index])->mutation_type_ptr_ == mutation_type_ptr)
-					++match_count;
+			for (int run_index = 0; run_index < mutrun_count; ++run_index)
+			{
+				const MutationRun *mutrun = genome1->mutruns_[run_index];
+				int genome1_count = mutrun->size();
+				const MutationIndex *genome1_ptr = mutrun->begin_pointer_const();
+				
+				for (int mut_index = 0; mut_index < genome1_count; ++mut_index)
+					if ((mut_block_ptr + genome1_ptr[mut_index])->mutation_type_ptr_ == mutation_type_ptr)
+						++match_count;
+			}
 		}
-	}
-	if (!genome2_->IsNull())
-	{
-		int mutrun_count = genome2_->mutrun_count_;
-		
-		for (int run_index = 0; run_index < mutrun_count; ++run_index)
+		if (!genome2->IsNull())
 		{
-			MutationRun *mutrun = genome2_->mutruns_[run_index].get();
-			int genome2_count = mutrun->size();
-			const MutationIndex *genome2_ptr = mutrun->begin_pointer_const();
+			int mutrun_count = genome2->mutrun_count_;
 			
-			for (int mut_index = 0; mut_index < genome2_count; ++mut_index)
-				if ((mut_block_ptr + genome2_ptr[mut_index])->mutation_type_ptr_ == mutation_type_ptr)
-					++match_count;
+			for (int run_index = 0; run_index < mutrun_count; ++run_index)
+			{
+				const MutationRun *mutrun = genome2->mutruns_[run_index];
+				int genome2_count = mutrun->size();
+				const MutationIndex *genome2_ptr = mutrun->begin_pointer_const();
+				
+				for (int mut_index = 0; mut_index < genome2_count; ++mut_index)
+					if ((mut_block_ptr + genome2_ptr[mut_index])->mutation_type_ptr_ == mutation_type_ptr)
+						++match_count;
+			}
 		}
+		
+		integer_result->set_int_no_check(match_count, element_index);
 	}
 	
-	return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Int_singleton(match_count));
+	return EidosValue_SP(integer_result);
 }
 
-//	*********************	- (float$)relatedness(o<Individual>$ individuals)
+//	*********************	- (float)relatedness(o<Individual> individuals)
 //
 EidosValue_SP Individual::ExecuteMethod_relatedness(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter)
 {
 #pragma unused (p_method_id, p_arguments, p_interpreter)
 	EidosValue *individuals_value = p_arguments[0].get();
-	
 	int individuals_count = individuals_value->Count();
-	bool pedigree_tracking_enabled = subpopulation_->population_.sim_.PedigreesEnabledByUser();
+	
+	// SPECIES CONSISTENCY CHECK
+	if (individuals_count > 0)
+	{
+		Species *species = Community::SpeciesForIndividuals(individuals_value);
+		
+		if (species != &subpopulation_->species_)
+			EIDOS_TERMINATION << "ERROR (Individual::ExecuteMethod_relatedness): relatedness() requires that all individuals belong to the same species as the target individual." << EidosTerminate();
+	}
+	
+	bool pedigree_tracking_enabled = subpopulation_->species_.PedigreesEnabledByUser();
 	
 	if (individuals_count == 1)
 	{
@@ -1245,6 +1343,9 @@ EidosValue_SP Individual::ExecuteMethod_relatedness(EidosGlobalStringID p_method
 		
 		if (pedigree_tracking_enabled)
 		{
+			// this parallelizes the case of one_individual.relatedness(many_individuals)
+			// it would be nice to also parallelize the case of many_individuals.relatedness(one_individual); that would require accelerating this method
+#pragma omp parallel for schedule(dynamic, 128) default(none) shared(individuals_count, individuals_value) firstprivate(float_result) if(individuals_count >= EIDOS_OMPMIN_RELATEDNESS)
 			for (int value_index = 0; value_index < individuals_count; ++value_index)
 			{
 				Individual *ind = (Individual *)(individuals_value->ObjectElementAtIndex(value_index, nullptr));
@@ -1278,15 +1379,22 @@ EidosValue_SP Individual::ExecuteMethod_Accelerated_sumOfMutationsOfType(EidosOb
 	if (p_elements_size == 0)
 		return gStaticEidosValue_Float_ZeroVec;
 	
-	Individual *element0 = (Individual *)(p_elements[0]);
-	SLiMSim &sim = element0->subpopulation_->population_.sim_;
+	// SPECIES CONSISTENCY CHECK
+	Species *species = Community::SpeciesForIndividualsVector((Individual **)p_elements, (int)p_elements_size);
+	
+	if (species == nullptr)
+		EIDOS_TERMINATION << "ERROR (Individual::ExecuteMethod_Accelerated_sumOfMutationsOfType): sumOfMutationsOfType() requires that mutType belongs to the same species as the target individual." << EidosTerminate();
+	
+	species->population_.CheckForDeferralInIndividualsVector((Individual **)p_elements, p_elements_size, "Individual::ExecuteMethod_Accelerated_sumOfMutationsOfType");
+	
 	EidosValue *mutType_value = p_arguments[0].get();
-	MutationType *mutation_type_ptr = SLiM_ExtractMutationTypeFromEidosValue_io(mutType_value, 0, sim, "sumOfMutationsOfType()");
+	MutationType *mutation_type_ptr = SLiM_ExtractMutationTypeFromEidosValue_io(mutType_value, 0, &species->community_, species, "sumOfMutationsOfType()");		// SPECIES CONSISTENCY CHECK
 	
 	// Count the number of mutations of the given type
 	Mutation *mut_block_ptr = gSLiM_Mutation_Block;
 	EidosValue_Float_vector *float_result = (new (gEidosValuePool->AllocateChunk()) EidosValue_Float_vector())->resize_no_initialize(p_elements_size);
 	
+#pragma omp parallel for schedule(dynamic, 1) default(none) shared(p_elements_size) firstprivate(p_elements, mut_block_ptr, mutation_type_ptr, float_result) if(p_elements_size >= EIDOS_OMPMIN_SUM_OF_MUTS_OF_TYPE)
 	for (size_t element_index = 0; element_index < p_elements_size; ++element_index)
 	{
 		Individual *element = (Individual *)(p_elements[element_index]);
@@ -1300,7 +1408,7 @@ EidosValue_SP Individual::ExecuteMethod_Accelerated_sumOfMutationsOfType(EidosOb
 			
 			for (int run_index = 0; run_index < mutrun_count; ++run_index)
 			{
-				MutationRun *mutrun = genome1->mutruns_[run_index].get();
+				const MutationRun *mutrun = genome1->mutruns_[run_index];
 				int genome1_count = mutrun->size();
 				const MutationIndex *genome1_ptr = mutrun->begin_pointer_const();
 				
@@ -1319,7 +1427,7 @@ EidosValue_SP Individual::ExecuteMethod_Accelerated_sumOfMutationsOfType(EidosOb
 			
 			for (int run_index = 0; run_index < mutrun_count; ++run_index)
 			{
-				MutationRun *mutrun = genome2->mutruns_[run_index].get();
+				const MutationRun *mutrun = genome2->mutruns_[run_index];
 				int genome2_count = mutrun->size();
 				const MutationIndex *genome2_ptr = mutrun->begin_pointer_const();
 				
@@ -1344,10 +1452,13 @@ EidosValue_SP Individual::ExecuteMethod_Accelerated_sumOfMutationsOfType(EidosOb
 EidosValue_SP Individual::ExecuteMethod_uniqueMutationsOfType(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter)
 {
 #pragma unused (p_method_id, p_arguments, p_interpreter)
+	if (genome1_->IsDeferred() || genome2_->IsDeferred())
+		EIDOS_TERMINATION << "ERROR (Individual::ExecuteMethod_uniqueMutationsOfType): the mutations of deferred genomes cannot be accessed." << EidosTerminate();
+	
 	EidosValue *mutType_value = p_arguments[0].get();
 	
-	SLiMSim &sim = subpopulation_->population_.sim_;
-	MutationType *mutation_type_ptr = SLiM_ExtractMutationTypeFromEidosValue_io(mutType_value, 0, sim, "uniqueMutationsOfType()");
+	Species &species = subpopulation_->species_;
+	MutationType *mutation_type_ptr = SLiM_ExtractMutationTypeFromEidosValue_io(mutType_value, 0, &species.community_, &species, "uniqueMutationsOfType()");		// SPECIES CONSISTENCY CHECK
 	
 	// This code is adapted from uniqueMutations and follows its logic closely
 	
@@ -1370,8 +1481,8 @@ EidosValue_SP Individual::ExecuteMethod_uniqueMutationsOfType(EidosGlobalStringI
 	{
 		// We want to interleave mutations from the two genomes, keeping only the uniqued mutations.  For a given position, we take mutations
 		// from g1 first, and then look at the mutations in g2 at the same position and add them if they are not in g1.
-		MutationRun *mutrun1 = (genome1_size ? genome1_->mutruns_[run_index].get() : nullptr);
-		MutationRun *mutrun2 = (genome2_size ? genome2_->mutruns_[run_index].get() : nullptr);
+		const MutationRun *mutrun1 = (genome1_size ? genome1_->mutruns_[run_index] : nullptr);
+		const MutationRun *mutrun2 = (genome2_size ? genome2_->mutruns_[run_index] : nullptr);
 		int g1_size = (mutrun1 ? mutrun1->size() : 0);
 		int g2_size = (mutrun2 ? mutrun2->size() : 0);
 		int g1_index = 0, g2_index = 0;
@@ -1527,7 +1638,7 @@ EidosValue_SP Individual::ExecuteMethod_uniqueMutationsOfType(EidosGlobalStringI
 	 initializeGenomicElement(g1, 0, 99999);
 	 initializeRecombinationRate(1e-8);
 	 }
-	 1 {
+	 1 early() {
 	 sim.addSubpop("p1", 500);
 	 }
 	 1:20000 late() {
@@ -1565,6 +1676,8 @@ const std::vector<EidosPropertySignature_CSP> *Individual_Class::Properties(void
 	
 	if (!properties)
 	{
+		THREAD_SAFETY_IN_ANY_PARALLEL("Individual_Class::Properties(): not warmed up");
+		
 		properties = new std::vector<EidosPropertySignature_CSP>(*super::Properties());
 		
 		properties->emplace_back((EidosPropertySignature *)(new EidosPropertySignature(gStr_subpopulation,			true,	kEidosValueMaskObject | kEidosValueMaskSingleton, gSLiM_Subpopulation_Class))->DeclareAcceleratedGet(Individual::GetProperty_Accelerated_subpopulation));
@@ -1581,9 +1694,8 @@ const std::vector<EidosPropertySignature_CSP> *Individual_Class::Properties(void
 		properties->emplace_back((EidosPropertySignature *)(new EidosPropertySignature(gEidosStr_x,					false,	kEidosValueMaskFloat | kEidosValueMaskSingleton))->DeclareAcceleratedGet(Individual::GetProperty_Accelerated_x)->DeclareAcceleratedSet(Individual::SetProperty_Accelerated_x));
 		properties->emplace_back((EidosPropertySignature *)(new EidosPropertySignature(gEidosStr_y,					false,	kEidosValueMaskFloat | kEidosValueMaskSingleton))->DeclareAcceleratedGet(Individual::GetProperty_Accelerated_y)->DeclareAcceleratedSet(Individual::SetProperty_Accelerated_y));
 		properties->emplace_back((EidosPropertySignature *)(new EidosPropertySignature(gEidosStr_z,					false,	kEidosValueMaskFloat | kEidosValueMaskSingleton))->DeclareAcceleratedGet(Individual::GetProperty_Accelerated_z)->DeclareAcceleratedSet(Individual::SetProperty_Accelerated_z));
-#ifdef SLIM_NONWF_ONLY
 		properties->emplace_back((EidosPropertySignature *)(new EidosPropertySignature(gStr_age,					false,	kEidosValueMaskInt | kEidosValueMaskSingleton))->DeclareAcceleratedGet(Individual::GetProperty_Accelerated_age)->DeclareAcceleratedSet(Individual::SetProperty_Accelerated_age));
-#endif  // SLIM_NONWF_ONLY
+		properties->emplace_back((EidosPropertySignature *)(new EidosPropertySignature(gStr_meanParentAge,			true,	kEidosValueMaskFloat | kEidosValueMaskSingleton)));
 		properties->emplace_back((EidosPropertySignature *)(new EidosPropertySignature(gStr_pedigreeID,				true,	kEidosValueMaskInt | kEidosValueMaskSingleton))->DeclareAcceleratedGet(Individual::GetProperty_Accelerated_pedigreeID));
 		properties->emplace_back((EidosPropertySignature *)(new EidosPropertySignature(gStr_pedigreeParentIDs,		true,	kEidosValueMaskInt)));
 		properties->emplace_back((EidosPropertySignature *)(new EidosPropertySignature(gStr_pedigreeGrandparentIDs,	true,	kEidosValueMaskInt)));
@@ -1604,10 +1716,12 @@ const std::vector<EidosMethodSignature_CSP> *Individual_Class::Methods(void) con
 	
 	if (!methods)
 	{
+		THREAD_SAFETY_IN_ANY_PARALLEL("Individual_Class::Methods(): not warmed up");
+		
 		methods = new std::vector<EidosMethodSignature_CSP>(*super::Methods());
 		
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_containsMutations, kEidosValueMaskLogical))->AddObject("mutations", gSLiM_Mutation_Class));
-		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_countOfMutationsOfType, kEidosValueMaskInt | kEidosValueMaskSingleton))->AddIntObject_S("mutType", gSLiM_MutationType_Class));
+		methods->emplace_back(((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_countOfMutationsOfType, kEidosValueMaskInt | kEidosValueMaskSingleton))->AddIntObject_S("mutType", gSLiM_MutationType_Class))->DeclareAcceleratedImp(Individual::ExecuteMethod_Accelerated_countOfMutationsOfType));
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_relatedness, kEidosValueMaskFloat))->AddObject("individuals", gSLiM_Individual_Class));
 		methods->emplace_back((EidosClassMethodSignature *)(new EidosClassMethodSignature(gStr_setSpatialPosition, kEidosValueMaskVOID))->AddFloat("position"));
 		methods->emplace_back(((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_sumOfMutationsOfType, kEidosValueMaskFloat | kEidosValueMaskSingleton))->AddIntObject_S("mutType", gSLiM_MutationType_Class))->DeclareAcceleratedImp(Individual::ExecuteMethod_Accelerated_sumOfMutationsOfType));
@@ -1634,12 +1748,34 @@ EidosValue_SP Individual_Class::ExecuteMethod_setSpatialPosition(EidosGlobalStri
 {
 #pragma unused (p_method_id, p_arguments, p_interpreter)
 	EidosValue *position_value = p_arguments[0].get();
-	SLiMSim &sim = SLiM_GetSimFromInterpreter(p_interpreter);
-	int dimensionality = sim.SpatialDimensionality();
+	int dimensionality = 0;
 	int value_count = position_value->Count();
 	int target_size = p_target->Count();
 	
-	if (dimensionality == 0)
+	// Determine the spatiality of the individuals involved, and make sure it is the same for all
+	if (target_size == 1)
+	{
+		Individual *target = (Individual *)p_target->ObjectElementAtIndex(0, nullptr);
+		
+		dimensionality = target->subpopulation_->species_.SpatialDimensionality();
+	}
+	else if (target_size > 1)
+	{
+		const EidosValue_Object_vector *target_vec = p_target->ObjectElementVector();
+		Individual * const *targets = (Individual * const *)(target_vec->data());
+		
+		dimensionality = targets[0]->subpopulation_->species_.SpatialDimensionality();
+		
+		for (int target_index = 1; target_index < target_size; ++target_index)
+		{
+			Individual *target = targets[target_index];
+			
+			if (target->subpopulation_->species_.SpatialDimensionality() != dimensionality)
+				EIDOS_TERMINATION << "ERROR (Individual::ExecuteMethod_setSpatialPosition): setSpatialPosition() requires that all individuals in the target vector have the same spatial dimensionality." << EidosTerminate();
+		}
+	}
+	
+	if ((target_size > 0) && (dimensionality == 0))
 		EIDOS_TERMINATION << "ERROR (Individual::ExecuteMethod_setSpatialPosition): setSpatialPosition() cannot be called in non-spatial simulations." << EidosTerminate();
 	if ((dimensionality < 0) || (dimensionality > 3))
 		EIDOS_TERMINATION << "ERROR (Individual::ExecuteMethod_setSpatialPosition): (internal error) unrecognized dimensionality." << EidosTerminate();
@@ -1671,7 +1807,7 @@ EidosValue_SP Individual_Class::ExecuteMethod_setSpatialPosition(EidosGlobalStri
 					break;
 			}
 		}
-		else
+		else if (target_size > 1)
 		{
 			// Vector target case, one point
 			const EidosValue_Object_vector *target_vec = p_target->ObjectElementVector();
@@ -1682,6 +1818,8 @@ EidosValue_SP Individual_Class::ExecuteMethod_setSpatialPosition(EidosGlobalStri
 				case 1:
 				{
 					double x = position_value->FloatAtIndex(0, nullptr);
+					
+#pragma omp parallel for simd schedule(simd:static) default(none) shared(target_size) firstprivate(targets, x) if(target_size >= EIDOS_OMPMIN_SET_SPATIAL_POS_1)
 					for (int target_index = 0; target_index < target_size; ++target_index)
 					{
 						Individual *target = targets[target_index];
@@ -1693,6 +1831,8 @@ EidosValue_SP Individual_Class::ExecuteMethod_setSpatialPosition(EidosGlobalStri
 				{
 					double x = position_value->FloatAtIndex(0, nullptr);
 					double y = position_value->FloatAtIndex(1, nullptr);
+					
+#pragma omp parallel for simd schedule(simd:static) default(none) shared(target_size) firstprivate(targets, x, y) if(target_size >= EIDOS_OMPMIN_SET_SPATIAL_POS_1)
 					for (int target_index = 0; target_index < target_size; ++target_index)
 					{
 						Individual *target = targets[target_index];
@@ -1706,6 +1846,8 @@ EidosValue_SP Individual_Class::ExecuteMethod_setSpatialPosition(EidosGlobalStri
 					double x = position_value->FloatAtIndex(0, nullptr);
 					double y = position_value->FloatAtIndex(1, nullptr);
 					double z = position_value->FloatAtIndex(2, nullptr);
+					
+#pragma omp parallel for simd schedule(simd:static) default(none) shared(target_size) firstprivate(targets, x, y, z) if(target_size >= EIDOS_OMPMIN_SET_SPATIAL_POS_1)
 					for (int target_index = 0; target_index < target_size; ++target_index)
 					{
 						Individual *target = targets[target_index];
@@ -1726,37 +1868,83 @@ EidosValue_SP Individual_Class::ExecuteMethod_setSpatialPosition(EidosGlobalStri
 		const EidosValue_Float_vector *position_vec = position_value->FloatVector();
 		const double *positions = position_vec->data();
 		
-		switch (dimensionality)
+#ifdef _OPENMP
+		if (target_size >= EIDOS_OMPMIN_SET_SPATIAL_POS_2)
 		{
-			case 1:
+			switch (dimensionality)
 			{
-				for (int target_index = 0; target_index < target_size; ++target_index)
+				case 1:
 				{
-					Individual *target = targets[target_index];
-					target->spatial_x_ = *(positions++);
+#pragma omp parallel for schedule(static) default(none) shared(target_size) firstprivate(targets, positions) // if(EIDOS_OMPMIN_SET_SPATIAL_POS_2)
+					for (int target_index = 0; target_index < target_size; ++target_index)
+					{
+						targets[target_index]->spatial_x_ = positions[target_index];
+					}
+					break;
 				}
-				break;
+				case 2:
+				{
+#pragma omp parallel for schedule(static) default(none) shared(target_size) firstprivate(targets, positions) // if(EIDOS_OMPMIN_SET_SPATIAL_POS_2)
+					for (int target_index = 0; target_index < target_size; ++target_index)
+					{
+						Individual *target = targets[target_index];
+						const double *target_pos = positions + target_index * 2;
+						
+						target->spatial_x_ = target_pos[0];
+						target->spatial_y_ = target_pos[1];
+					}
+					break;
+				}
+				case 3:
+				{
+#pragma omp parallel for schedule(static) default(none) shared(target_size) firstprivate(targets, positions) // if(EIDOS_OMPMIN_SET_SPATIAL_POS_2)
+					for (int target_index = 0; target_index < target_size; ++target_index)
+					{
+						Individual *target = targets[target_index];
+						const double *target_pos = positions + target_index * 3;
+						
+						target->spatial_x_ = target_pos[0];
+						target->spatial_y_ = target_pos[1];
+						target->spatial_z_ = target_pos[2];
+					}
+					break;
+				}
 			}
-			case 2:
+		} else
+#endif
+		{
+			switch (dimensionality)
 			{
-				for (int target_index = 0; target_index < target_size; ++target_index)
+				case 1:
 				{
-					Individual *target = targets[target_index];
-					target->spatial_x_ = *(positions++);
-					target->spatial_y_ = *(positions++);
+					for (int target_index = 0; target_index < target_size; ++target_index)
+					{
+						Individual *target = targets[target_index];
+						target->spatial_x_ = *(positions++);
+					}
+					break;
 				}
-				break;
-			}
-			case 3:
-			{
-				for (int target_index = 0; target_index < target_size; ++target_index)
+				case 2:
 				{
-					Individual *target = targets[target_index];
-					target->spatial_x_ = *(positions++);
-					target->spatial_y_ = *(positions++);
-					target->spatial_z_ = *(positions++);
+					for (int target_index = 0; target_index < target_size; ++target_index)
+					{
+						Individual *target = targets[target_index];
+						target->spatial_x_ = *(positions++);
+						target->spatial_y_ = *(positions++);
+					}
+					break;
 				}
-				break;
+				case 3:
+				{
+					for (int target_index = 0; target_index < target_size; ++target_index)
+					{
+						Individual *target = targets[target_index];
+						target->spatial_x_ = *(positions++);
+						target->spatial_y_ = *(positions++);
+						target->spatial_z_ = *(positions++);
+					}
+					break;
+				}
 			}
 		}
 	}

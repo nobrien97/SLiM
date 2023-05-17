@@ -3,7 +3,7 @@
 //  Eidos
 //
 //  Created by Ben Haller on 5/1/15.
-//  Copyright (c) 2015-2021 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2015-2023 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -201,6 +201,8 @@ const std::vector<EidosPropertySignature_CSP> *EidosTestElement_Class::Propertie
 	
 	if (!properties)
 	{
+		THREAD_SAFETY_IN_ANY_PARALLEL("EidosTestElement_Class::Properties(): not warmed up");
+		
 		properties = new std::vector<EidosPropertySignature_CSP>(*super::Properties());
 		
 		properties->emplace_back((EidosPropertySignature *)(new EidosPropertySignature(gEidosStr__yolk,		false,	kEidosValueMaskInt | kEidosValueMaskSingleton))->DeclareAcceleratedGet(EidosTestElement::GetProperty_Accelerated__yolk)->DeclareAcceleratedSet(EidosTestElement::SetProperty_Accelerated__yolk));
@@ -218,6 +220,8 @@ const std::vector<EidosMethodSignature_CSP> *EidosTestElement_Class::Methods(voi
 	
 	if (!methods)
 	{
+		THREAD_SAFETY_IN_ANY_PARALLEL("EidosTestElement_Class::Methods(): not warmed up");
+		
 		methods = new std::vector<EidosMethodSignature_CSP>(*super::Methods());
 		
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gEidosStr__cubicYolk, kEidosValueMaskInt | kEidosValueMaskSingleton))->DeclareAcceleratedImp(EidosTestElement::ExecuteMethod_Accelerated_cubicYolk));
@@ -235,6 +239,8 @@ const std::vector<EidosFunctionSignature_CSP> *EidosTestElement_Class::Functions
 	
 	if (!functions)
 	{
+		THREAD_SAFETY_IN_ANY_PARALLEL("EidosTestElement_Class::Functions(): not warmed up");
+		
 		// Note there is no call to super, the way there is for methods and properties; functions are not inherited!
 		functions = new std::vector<EidosFunctionSignature_CSP>;
 		
@@ -245,6 +251,131 @@ const std::vector<EidosFunctionSignature_CSP> *EidosTestElement_Class::Functions
 	
 	return functions;
 }
+
+
+//
+//	EidosTestElementNRR
+//
+#pragma mark -
+#pragma mark EidosTestElementNRR
+#pragma mark -
+
+EidosTestElementNRR::EidosTestElementNRR(int64_t p_value) : yolk_(p_value)
+{
+}
+
+EidosTestElementNRR::~EidosTestElementNRR(void)
+{
+	//std::cout << "~EidosTestElementNRR : " << yolk_ << std::endl;
+}
+
+const EidosClass *EidosTestElementNRR::Class(void) const
+{
+	return gEidosTestElementNRR_Class;
+}
+
+void EidosTestElementNRR::Print(std::ostream &p_ostream) const
+{
+	p_ostream << Class()->ClassName();	// standard EidosObject behavior (not Dictionary behavior)
+}
+
+EidosValue_SP EidosTestElementNRR::GetProperty(EidosGlobalStringID p_property_id)
+{
+	if (p_property_id == gEidosID__yolk)
+		return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Int_singleton(yolk_));
+	
+	// all others, including gID_none
+	else
+		return super::GetProperty(p_property_id);
+}
+
+void EidosTestElementNRR::SetProperty(EidosGlobalStringID p_property_id, const EidosValue &p_value)
+{
+	if (p_property_id == gEidosID__yolk)				// ACCELERATED
+	{
+		yolk_ = p_value.IntAtIndex(0, nullptr);
+		return;
+	}
+	
+	// all others, including gID_none
+	else
+		return super::SetProperty(p_property_id, p_value);
+}
+
+
+//
+//	Object instantiation
+//
+#pragma mark -
+#pragma mark Object instantiation
+#pragma mark -
+
+//	(object<_TestElementNRR>$)_TestNRR(integer$ yolk)
+static EidosValue_SP Eidos_Instantiate_EidosTestElementNRR(const std::vector<EidosValue_SP> &p_arguments, __attribute__((unused)) EidosInterpreter &p_interpreter)
+{
+	// Note that this function ignores matrix/array attributes, and always returns a vector, by design
+	
+	EidosValue_SP result_SP(nullptr);
+	
+	EidosValue *yolk_value = p_arguments[0].get();
+	EidosTestElementNRR *objectElement = new EidosTestElementNRR(yolk_value->IntAtIndex(0, nullptr));
+	result_SP = EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Object_singleton(objectElement, gEidosTestElementNRR_Class));
+	
+	// Note that since these are not under retain/release, and Eidos has no logic to keep track of them and release them, they just leak
+	// This is probably what EidosTestElement::FreeThunks() used to do before EidosTestElement was put under retain/release, so that
+	// mechanism will probably need to be revived in order for leak checking to work properly.
+	
+	return result_SP;
+}
+
+
+//
+//	EidosTestElementNRR_Class
+//
+#pragma mark -
+#pragma mark EidosTestElementNRR_Class
+#pragma mark -
+
+EidosClass *gEidosTestElementNRR_Class = nullptr;
+
+
+const std::vector<EidosPropertySignature_CSP> *EidosTestElementNRR_Class::Properties(void) const
+{
+	static std::vector<EidosPropertySignature_CSP> *properties = nullptr;
+	
+	if (!properties)
+	{
+		THREAD_SAFETY_IN_ANY_PARALLEL("EidosTestElementNRR_Class::Properties(): not warmed up");
+		
+		properties = new std::vector<EidosPropertySignature_CSP>(*super::Properties());
+		
+		properties->emplace_back((EidosPropertySignature *)(new EidosPropertySignature(gEidosStr__yolk,		false,	kEidosValueMaskInt | kEidosValueMaskSingleton)));
+		
+		std::sort(properties->begin(), properties->end(), CompareEidosPropertySignatures);
+	}
+	
+	return properties;
+}
+
+const std::vector<EidosFunctionSignature_CSP> *EidosTestElementNRR_Class::Functions(void) const
+{
+	static std::vector<EidosFunctionSignature_CSP> *functions = nullptr;
+	
+	if (!functions)
+	{
+		THREAD_SAFETY_IN_ANY_PARALLEL("EidosTestElementNRR_Class::Functions(): not warmed up");
+		
+		// Note there is no call to super, the way there is for methods and properties; functions are not inherited!
+		functions = new std::vector<EidosFunctionSignature_CSP>;
+		
+		functions->emplace_back((EidosFunctionSignature *)(new EidosFunctionSignature("_TestNRR", Eidos_Instantiate_EidosTestElementNRR, kEidosValueMaskObject | kEidosValueMaskSingleton, gEidosTestElementNRR_Class))->AddInt_S("yolk"));
+		
+		std::sort(functions->begin(), functions->end(), CompareEidosCallSignatures);
+	}
+	
+	return functions;
+}
+
 
 
 

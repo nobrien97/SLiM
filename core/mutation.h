@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 12/13/14.
-//  Copyright (c) 2014-2021 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2014-2023 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -20,7 +20,7 @@
 /*
  
  The class Mutation represents a single mutation, defined by its type, its position on the chromosome, and its selection coefficient.
- Mutations are also tagged with the subpopulation and generation in which they arose.
+ Mutations are also tagged with the subpopulation and tick in which they arose.
  
  */
 
@@ -54,6 +54,7 @@ typedef int32_t MutationIndex;
 // forward declaration of Mutation block allocation; see bottom of header
 class Mutation;
 extern Mutation *gSLiM_Mutation_Block;
+extern MutationIndex gSLiM_Mutation_Block_Capacity;
 
 
 typedef enum {
@@ -77,7 +78,7 @@ public:
 	const slim_position_t position_;					// position on the chromosome
 	slim_selcoeff_t selection_coeff_;					// selection coefficient – not const because it may be changed in script
 	slim_objectid_t subpop_index_;						// subpopulation in which mutation arose (or a user-defined tag value!)
-	const slim_generation_t origin_generation_;			// generation in which mutation arose
+	const slim_tick_t origin_tick_;						// tick in which the mutation arose
 	int8_t state_;										// see MutationState above
 	int8_t nucleotide_;									// the nucleotide being kept: A=0, C=1, G=2, T=3.  -1 is used to indicate non-nucleotide-based.
 	int8_t scratch_;									// temporary scratch space for use by algorithms; regard as volatile outside your own code block
@@ -86,7 +87,7 @@ public:
 	slim_usertag_t tag_value_;							// a user-defined tag value
 	
 #ifdef SLIMGUI
-	mutable slim_refcount_t gui_reference_count_;			// a count of the number of occurrences of this mutation within the selected subpopulations in SLiMgui, valid at generation end
+	mutable slim_refcount_t gui_reference_count_;			// a count of the number of occurrences of this mutation within the selected subpopulations in SLiMgui, valid at cycle end
 	mutable slim_refcount_t gui_scratch_reference_count_;	// an additional refcount used for temporary tallies by SLiMgui, valid only when explicitly updated
 #endif
 	
@@ -99,11 +100,15 @@ public:
 	slim_selcoeff_t cached_one_plus_haploiddom_sel_;	// a cached value for (1 + haploid_dominance_coeff * selection_coeff_), clamped to 0.0 minimum
 	// NOTE THERE ARE 4 BYTES FREE IN THE CLASS LAYOUT HERE; see Mutation::Mutation() and Mutation layout.graffle
 	
+#if DEBUG
+	mutable slim_refcount_t refcount_CHECK_;					// scratch space for checking of parallel refcounting
+#endif
+	
 	Mutation(const Mutation&) = delete;					// no copying
 	Mutation& operator=(const Mutation&) = delete;		// no copying
 	Mutation(void) = delete;							// no null construction; Mutation is an immutable class
-	Mutation(MutationType *p_mutation_type_ptr, slim_position_t p_position, double p_selection_coeff, slim_objectid_t p_subpop_index, slim_generation_t p_generation, int8_t p_nucleotide);
-	Mutation(slim_mutationid_t p_mutation_id, MutationType *p_mutation_type_ptr, slim_position_t p_position, double p_selection_coeff, slim_objectid_t p_subpop_index, slim_generation_t p_generation, int8_t p_nucleotide);
+	Mutation(MutationType *p_mutation_type_ptr, slim_position_t p_position, double p_selection_coeff, slim_objectid_t p_subpop_index, slim_tick_t p_tick, int8_t p_nucleotide);
+	Mutation(slim_mutationid_t p_mutation_id, MutationType *p_mutation_type_ptr, slim_position_t p_position, double p_selection_coeff, slim_objectid_t p_subpop_index, slim_tick_t p_tick, int8_t p_nucleotide);
 	
 	// a destructor is needed now that we inherit from EidosDictionaryRetained; we want it to be as minimal as possible, though, and inline
 #if DEBUG_MUTATIONS
@@ -137,7 +142,7 @@ public:
 	static EidosValue *GetProperty_Accelerated_isSegregating(EidosObject **p_values, size_t p_values_size);
 	static EidosValue *GetProperty_Accelerated_nucleotide(EidosObject **p_values, size_t p_values_size);
 	static EidosValue *GetProperty_Accelerated_nucleotideValue(EidosObject **p_values, size_t p_values_size);
-	static EidosValue *GetProperty_Accelerated_originGeneration(EidosObject **p_values, size_t p_values_size);
+	static EidosValue *GetProperty_Accelerated_originTick(EidosObject **p_values, size_t p_values_size);
 	static EidosValue *GetProperty_Accelerated_position(EidosObject **p_values, size_t p_values_size);
 	static EidosValue *GetProperty_Accelerated_subpopID(EidosObject **p_values, size_t p_values_size);
 	static EidosValue *GetProperty_Accelerated_tag(EidosObject **p_values, size_t p_values_size);
@@ -196,16 +201,28 @@ extern Mutation *gSLiM_Mutation_Block;
 extern MutationIndex gSLiM_Mutation_FreeIndex;
 extern MutationIndex gSLiM_Mutation_Block_LastUsedIndex;
 
+#ifdef DEBUG_LOCKS_ENABLED
+// We do not arbitrate access to the mutation block with a lock; instead, we expect that clients
+// will manage their own multithreading issues.  In DEBUG mode we check for incorrect uses (races).
+// We use this lock to check.  Any failure to acquire the lock indicates a race.
+extern EidosDebugLock gSLiM_Mutation_LOCK;
+#endif
+
 extern slim_refcount_t *gSLiM_Mutation_Refcounts;	// an auxiliary buffer, parallel to gSLiM_Mutation_Block, to increase memory cache efficiency
 													// note that I tried keeping the fitness cache values and positions in separate buffers too, not a win
 void SLiM_CreateMutationBlock(void);
 void SLiM_IncreaseMutationBlockCapacity(void);
 void SLiM_ZeroRefcountBlock(MutationRun &p_mutation_registry);
-size_t SLiM_MemoryUsageForMutationBlock(void);
-size_t SLiM_MemoryUsageForMutationRefcounts(void);
+size_t SLiMMemoryUsageForMutationBlock(void);
+size_t SLiMMemoryUsageForFreeMutations(void);
+size_t SLiMMemoryUsageForMutationRefcounts(void);
 
 inline __attribute__((always_inline)) MutationIndex SLiM_NewMutationFromBlock(void)
 {
+#ifdef DEBUG_LOCKS_ENABLED
+	gSLiM_Mutation_LOCK.start_critical(0);
+#endif
+	
 	if (gSLiM_Mutation_FreeIndex == -1)
 		SLiM_IncreaseMutationBlockCapacity();
 	
@@ -216,11 +233,17 @@ inline __attribute__((always_inline)) MutationIndex SLiM_NewMutationFromBlock(vo
 	if (gSLiM_Mutation_Block_LastUsedIndex < result)
 		gSLiM_Mutation_Block_LastUsedIndex = result;
 	
+#ifdef DEBUG_LOCKS_ENABLED
+	gSLiM_Mutation_LOCK.end_critical();
+#endif
+	
 	return result;	// no need to zero out the memory, we are just an allocater, not a constructor
 }
 
 inline __attribute__((always_inline)) void SLiM_DisposeMutationToBlock(MutationIndex p_mutation_index)
 {
+	THREAD_SAFETY_IN_ACTIVE_PARALLEL("SLiM_DisposeMutationToBlock(): gSLiM_Mutation_Block change");
+	
 	void *mut_ptr = gSLiM_Mutation_Block + p_mutation_index;
 	
 	*(MutationIndex *)mut_ptr = gSLiM_Mutation_FreeIndex;

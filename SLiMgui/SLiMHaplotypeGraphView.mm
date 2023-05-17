@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 11/6/17.
-//  Copyright (c) 2017-2021 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2017-2023 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -153,6 +153,8 @@
 	// Draw haplotypes by delegating to our haplotype manager
 	[haplotypeManager glDrawHaplotypesInRect:interior displayBlackAndWhite:[self displayBlackAndWhite] showSubpopStrips:[self showSubpopulationStrips] eraseBackground:YES previousFirstBincounts:NULL];
 	
+	// would be nice to overdraw the species avatar in a corner or something, but since this is an NSOpenGLView that's hard...
+	
 	// Flush
 	[[self openGLContext] flushBuffer];
 }
@@ -187,7 +189,7 @@
 	[sp setAllowedFileTypes:@[@"jpg"]];
 	
 	[sp beginSheetModalForWindow:[self window] completionHandler:^(NSInteger result) {
-		if (result == NSFileHandlingPanelOKButton)
+		if (result == NSModalResponseOK)
 		{
 			[data writeToURL:[sp URL] atomically:YES];
 			

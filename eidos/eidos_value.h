@@ -3,7 +3,7 @@
 //  Eidos
 //
 //  Created by Ben Haller on 4/7/15.
-//  Copyright (c) 2015-2021 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2015-2023 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -301,11 +301,15 @@ std::ostream &operator<<(std::ostream &p_outstream, const EidosValue &p_value);
 // Eidos_intrusive_ptr support
 inline __attribute__((always_inline)) void Eidos_intrusive_ptr_add_ref(const EidosValue *p_value)
 {
+	THREAD_SAFETY_IN_ACTIVE_PARALLEL("Eidos_intrusive_ptr_add_ref(): EidosValue intrusive_ref_count_ change");
+	
 	++(p_value->intrusive_ref_count_);
 }
 
 inline __attribute__((always_inline)) void Eidos_intrusive_ptr_release(const EidosValue *p_value)
 {
+	THREAD_SAFETY_IN_ACTIVE_PARALLEL("Eidos_intrusive_ptr_release(): EidosValue intrusive_ref_count_ change");
+	
 	if ((--(p_value->intrusive_ref_count_)) == 0)
 	{
 		// We no longer delete; all EidosValues under Eidos_intrusive_ptr should have been allocated out of gEidosValuePool, so it handles the free
@@ -1032,7 +1036,7 @@ public:
 	// Property and method support; defined only on EidosValue_Object, not EidosValue.  The methods that a
 	// EidosValue_Object instance defines depend upon the type of the EidosObject objects it contains.
 	virtual EidosValue_SP GetPropertyOfElements(EidosGlobalStringID p_property_id) const = 0;
-	virtual void SetPropertyOfElements(EidosGlobalStringID p_property_id, const EidosValue &p_value) = 0;
+	virtual void SetPropertyOfElements(EidosGlobalStringID p_property_id, const EidosValue &p_value, EidosToken *p_property_token) = 0;
 	
 	virtual EidosValue_SP ExecuteMethodCall(EidosGlobalStringID p_method_id, const EidosInstanceMethodSignature *p_call_signature, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter) = 0;
 	
@@ -1082,7 +1086,7 @@ public:
 	// Property and method support; defined only on EidosValue_Object, not EidosValue.  The methods that a
 	// EidosValue_Object instance defines depend upon the type of the EidosObject objects it contains.
 	virtual EidosValue_SP GetPropertyOfElements(EidosGlobalStringID p_property_id) const override;
-	virtual void SetPropertyOfElements(EidosGlobalStringID p_property_id, const EidosValue &p_value) override;
+	virtual void SetPropertyOfElements(EidosGlobalStringID p_property_id, const EidosValue &p_value, EidosToken *p_property_token) override;
 	
 	virtual EidosValue_SP ExecuteMethodCall(EidosGlobalStringID p_method_id, const EidosInstanceMethodSignature *p_call_signature, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter) override;
 	
@@ -1108,6 +1112,8 @@ public:
 	void push_object_element_CRR(EidosObject *p_object);								// checks for retain/release
 	void push_object_element_RR(EidosObject *p_object);								// specifies retain/release
 	void push_object_element_NORR(EidosObject *p_object);							// specifies no retain/release
+	
+	void push_object_element_capcheck_NORR(EidosObject *p_object);					// specifies no retain/release; capacity check only
 	
 	void push_object_element_no_check_CRR(EidosObject *p_object);					// checks for retain/release
 	void push_object_element_no_check_RR(EidosObject *p_object);						// specifies retain/release
@@ -1160,6 +1166,20 @@ inline __attribute__((always_inline)) void EidosValue_Object_vector::push_object
 		expand();
 	
 	DeclareClassFromElement(p_object);
+	
+	values_[count_++] = p_object;
+}
+
+inline __attribute__((always_inline)) void EidosValue_Object_vector::push_object_element_capcheck_NORR(EidosObject *p_object)
+{
+#if DEBUG
+	// do checks only in DEBUG mode, for speed; the user should never be able to trigger these errors
+	DeclareClassFromElement(p_object, true);				// require a prior matching declaration
+	if (class_uses_retain_release_) RaiseForRetainReleaseViolation();
+#endif
+	
+	if (count_ == capacity_)
+		expand();
 	
 	values_[count_++] = p_object;
 }
@@ -1308,7 +1328,7 @@ public:
 	// Property and method support; defined only on EidosValue_Object, not EidosValue.  The methods that a
 	// EidosValue_Object instance defines depend upon the type of the EidosObject objects it contains.
 	virtual EidosValue_SP GetPropertyOfElements(EidosGlobalStringID p_property_id) const override;
-	virtual void SetPropertyOfElements(EidosGlobalStringID p_property_id, const EidosValue &p_value) override;
+	virtual void SetPropertyOfElements(EidosGlobalStringID p_property_id, const EidosValue &p_value, EidosToken *p_property_token) override;
 	
 	virtual EidosValue_SP ExecuteMethodCall(EidosGlobalStringID p_method_id, const EidosInstanceMethodSignature *p_call_signature, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter) override;
 	

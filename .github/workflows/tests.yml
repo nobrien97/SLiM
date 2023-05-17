@@ -1,6 +1,16 @@
+# It's useful to use yamllint to find problems with this file;
+# pip install --user yamllint, python3 -m yamllint <file>
+#
+# It is quite aggressive by default, though, so I've disabled some rules
+#
+# yamllint disable rule:document-start
+# yamllint disable rule:line-length
+# yamllint disable rule:brackets
+# yamllint disable rule:braces
+
 name: tests
 
-on: [push, pull_request]
+on: [push, pull_request]     # yamllint disable-line rule:truthy
 
 jobs:
   canceller:
@@ -19,18 +29,21 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # BCH 1/30/2021: removing macos-11.0 for now because GitHub isn't running it properly
-        # see https://github.com/actions/virtual-environments/issues/2486 for more info
-        # also relevant: https://github.com/actions/virtual-environments/issues/2381
-        os: [ubuntu-18.04, ubuntu-20.04, macos-10.15]
-        python: [ 3.8 ]
         include:
-          # Ubuntu with the oldest supported GCC.
-          - os: ubuntu-18.04
-            gcc: 4.8
-          # Ubuntu with the most recent GCC.
+          # Ubuntu with the oldest supported GCC (used to be 4.8, but with 20.04 it is 7, sadly).
           - os: ubuntu-20.04
-            gcc: 11
+            gcc: 7
+            python: 3.8
+          # Ubuntu with the most recent GCC (on 22.04, that is 12).
+          - os: ubuntu-22.04
+            gcc: 12
+            python: 3.9
+          # macOS, oldest supported version (macos-10.15 was removed by GitHub)
+          - os: macos-11
+            python: 3.8
+          # macOS, newest supported version (we skip macos-12 to save on build minutes)
+          - os: macos-13
+            python: 3.9
 
     steps:
       - name: Checkout
@@ -54,7 +67,7 @@ jobs:
             /usr/share/miniconda/envs/anaconda-client-env
             ~/osx-conda
             ~/.profile
-          key: ${{ runner.os }}-${{ matrix.python}}-conda-v11-${{ hashFiles('treerec/tests/conda-requirements.txt') }}-${{ hashFiles('treerec/tests/pip-requirements.txt') }}
+          key: ${{ runner.os }}-${{ matrix.python }}-conda-v13-${{ hashFiles('treerec/tests/conda-requirements.txt') }}-${{ hashFiles('treerec/tests/pip-requirements.txt') }}
 
       - name: Install Conda
         uses: conda-incubator/setup-miniconda@v2
@@ -69,7 +82,7 @@ jobs:
 
       - name: Install conda deps
         if: steps.cache.outputs.cache-hit != 'true'
-        shell: bash -l {0} #We need a login shell to get conda
+        shell: bash -l {0}    # We need a login shell to get conda
         run: conda install --yes --file=treerec/tests/conda-requirements.txt
 
       - name: Install pip deps
@@ -78,7 +91,7 @@ jobs:
         run: |
           pip3 install -r treerec/tests/pip-requirements.txt
 
-      - name: Fix OSX Cache Write #OSX Won't let the cache restore due to file perms
+      - name: Fix OSX Cache Write    # OSX Won't let the cache restore due to file perms
         if: steps.cache.outputs.cache-hit != 'true' && startsWith(matrix.os, 'macos')
         run: |
           cp -r /usr/local/miniconda/envs/anaconda-client-env ~/osx-conda
@@ -86,15 +99,19 @@ jobs:
       - name: Fix OSX Cache Restore
         if: steps.cache.outputs.cache-hit == 'true' && startsWith(matrix.os, 'macos')
         run: |
-          mkdir -p /usr/local/miniconda/envs
+          sudo mkdir -p /usr/local/miniconda/envs
           sudo cp -r ~/osx-conda /usr/local/miniconda/envs/anaconda-client-env
 
       - name: Install pyslim
+        shell: bash -l {0}
         run: |
+          # TODO: uncomment when pyslim 1.0 on conda
           source ~/.profile
-          conda activate anaconda-client-env
+          # conda activate anaconda-client-env
+          # pip install pyslim
           git clone https://github.com/tskit-dev/pyslim.git
-          cd pyslim && pip install .
+          cd pyslim
+          pip3 install .
 
       - name: Build (Debug)
         run: |
@@ -130,7 +147,7 @@ jobs:
           conda activate anaconda-client-env
           export PATH=$PATH:$PWD/Release
           echo $PATH
-          cd treerec/tests && pytest -xv
+          cd treerec/tests && python -m pytest -xv
 
   GUI:
     runs-on: ${{ matrix.os }}
@@ -144,18 +161,22 @@ jobs:
       matrix:
         include:
           # Ubuntu with the oldest supported Qt and GCC.
-          - os: ubuntu-18.04
+          - os: ubuntu-20.04
             qt: 5.9.5
-            gcc: 4.8
+            gcc: 7
           # Ubuntu with the most recent Qt and GCC.
           - os: ubuntu-20.04
             qt: 5.15.2
             gcc: 11
-          # MacOS with oldest supported Qt.
-          - os: macos-10.15
+          # Ubuntu with the most recent Qt and GCC.
+          - os: ubuntu-22.04
+            qt: 5.15.2
+            gcc: 12
+          # old macOS with oldest supported Qt.
+          - os: macos-11
             qt: 5.9.5
-          # MacOS with most recent Qt.
-          - os: macos-10.15
+          # new macOS with most recent Qt (we skip macos-12 to save on build minutes).
+          - os: macos-13
             qt: 5.15.2
 
     steps:
@@ -171,9 +192,10 @@ jobs:
             --slave /usr/bin/g++ g++ /usr/bin/g++-${{ matrix.gcc }}
 
       - name: Install Qt
-        uses: jurplel/install-qt-action@v2
+        uses: jurplel/install-qt-action@v3
         with:
           version: ${{ matrix.qt }}
+          setup-python: true
 
       - name: Build (cmake)
         run: |
@@ -197,103 +219,105 @@ jobs:
       fail-fast: false
       matrix:
         include:
-        - { sys: mingw64, env: x86_64, python: 3.8 }
-        - { sys: ucrt64, env: ucrt-x86_64, python: 3.8 }
+          - { sys: mingw64, env: x86_64, python: 3.8 }
+          - { sys: ucrt64, env: ucrt-x86_64, python: 3.8 }
     name: Windows CLI (${{ matrix.sys }}, ${{ matrix.env }})
     defaults:
       run:
         shell: msys2 {0}
     steps:
-    
-    - name: 'Checkout'
-      uses: actions/checkout@v2
-      with:
-        submodules: true
+      - name: 'Checkout'
+        uses: actions/checkout@v2
+        with:
+          submodules: true
 
-    - name: Setup MSYS2 ${{matrix.sys}}
-      uses: msys2/setup-msys2@v2
-      with:
-        msystem: ${{matrix.sys}}
-        update: true
-        install: >-
-          git
-          base-devel
-          msys2-devel
-          mingw-w64-${{matrix.env}}-toolchain
-          mingw-w64-${{matrix.env}}-cmake
-          automake1.16
-          autoconf
+      - name: Setup MSYS2 ${{matrix.sys}}
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: ${{matrix.sys}}
+          update: true
+          install: >-
+            git
+            base-devel
+            msys2-devel
+            mingw-w64-${{matrix.env}}-toolchain
+            mingw-w64-${{matrix.env}}-cmake
 
-    - name: Cache conda and dependancies
-      id: cache
-      uses: actions/cache@v2
-      with:
-        path: |
-          c:\Miniconda\envs\anaconda-client-env
-          /usr/share/miniconda/envs/anaconda-client-env
-          ~/osx-conda
-          ~/.profile
-        key: ${{ runner.os }}-${{ matrix.python}}-conda-v11-${{ hashFiles('treerec/tests/conda-requirements.txt') }}-${{ hashFiles('treerec/tests/pip-requirements.txt') }}
+      - name: Cache conda and dependancies
+        id: cache
+        uses: actions/cache@v2
+        with:
+          path: |
+            c:\Miniconda\envs\anaconda-client-env
+            ~/.bash_profile
+            ~/.profile
+          key: ${{ runner.os }}-${{ matrix.python}}-conda-v16-${{ hashFiles('treerec/tests/conda-requirements.txt') }}-${{ hashFiles('treerec/tests/pip-requirements.txt') }}
 
-    - name: Install Conda
-      uses: conda-incubator/setup-miniconda@v2
-      if: steps.cache.outputs.cache-hit != 'true'
-      with:
-        activate-environment: anaconda-client-env
-        python-version: ${{ matrix.python }}
-        channels: conda-forge
-        channel-priority: strict
-        auto-update-conda: true
-        use-only-tar-bz2: true
+      - name: Install Conda
+        uses: conda-incubator/setup-miniconda@v2
+        if: steps.cache.outputs.cache-hit != 'true'
+        with:
+          activate-environment: anaconda-client-env
+          python-version: ${{ matrix.python }}
+          channels: conda-forge
+          channel-priority: strict
+          auto-update-conda: true
+          use-only-tar-bz2: true
 
-    - name: Install conda deps
-      if: steps.cache.outputs.cache-hit != 'true'
-      shell: pwsh
-      run: |
-        C:\Miniconda\condabin\conda.bat install --yes --file=treerec/tests/conda-requirements.txt
-        C:\Miniconda\condabin\conda.bat init powershell
+      - name: Install conda deps
+        if: steps.cache.outputs.cache-hit != 'true'
+        shell: bash -l {0}
+        run: |
+          conda install --yes --file=treerec/tests/conda-requirements.txt
 
-    - name: Install pip deps
-      if: steps.cache.outputs.cache-hit != 'true'
-      shell: pwsh
-      run: |
-        pip3 install -r treerec/tests/pip-requirements.txt
+      - name: Install pip deps
+        if: steps.cache.outputs.cache-hit != 'true'
+        shell: bash -l {0}
+        run: |
+          pip install -r treerec/tests/pip-requirements.txt
 
-    - name: Install pyslim
-      shell: pwsh
-      run: |
-        C:\Miniconda\condabin\conda.bat activate anaconda-client-env
-        git clone https://github.com/tskit-dev/pyslim.git
-        cd pyslim && pip install .
+      - name: Install pyslim
+        shell: bash -l {0}
+        run: |
+          # TODO: uncomment when pyslim 1.0 is on conda
+          # conda install -c conda-forge pyslim
+          git clone https://github.com/tskit-dev/pyslim.git
+          cd pyslim
+          pip3 install .
 
-    - name: Debug
-      run: |
-        mkdir Debug
-        cd Debug
-        cmake -G"MSYS Makefiles" -DCMAKE_BUILD_TYPE=Debug ..
-        make -j 2
+      - name: Debug
+        run: |
+          cd windows_compat/gnulib
+          touch --date="`date`" aclocal.m4 Makefile.am configure configure.ac config.h.in Makefile.in
+          cd ../..
+          mkdir Debug
+          cd Debug
+          cmake -G"MSYS Makefiles" -DCMAKE_BUILD_TYPE=Debug ..
+          make -j 2
 
-    - name: Build (Release)
-      run: |
-        mkdir Release
-        cd Release
-        cmake -G"MSYS Makefiles" -DCMAKE_BUILD_TYPE=Release ..
-        make -j 2
+      - name: Build (Release)
+        run: |
+          cd windows_compat/gnulib
+          touch --date="`date`" aclocal.m4 Makefile.am configure configure.ac config.h.in Makefile.in
+          cd ../..
+          mkdir Release
+          cd Release
+          cmake -G"MSYS Makefiles" -DCMAKE_BUILD_TYPE=Release ..
+          make -j 2
 
-    - name: Test (Release)
-      run: |
-        cd Release
-        ./eidos -testEidos
-        ./slim -testEidos
-        ./slim -testSLiM
-    
-    - name: Treesequence tests
-      shell: pwsh
-      run: |
-        C:\Miniconda\condabin\conda.bat activate anaconda-client-env
-        $env:path += ";$(pwd)\Release"
-        cd treerec\tests 
-        pytest -xv
+      - name: Test (Release)
+        run: |
+          cd Release
+          ./eidos -testEidos
+          ./slim -testEidos
+          ./slim -testSLiM
+
+      - name: Treesequence tests
+        shell: bash -l {0}
+        run: |
+          export PATH=$PATH:$(pwd)/Release
+          cd treerec/tests
+          python -m pytest -xv
 
   tests-windows-latest-GUI:
     runs-on: windows-latest
@@ -301,41 +325,42 @@ jobs:
       fail-fast: false
       matrix:
         include:
-        - { sys: mingw64, env: x86_64 }
-        - { sys: ucrt64, env: ucrt-x86_64 }
+          - { sys: mingw64, env: x86_64 }
+          - { sys: ucrt64, env: ucrt-x86_64 }
     name: Windows GUI (${{ matrix.sys }}, ${{ matrix.env }})
     defaults:
       run:
         shell: msys2 {0}
     steps:
-    
-    - name: 'Checkout'
-      uses: actions/checkout@v2
-      with:
-        submodules: true
+      - name: 'Checkout'
+        uses: actions/checkout@v2
+        with:
+          submodules: true
 
-    - name: Setup MSYS2 ${{matrix.sys}}
-      uses: msys2/setup-msys2@v2
-      with:
-        msystem: ${{matrix.sys}}
-        update: true
-        install: >-
-          git
-          base-devel
-          msys2-devel
-          mingw-w64-${{matrix.env}}-toolchain
-          mingw-w64-${{matrix.env}}-cmake
-          mingw-w64-${{matrix.env}}-qt5-base
-          automake1.16
-          autoconf
+      - name: Setup MSYS2 ${{matrix.sys}}
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: ${{matrix.sys}}
+          update: true
+          install: >-
+            git
+            base-devel
+            msys2-devel
+            mingw-w64-${{matrix.env}}-toolchain
+            mingw-w64-${{matrix.env}}-cmake
+            mingw-w64-${{matrix.env}}-qt5-base
 
-    - name: Build (cmake)
-      run: |
-        # Just do a release build.
-        mkdir Release
-        cd Release
-        cmake -G"MSYS Makefiles" -DBUILD_SLIMGUI=ON -DCMAKE_BUILD_TYPE=Release ..
-        make -j 2
+      - name: Build (cmake)
+        run: |
+          cd .
+          cd windows_compat/gnulib
+          touch --date="`date`" aclocal.m4 Makefile.am configure configure.ac config.h.in Makefile.in
+          cd ../..
+          # Just do a release build.
+          mkdir Release
+          cd Release
+          cmake -G"MSYS Makefiles" -DBUILD_SLIMGUI=ON -DCMAKE_BUILD_TYPE=Release ..
+          make -j 2
 
   tests-windows-latest-pacman:
     runs-on: windows-latest
@@ -343,29 +368,28 @@ jobs:
       fail-fast: false
       matrix:
         include:
-        - { sys: mingw64, env: x86_64 }
-        - { sys: ucrt64, env: ucrt-x86_64 }
+          - { sys: mingw64, env: x86_64 }
+          - { sys: ucrt64, env: ucrt-x86_64 }
     name: Windows pacman (${{ matrix.sys }}, ${{ matrix.env }})
     defaults:
       run:
         shell: msys2 {0}
     steps:
-    
-    - name: 'Checkout'
-      uses: actions/checkout@v2
-      with:
-        submodules: true
+      - name: 'Checkout'
+        uses: actions/checkout@v2
+        with:
+          submodules: true
 
-    - name: Setup MSYS2 ${{matrix.sys}}
-      uses: msys2/setup-msys2@v2
-      with:
-        msystem: ${{matrix.sys}}
-        update: true
-        install: >-
-          mingw-w64-${{matrix.env}}-slim-simulator
+      - name: Setup MSYS2 ${{matrix.sys}}
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: ${{matrix.sys}}
+          update: true
+          install: >-
+            mingw-w64-${{matrix.env}}-slim-simulator
 
-    - name: Test
-      run: |
-        eidos -testEidos
-        slim -testEidos
-        slim -testSLiM
+      - name: Test
+        run: |
+          eidos -testEidos
+          slim -testEidos
+          slim -testSLiM

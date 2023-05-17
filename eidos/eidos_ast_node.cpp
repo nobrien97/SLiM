@@ -3,7 +3,7 @@
 //  Eidos
 //
 //  Created by Ben Haller on 7/27/15.
-//  Copyright (c) 2015-2021 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2015-2023 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -21,7 +21,6 @@
 #include "eidos_ast_node.h"
 #include "eidos_interpreter.h"
 
-#include "errno.h"
 #include <string>
 #include <algorithm>
 
@@ -488,7 +487,7 @@ void EidosASTNode::PrintTreeWithIndent(std::ostream &p_outstream, int p_indent) 
 	}
 }
 
-#if defined(SLIMGUI) && (SLIMPROFILING == 1)
+#if (SLIMPROFILING == 1)
 // PROFILING
 
 void EidosASTNode::ZeroProfileTotals(void) const
@@ -507,9 +506,15 @@ eidos_profile_t EidosASTNode::ConvertProfileTotalsToSelfCounts(void) const
 	{
 		// Nodes with a non-zero count return their count as their total, and exclude their children
 		eidos_profile_t result = profile_total_;
+		eidos_profile_t child_total = 0;
 		
 		for (const EidosASTNode *child : children_)
-			profile_total_ -= child->ConvertProfileTotalsToSelfCounts();
+			child_total += child->ConvertProfileTotalsToSelfCounts();
+		
+		if (profile_total_ >= child_total)
+			profile_total_ = profile_total_ - child_total;
+		else
+			profile_total_ = 0;			// clip to a minimum of 0
 		
 		return result;
 	}
@@ -533,6 +538,44 @@ eidos_profile_t EidosASTNode::TotalOfSelfCounts(void) const
 		total += child->TotalOfSelfCounts();
 	
 	return total;
+}
+
+void EidosASTNode::FullUTF8Range(int32_t *p_start, int32_t *p_end) const
+{
+	int32_t start = token_->token_start_;
+	int32_t end = token_->token_end_;
+	
+	if (full_range_end_token_)
+	{
+		// If we have an end token, that defines our range end
+		end = std::max(end, full_range_end_token_->token_end_);
+		
+		// We still need to scan our children for our range start, however
+		for (const EidosASTNode *child : children_)
+		{
+			int32_t child_start = 0, child_end = 0;
+			
+			child->FullUTF8Range(&child_start, &child_end);
+			
+			start = std::min(start, child_start);
+		}
+	}
+	else
+	{
+		// Otherwise, incorporate the ranges of our children
+		for (const EidosASTNode *child : children_)
+		{
+			int32_t child_start = 0, child_end = 0;
+			
+			child->FullUTF8Range(&child_start, &child_end);
+			
+			start = std::min(start, child_start);
+			end = std::max(end, child_end);
+		}
+	}
+	
+	*p_start = start;
+	*p_end = end;
 }
 
 void EidosASTNode::FullUTF16Range(int32_t *p_start, int32_t *p_end) const
@@ -573,7 +616,7 @@ void EidosASTNode::FullUTF16Range(int32_t *p_start, int32_t *p_end) const
 	*p_end = end;
 }
 
-#endif	// defined(SLIMGUI) && (SLIMPROFILING == 1)
+#endif	// (SLIMPROFILING == 1)
 
 
 

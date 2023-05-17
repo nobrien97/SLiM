@@ -3,7 +3,7 @@
 //  Eidos
 //
 //  Created by Ben Haller on 4/6/15.
-//  Copyright (c) 2015-2021 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2015-2023 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -26,10 +26,7 @@
 #ifndef __Eidos__eidos_functions__
 #define __Eidos__eidos_functions__
 
-#include "eidos_interpreter.h"
 #include "eidos_value.h"
-
-#include <iostream>
 
 
 // Utility functions usable by everybody
@@ -102,6 +99,7 @@ EidosValue_SP Eidos_ExecuteFunction_var(const std::vector<EidosValue_SP> &p_argu
 #pragma mark -
 
 //	distribution draw / density functions
+EidosValue_SP Eidos_ExecuteFunction_findInterval(const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter);
 EidosValue_SP Eidos_ExecuteFunction_dmvnorm(const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter);
 EidosValue_SP Eidos_ExecuteFunction_dnorm(const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter);
 EidosValue_SP Eidos_ExecuteFunction_qnorm(const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter);
@@ -282,6 +280,9 @@ EidosValue_SP Eidos_ExecuteFunction_functionSource(const std::vector<EidosValue_
 EidosValue_SP Eidos_ExecuteFunction_getSeed(const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter);
 EidosValue_SP Eidos_ExecuteFunction_license(const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter);
 EidosValue_SP Eidos_ExecuteFunction_ls(const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter);
+EidosValue_SP Eidos_ExecuteFunction_parallelGetNumThreads(__attribute__((unused)) const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter);
+EidosValue_SP Eidos_ExecuteFunction_parallelGetMaxThreads(__attribute__((unused)) const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter);
+EidosValue_SP Eidos_ExecuteFunction_parallelSetNumThreads(__attribute__((unused)) const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter);
 EidosValue_SP Eidos_ExecuteFunction_rm(const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter);
 EidosValue_SP Eidos_ExecuteFunction_sapply(const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter);
 EidosValue_SP Eidos_ExecuteFunction_setSeed(const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter);

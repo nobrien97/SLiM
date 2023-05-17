@@ -3,7 +3,7 @@
 //  SLiMgui
 //
 //  Created by Ben Haller on 1/20/15.
-//  Copyright (c) 2015-2021 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2015-2023 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -26,7 +26,6 @@
 #import "CocoaExtra.h"
 #import "EidosCocoaExtra.h"
 #import "eidos_beep.h"
-#import "TipsWindowController.h"
 #import <WebKit/WebKit.h>
 
 #include <stdio.h>
@@ -165,7 +164,7 @@ typedef enum SLiMLaunchAction
 				case 7: chapterName = @"Mutation types, genomic elements, and chromosome structure";		break;
 				case 8: chapterName = @"SLiMgui visualizations for polymorphism patterns";					break;
 				case 9:	chapterName = @"Selective sweeps";													break;
-				case 10:chapterName = @"Context-dependent selection using fitness() callbacks";				break;
+				case 10:chapterName = @"Context-dependent selection using mutationEffect() callbacks";		break;
 				case 11:chapterName = @"Complex mating schemes using mateChoice() callbacks";				break;
 				case 12:chapterName = @"Direct child modifications using modifyChild() callbacks";			break;
 				case 13:chapterName = @"Phenotypes, fitness functions, quantitative traits, and QTLs";		break;
@@ -174,6 +173,7 @@ typedef enum SLiMLaunchAction
 				case 16:chapterName = @"Going beyond Wright-Fisher models: nonWF model recipes";			break;
 				case 17:chapterName = @"Tree-sequence recording: tracking population history";				break;
 				case 18:chapterName = @"Modeling explicit nucleotides";										break;
+				case 19:chapterName = @"Multispecies modeling";												break;
 				default: break;
 			}
 			
@@ -218,11 +218,23 @@ typedef enum SLiMLaunchAction
 	Eidos_Beep = &Eidos_Beep_MACOS;
 	
 	// Warm up our back ends before anything else happens, including our own class objects
+#ifdef _OPENMP
+	// Multithreading in SLiMguiLegacy is not for end user use; this is for testing/debugging only.
+	// We always use 4 threads; we don't want to hog the whole machine, just run with a couple threads.
+	// We pass false for active_threads to let the worker threads sleep, otherwise the CPU is pegged
+	// the whole time SLiMgui is running, even when sitting idle.
+	Eidos_WarmUpOpenMP(&std::cout, true, 4, false);
+#endif
+	
 	Eidos_WarmUp();
 	SLiM_WarmUp();
 	
 	gSLiM_SLiMgui_Class = new SLiMgui_Class(gStr_SLiMgui, gEidosDictionaryUnretained_Class);
 	gSLiM_SLiMgui_Class->CacheDispatchTables();
+	
+	// QtSLiM frees the RNG that Eidos_WarmUp() just made, here.  We could do that too; it would
+	// do no harm.  But with the initialization order in SLiMguiLegacy, it will be freed by
+	// startNewSimulationFromScript anyway, before any problems arise.
 	
 	// Remember our current working directory, to return to whenever we are not inside SLiM/Eidos
 	app_cwd_ = Eidos_CurrentDirectory();
@@ -262,7 +274,7 @@ typedef enum SLiMLaunchAction
 	{
 		NSAlert *alert = [[NSAlert alloc] init];
 		
-		[alert setAlertStyle:NSCriticalAlertStyle];
+		[alert setAlertStyle:NSAlertStyleCritical];
 		[alert setMessageText:@"Missing font"];
 		[alert setInformativeText:[NSString stringWithFormat:@"The standard system font %@ is required for SLiMgui to run, but appears to be missing.  Please check your macOS installation.\n\nSLiMgui will now exit.", fontName]];
 		[alert addButtonWithTitle:@"OK"];
@@ -287,7 +299,8 @@ typedef enum SLiMLaunchAction
 			break;
 	}
 	
-	[TipsWindowController showTipsWindowOnLaunch];
+	// The tips window has been removed so I don't have to maintain it, but the sources remain in the repository.  BCH 3/3/2022
+	//[TipsWindowController showTipsWindowOnLaunch];
 }
 
 - (void)openNewDocumentIfNeeded:(id)sender
@@ -300,6 +313,7 @@ typedef enum SLiMLaunchAction
 		SLiMDocument *doc = [[NSDocumentController sharedDocumentController] openUntitledDocumentAndDisplay:YES error:NULL];
 		
 		[doc setTransient:YES];
+		[[doc slimWindowController] displayStartupMessage];
 	}
 }
 
@@ -328,8 +342,9 @@ typedef enum SLiMLaunchAction
 	
 	[defaults removeObjectForKey:EidosDefaultsSuppressScriptCheckSuccessPanelKey];
 	
-	[defaults removeObjectForKey:SLiMDefaultsShowTipsPanelKey];
-	[defaults removeObjectForKey:SLiMDefaultsTipsIndexKey];
+	// The tips window has been removed so I don't have to maintain it, but the sources remain in the repository.  BCH 3/3/2022
+	//[defaults removeObjectForKey:SLiMDefaultsShowTipsPanelKey];
+	//[defaults removeObjectForKey:SLiMDefaultsTipsIndexKey];
 }
 
 
@@ -353,8 +368,7 @@ typedef enum SLiMLaunchAction
 	
 	// Set our version number string
 	NSString *bundleVersionString = [[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleShortVersionString"];
-	NSString *bundleVersion = [[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleVersion"];
-	NSString *versionString = [NSString stringWithFormat:@"%@ (build %@)", bundleVersionString, bundleVersion];
+	NSString *versionString = [NSString stringWithFormat:@"version %@", bundleVersionString];
 	
 	[aboutVersionTextField setStringValue:versionString];
 	
