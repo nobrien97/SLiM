@@ -129,7 +129,7 @@ public:
 		debug_points_ = nullptr;
 #endif
 	}
-	
+	inline __attribute__((always_inline)) std::string RootNodeString() { return root_node_->token_->token_string_;}
 	inline __attribute__((always_inline)) std::string IndentString(int p_indent_level) { return std::string(p_indent_level * 2, ' '); };
 	
 	void SetShouldLogExecution(bool p_log);

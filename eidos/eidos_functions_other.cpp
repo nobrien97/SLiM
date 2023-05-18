@@ -524,6 +524,70 @@ EidosValue_SP Eidos_ExecuteFunction_exists(const std::vector<EidosValue_SP> &p_a
 	return result_SP;
 }
 
+std::vector<std::string> SplitStringToVector(const std::string& str, const char sep)
+{
+	std::vector<std::string> result;
+	std::string token;
+	std::stringstream ss(str);
+
+	// Separate string by seperator
+	while (std::getline(ss, token, sep))
+	{
+		result.push_back(token);
+	}
+	
+	return result;
+}
+
+
+//	(string)symtostr(object symbol)
+EidosValue_SP Eidos_ExecuteFunction_symtostr(const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter)
+{
+	EidosValue_SP result_SP(nullptr);
+	EidosValue_String_vector *string_result = new (gEidosValuePool->AllocateChunk()) EidosValue_String_vector();
+	result_SP = EidosValue_SP(string_result);
+
+	std::string symbols = p_interpreter.RootNodeString();
+	std::string argstring = symbols.substr(9);
+	// Remove last ")"
+	argstring.pop_back();
+	std::vector<std::string> args = SplitStringToVector(argstring, ',');
+	
+	EidosValue_Object *symbol_value = (EidosValue_Object *)p_arguments[0].get();
+	int symbol_count = symbol_value->Count();
+	
+	if ((symbol_count == 1) && (symbol_value->DimensionCount() == 1))
+	{
+		// If there's just one, no more manipulation necessary, just push the string
+		string_result->PushString(args[0]);
+	}
+	else
+	{
+		// handle extra c() characters
+		if (args[0][0] == 'c' && args[0][1] == '(')
+		{
+			args[0] = args[0].substr(2);
+		}
+
+		if (args.back().back() == ')')
+		{
+			args.back().pop_back();
+		}
+
+		for (size_t i = 0; i < args.size(); i++)
+		{
+			// Remove whitespace
+			std::string s = args[i];
+			s.erase(std::remove_if(s.begin(), s.end(), ::isspace), s.end());
+			string_result->PushString(s);
+		}
+
+		
+	}
+	
+	return result_SP;
+}
+
 //	(void)functionSignature([Ns$ functionName = NULL])
 EidosValue_SP Eidos_ExecuteFunction_functionSignature(const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter)
 {
