@@ -541,18 +541,19 @@ std::vector<std::string> SplitStringToVector(const std::string& str, const char 
 
 
 //	(string)symtostr(object symbol)
-EidosValue_SP Eidos_ExecuteFunction_symtostr(const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter)
+EidosValue_SP Eidos_ExecuteFunction_deparse(const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter)
 {
 	EidosValue_SP result_SP(nullptr);
 	EidosValue_String_vector *string_result = new (gEidosValuePool->AllocateChunk()) EidosValue_String_vector();
 	result_SP = EidosValue_SP(string_result);
 
 	std::string symbols = p_interpreter.RootNodeString();
-	std::string argstring = symbols.substr(9);
+	std::string argstring = symbols.substr(8);
 	// Remove last ")"
 	argstring.pop_back();
-	std::vector<std::string> args = SplitStringToVector(argstring, ',');
+	//std::vector<std::string> args = SplitStringToVector(argstring, ',');
 	
+	/*
 	EidosValue_Object *symbol_value = (EidosValue_Object *)p_arguments[0].get();
 	int symbol_count = symbol_value->Count();
 	
@@ -584,7 +585,8 @@ EidosValue_SP Eidos_ExecuteFunction_symtostr(const std::vector<EidosValue_SP> &p
 
 		
 	}
-	
+	*/
+	string_result->PushString(argstring);
 	return result_SP;
 }
 
