@@ -4316,6 +4316,35 @@ int8_t GenomeWalker::NucleotideAtCurrentPosition(void)
 	return -1;
 }
 
+// Get the IDs of mutations at some position in the genome
+std::vector<slim_mutationid_t> Genome::internalGetMutationIDsAtPosition(const slim_position_t &position)
+{	
+	// Count the number of mutations of the given type
+	Mutation *mut_block_ptr = gSLiM_Mutation_Block;
+	
+	std::vector<slim_mutationid_t> result;
+		
+	int mutrun_count = mutrun_count_;
+	for (int run_index = 0; run_index < mutrun_count; ++run_index)
+	{
+		MutationRun *mutrun = mutruns_[run_index].get();
+		int genome1_count = mutrun->size();
+		const MutationIndex *genome1_ptr = mutrun->begin_pointer_const();
+			
+		for (int mut_index = 0; mut_index < genome1_count; ++mut_index)
+		{
+			Mutation *mut_ptr = mut_block_ptr + genome1_ptr[mut_index];
+			// HACK: ignore mutType 1 because I'm good at this
+			if (mut_ptr->position_ == position && mut_ptr->mutation_type_ptr_->mutation_type_id_ != 1)
+				result.emplace_back(mut_ptr->mutation_id_);
+		}
+	}
+
+	return result;
+}
+
+
+
 
 
 

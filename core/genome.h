@@ -376,6 +376,9 @@ public:
 	// Memory usage tallying, for outputUsage()
 	size_t MemoryUsageForMutrunBuffers(void);
 	
+	// get mutation IDs at some position
+	std::vector<slim_mutationid_t> internalGetMutationIDsAtPosition(const slim_position_t &position);
+
 	
 	//
 	// Eidos support

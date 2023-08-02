@@ -65,10 +65,11 @@ const std::vector<EidosFunctionSignature_CSP> *SLiMSim::SLiMFunctionSignatures(v
 		sim_func_signatures_.emplace_back((EidosFunctionSignature *)(new EidosFunctionSignature("calcPairHeterozygosity", gSLiMSourceCode_calcPairHeterozygosity, kEidosValueMaskFloat | kEidosValueMaskSingleton, "SLiM"))->AddObject_S("genome1", gSLiM_Genome_Class)->AddObject_S("genome2", gSLiM_Genome_Class)->AddInt_OSN("start", gStaticEidosValueNULL)->AddInt_OSN("end", gStaticEidosValueNULL)->AddLogical_OS("infiniteSites", gStaticEidosValue_LogicalT));
 		sim_func_signatures_.emplace_back((EidosFunctionSignature *)(new EidosFunctionSignature("calcHeterozygosity", gSLiMSourceCode_calcHeterozygosity, kEidosValueMaskFloat | kEidosValueMaskSingleton, "SLiM"))->AddObject("genomes", gSLiM_Genome_Class)->AddObject_ON("muts", gSLiM_Mutation_Class, gStaticEidosValueNULL)->AddInt_OSN("start", gStaticEidosValueNULL)->AddInt_OSN("end", gStaticEidosValueNULL));
 		sim_func_signatures_.emplace_back((EidosFunctionSignature *)(new EidosFunctionSignature("calcWattersonsTheta", gSLiMSourceCode_calcWattersonsTheta, kEidosValueMaskFloat | kEidosValueMaskSingleton, "SLiM"))->AddObject("genomes", gSLiM_Genome_Class)->AddObject_ON("muts", gSLiM_Mutation_Class, gStaticEidosValueNULL)->AddInt_OSN("start", gStaticEidosValueNULL)->AddInt_OSN("end", gStaticEidosValueNULL));
-		
 		// Other built-in SLiM functions
 		sim_func_signatures_.emplace_back((EidosFunctionSignature *)(new EidosFunctionSignature("summarizeIndividuals", SLiM_ExecuteFunction_summarizeIndividuals, kEidosValueMaskFloat, "SLiM"))->AddObject("individuals", gSLiM_Individual_Class)->AddInt("dim")->AddNumeric("spatialBounds")->AddString_S("operation")->AddLogicalEquiv_OSN("empty", gStaticEidosValue_Float0)->AddLogical_OS("perUnitArea", gStaticEidosValue_LogicalF)->AddString_OSN("spatiality", gStaticEidosValueNULL));
 		sim_func_signatures_.emplace_back((EidosFunctionSignature *)(new EidosFunctionSignature("treeSeqMetadata", SLiM_ExecuteFunction_treeSeqMetadata, kEidosValueMaskObject | kEidosValueMaskSingleton, gEidosDictionaryRetained_Class, "SLiM"))->AddString_S("filePath")->AddLogical_OS("userData", gStaticEidosValue_LogicalT));
+		sim_func_signatures_.emplace_back((EidosFunctionSignature *)(new EidosFunctionSignature("calcHeterozygosityAtPosition", SLiM_ExecuteFunction_calcHeterozygosityAtPosition, kEidosValueMaskFloat, "SLiM"))->AddObject("individuals", gSLiM_Individual_Class)->AddInt("positions"));
+
 	}
 	
 	return &sim_func_signatures_;
@@ -1748,6 +1749,89 @@ EidosValue_SP SLiM_ExecuteFunction_treeSeqMetadata(const std::vector<EidosValue_
 	objectElement->ContentsChanged("treeSeqMetadata()");
 	return result_SP;
 }
+
+// (float$)calcHeterozygosityAtPosition(o<Individual> individuals, i positions)
+EidosValue_SP SLiM_ExecuteFunction_calcHeterozygosityAtPosition(const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter)
+{
+	EidosValue_Object *individuals_value = (EidosValue_Object *)p_arguments[0].get();
+	EidosValue *positions_value = p_arguments[1].get();
+
+	int nInds = individuals_value->Count();
+	int nPos = positions_value->Count();
+	std::vector<slim_position_t> positions; 
+	positions.reserve(nPos);
+
+	// Get all positions in a vector
+	for (int i = 0; i < nPos; ++i)
+	{
+		positions.push_back(SLiMCastToPositionTypeOrRaise(positions_value->IntAtIndex(i, nullptr)));
+	}
+
+	// Keep track of the number of heterozygous/homozygous individuals for each position
+	std::vector<int> hetCounts(nPos);
+
+
+	// Iterate over individuals
+	for (int i = 0; i < nInds; ++i)
+	{
+		Individual *ind __attribute__((used)) = (Individual *)individuals_value->ObjectElementAtIndex(i, nullptr);
+		std::vector<Genome*> genomes = {ind->genome1_, ind->genome2_};
+		// Iterate over positions
+		for (int j = 0; j < nPos; ++j)
+		{
+			// Get all mutations at that position
+			std::vector<slim_mutationid_t> mutsGenome1 = genomes[0]->internalGetMutationIDsAtPosition(positions[j]);
+			std::vector<slim_mutationid_t> mutsGenome2 = genomes[1]->internalGetMutationIDsAtPosition(positions[j]);
+
+			// If there's nothing there, continue
+			if (mutsGenome1.size() == 0 && mutsGenome2.size() == 0)
+			{
+				continue;
+			}
+
+			// If only one of the genomes is completely empty, then all the mutations are heterozygous
+			if (mutsGenome1.size() == 0 || mutsGenome2.size() == 0)
+			{
+				hetCounts[j] += (mutsGenome1.size() + mutsGenome2.size());
+				continue;
+			}
+
+			for (int l = 0; l < 5; ++l)
+			{
+
+			}
+
+			// Sort ids
+			std::sort(mutsGenome1.begin(), mutsGenome1.end());
+			std::sort(mutsGenome2.begin(), mutsGenome2.end());
+
+			int nTotalMuts = mutsGenome1.size() + mutsGenome2.size();
+			// Find the set difference between the two genomes: the ones in the sd are heterozygous
+			std::vector<slim_mutationid_t> setDiff(nTotalMuts);
+			std::vector<slim_mutationid_t>::iterator it;
+
+			it = std::set_difference(mutsGenome1.begin(), mutsGenome1.end(), mutsGenome2.begin(), mutsGenome2.end(),
+								setDiff.begin(), 
+								[](auto& a, auto& b) { return (int64_t)(a) < (int64_t)(b); });
+			setDiff.resize(it-setDiff.begin());
+
+			// add them to the accumulating list
+			hetCounts[j] += setDiff.size();
+
+		}
+	}
+
+	// work out the heterozygosity for each locus
+	std::vector<double> out(nPos);
+	for (int j = 0; j < nPos; ++j)
+	{
+		out[j] = (double)(hetCounts[j])/(double)(nInds);
+	}
+
+	return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float_vector{out});
+
+}
+
 
 
 
