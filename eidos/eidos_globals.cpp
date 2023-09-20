@@ -2761,6 +2761,7 @@ const std::string &gEidosStr_weights = EidosRegisteredString("weights", gEidosID
 const std::string &gEidosStr_c = EidosRegisteredString("c", gEidosID_c);
 const std::string &gEidosStr_n = EidosRegisteredString("n", gEidosID_n);
 const std::string &gEidosStr_s = EidosRegisteredString("s", gEidosID_s);
+const std::string &gEidosStr_la = EidosRegisteredString("la", gEidosID_laplace);
 const std::string &gEidosStr_x = EidosRegisteredString("x", gEidosID_x);
 const std::string &gEidosStr_y = EidosRegisteredString("y", gEidosID_y);
 const std::string &gEidosStr_z = EidosRegisteredString("z", gEidosID_z);

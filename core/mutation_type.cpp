@@ -41,6 +41,7 @@ std::ostream& operator<<(std::ostream& p_out, DFEType p_dfe_type)
 		case DFEType::kExponential:		p_out << gStr_e;		break;
 		case DFEType::kNormal:			p_out << gEidosStr_n;	break;
 		case DFEType::kWeibull:			p_out << gStr_w;		break;
+		case DFEType::kLaplace:			p_out << gEidosStr_la;	break;
 		case DFEType::kScript:			p_out << gEidosStr_s;	break;
 	}
 	
@@ -136,6 +137,11 @@ void MutationType::ParseDFEParameters(std::string &p_dfe_type_string, const Eido
 		*p_dfe_type = DFEType::kWeibull;
 		expected_dfe_param_count = 2;
 	}
+	else if (p_dfe_type_string.compare(gEidosStr_la) == 0)
+	{
+		*p_dfe_type = DFEType::kLaplace;
+		expected_dfe_param_count = 2;
+	}
 	else if (p_dfe_type_string.compare(gEidosStr_s) == 0)
 	{
 		*p_dfe_type = DFEType::kScript;
@@ -199,6 +205,11 @@ void MutationType::ParseDFEParameters(std::string &p_dfe_type_string, const Eido
 			if ((*p_dfe_parameters)[1] <= 0.0)
 				EIDOS_TERMINATION << "ERROR (MutationType::ParseDFEParameters): a DFE of type \"w\" must have a shape parameter > 0." << EidosTerminate();
 			break;
+		case DFEType::kLaplace:
+			// width must be > 0
+			if ((*p_dfe_parameters)[1] <= 0.0)
+				EIDOS_TERMINATION << "ERROR (MutationType::ParseDFEParameters): a DFE of type \"la\" must have a width parameter > 0." << EidosTerminate();
+			break;
 		case DFEType::kScript:
 			// no limits on script here; the script is checked when it gets tokenized/parsed/executed
 			break;
@@ -214,7 +225,8 @@ double MutationType::DrawSelectionCoefficient(void) const
 		case DFEType::kExponential:		return gsl_ran_exponential(EIDOS_GSL_RNG, dfe_parameters_[0]);
 		case DFEType::kNormal:			return gsl_ran_gaussian(EIDOS_GSL_RNG, dfe_parameters_[1]) + dfe_parameters_[0];
 		case DFEType::kWeibull:			return gsl_ran_weibull(EIDOS_GSL_RNG, dfe_parameters_[0], dfe_parameters_[1]);
-			
+		case DFEType::kLaplace:			return gsl_ran_laplace(EIDOS_GSL_RNG, dfe_parameters_[1]) + dfe_parameters_[0];
+
 		case DFEType::kScript:
 		{
 			// We have a script string that we need to execute, and it will return a float or integer to us.  This
@@ -363,6 +375,7 @@ EidosValue_SP MutationType::GetProperty(EidosGlobalStringID p_property_id)
 			static EidosValue_SP static_dfe_string_e;
 			static EidosValue_SP static_dfe_string_n;
 			static EidosValue_SP static_dfe_string_w;
+			static EidosValue_SP static_dfe_string_la;
 			static EidosValue_SP static_dfe_string_s;
 			
 			if (!static_dfe_string_f)
@@ -372,6 +385,7 @@ EidosValue_SP MutationType::GetProperty(EidosGlobalStringID p_property_id)
 				static_dfe_string_e = EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String_singleton(gStr_e));
 				static_dfe_string_n = EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String_singleton(gEidosStr_n));
 				static_dfe_string_w = EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String_singleton(gStr_w));
+				static_dfe_string_la = EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String_singleton(gEidosStr_la));
 				static_dfe_string_s = EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String_singleton(gEidosStr_s));
 			}
 			
@@ -382,6 +396,7 @@ EidosValue_SP MutationType::GetProperty(EidosGlobalStringID p_property_id)
 				case DFEType::kExponential:		return static_dfe_string_e;
 				case DFEType::kNormal:			return static_dfe_string_n;
 				case DFEType::kWeibull:			return static_dfe_string_w;
+				case DFEType::kLaplace:			return static_dfe_string_la;
 				case DFEType::kScript:			return static_dfe_string_s;
 				default:						return gStaticEidosValueNULL;	// never hit; here to make the compiler happy
 			}
@@ -696,7 +711,7 @@ EidosValue_SP MutationType::ExecuteMethod_setDistribution(EidosGlobalStringID p_
 	sim_.mutation_types_changed_ = true;
 	
 	// check whether we are now using a DFE type that is non-neutral; check and set pure_neutral_ and all_pure_neutral_DFE_
-	if ((dfe_type_ != DFEType::kFixed) || (dfe_parameters_[0] != 0.0))
+	if ((dfe_type_ != DFEType::kFixed) || (dfe_parameters_[1] != 0.0))
 	{
 		sim_.pure_neutral_ = false;
 		all_pure_neutral_DFE_ = false;
