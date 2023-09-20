@@ -546,6 +546,7 @@ QVariant QtSLiMMutTypeTableModel::data(const QModelIndex &p_index, int role) con
                     case DFEType::kExponential:		return QVariant(QString("exp"));
                     case DFEType::kNormal:			return QVariant(QString("normal"));
                     case DFEType::kWeibull:			return QVariant(QString("Weibull"));
+                    case DFEType::kLaplace:         return QVariant(QString("Laplace"));
                     case DFEType::kScript:			return QVariant(QString("script"));
                 }
             }
@@ -580,6 +581,7 @@ QVariant QtSLiMMutTypeTableModel::data(const QModelIndex &p_index, int role) con
                             case DFEType::kExponential:		paramSymbol = "s̄"; break;
                             case DFEType::kNormal:			paramSymbol = (paramIndex == 0 ? "s̄" : "σ"); break;
                             case DFEType::kWeibull:			paramSymbol = (paramIndex == 0 ? "λ" : "k"); break;
+                            case DFEType::kLaplace:         paramSymbol = (paramIndex == 0 ? "s̄" : "b" ); break;
                             case DFEType::kScript:			break;
                         }
                         

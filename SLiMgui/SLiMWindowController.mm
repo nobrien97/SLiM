@@ -4775,6 +4775,7 @@
 						case DFEType::kExponential:		return @"exp";
 						case DFEType::kNormal:			return @"normal";
 						case DFEType::kWeibull:			return @"Weibull";
+						case DFEType::kLaplace:			return @"Laplace";
 						case DFEType::kScript:			return @"script";
 					}
 				}
@@ -4810,6 +4811,7 @@
 								case DFEType::kExponential:		paramSymbol = @"s̄"; break;
 								case DFEType::kNormal:			paramSymbol = (paramIndex == 0 ? @"s̄" : @"σ"); break;
 								case DFEType::kWeibull:			paramSymbol = (paramIndex == 0 ? @"λ" : @"k"); break;
+								case DFEType::kLaplace:			paramSymbol = (paramIndex == 0 ? @"s̄" : @"b"); break;								
 								case DFEType::kScript:			break;
 							}
 							
