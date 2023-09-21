@@ -174,6 +174,7 @@ typedef enum SLiMLaunchAction
 				case 17:chapterName = @"Tree-sequence recording: tracking population history";				break;
 				case 18:chapterName = @"Modeling explicit nucleotides";										break;
 				case 19:chapterName = @"Multispecies modeling";												break;
+				case 22:chapterName = @"Parallel SLiM: Running SLiM multithreaded";							break;
 				default: break;
 			}
 			
@@ -223,7 +224,7 @@ typedef enum SLiMLaunchAction
 	// We always use 4 threads; we don't want to hog the whole machine, just run with a couple threads.
 	// We pass false for active_threads to let the worker threads sleep, otherwise the CPU is pegged
 	// the whole time SLiMgui is running, even when sitting idle.
-	Eidos_WarmUpOpenMP(&std::cout, true, 4, false);
+	Eidos_WarmUpOpenMP(&std::cout, true, 4, false, /* default per-task thread counts */ "");
 #endif
 	
 	Eidos_WarmUp();

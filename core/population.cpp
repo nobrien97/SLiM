@@ -604,7 +604,10 @@ void Population::DoDeferredReproduction(void)
 #endif
 	
 	// now generate the genomes of the deferred offspring in parallel
-#pragma omp parallel for schedule(dynamic, 1) default(none) shared(deferred_count_nonrecombinant) if(deferred_count_nonrecombinant >= EIDOS_OMPMIN_DEFERRED_REPRO)
+	EIDOS_BENCHMARK_START(EidosBenchmarkType::k_DEFERRED_REPRO);
+	
+	EIDOS_THREAD_COUNT(gEidos_OMP_threads_DEFERRED_REPRO);
+#pragma omp parallel for schedule(dynamic, 1) default(none) shared(deferred_count_nonrecombinant) if(deferred_count_nonrecombinant >= EIDOS_OMPMIN_DEFERRED_REPRO) num_threads(thread_count)
 	for (size_t deferred_index = 0; deferred_index < deferred_count_nonrecombinant; ++deferred_index)
 	{
 		SLiM_DeferredReproduction_NonRecombinant &deferred_rec = deferred_reproduction_nonrecombinant_[deferred_index];
@@ -623,7 +626,8 @@ void Population::DoDeferredReproduction(void)
 		}
 	}
 	
-#pragma omp parallel for schedule(dynamic, 1) default(none) shared(deferred_count_recombinant) if(deferred_count_recombinant >= EIDOS_OMPMIN_DEFERRED_REPRO)
+	//EIDOS_THREAD_COUNT(gEidos_OMP_threads_DEFERRED_REPRO);	// this loop shares the same key
+#pragma omp parallel for schedule(dynamic, 1) default(none) shared(deferred_count_recombinant) if(deferred_count_recombinant >= EIDOS_OMPMIN_DEFERRED_REPRO) num_threads(thread_count)
 	for (size_t deferred_index = 0; deferred_index < deferred_count_recombinant; ++deferred_index)
 	{
 		SLiM_DeferredReproduction_Recombinant &deferred_rec = deferred_reproduction_recombinant_[deferred_index];
@@ -637,6 +641,8 @@ void Population::DoDeferredReproduction(void)
 			DoRecombinantMutation(deferred_rec.mutorigin_subpop_, *deferred_rec.child_genome_, deferred_rec.strand1_, deferred_rec.strand2_, deferred_rec.sex_, deferred_rec.break_vec_, nullptr);
 		}
 	}
+	
+	EIDOS_BENCHMARK_END(EidosBenchmarkType::k_DEFERRED_REPRO);
 	
 	// Clear the deferred reproduction queue
 	deferred_reproduction_nonrecombinant_.clear();
@@ -2112,15 +2118,14 @@ void Population::EvolveSubpopulation(Subpopulation &p_subpop, bool p_mate_choice
 					
 					// We need to make sure we have adequate capacity in the global mutation block for new mutations before we go parallel;
 					// if SLiM_IncreaseMutationBlockCapacity() is called while parallel, it is a fatal error.  So we make a guess at how
-					// much free space we will need, and preallocate here as needed.
+					// much free space we will need, and preallocate here as needed, regardless of will_parallelize; no reason not to.
 #ifdef _OPENMP
-					bool will_parallelize = can_parallelize && (migrants_to_generate >= 100);
+					bool will_parallelize = can_parallelize && (migrants_to_generate >= EIDOS_OMPMIN_WF_REPRO);
 					size_t est_mutation_block_slots_remaining_PRE = 0;
 					//size_t actual_mutation_block_slots_remaining_PRE = 0;
 					double overall_mutation_rate = 0;
 					size_t est_slots_needed = 0;
 					
-					if (will_parallelize)
 					{
 						do {
 							int registry_size;
@@ -2155,7 +2160,9 @@ void Population::EvolveSubpopulation(Subpopulation &p_subpop, bool p_mate_choice
 						// a simple loop for the base case with no selfing, no cloning, and no callbacks; we split into two cases by sex_enabled for maximal speed
 						if (sex_enabled)
 						{
-#pragma omp parallel default(none) shared(gEidos_RNG_PERTHREAD, migrants_to_generate, base_child_count, base_pedigree_id, pedigrees_enabled, p_subpop, source_subpop, child_sex, prevent_incidental_selfing) if(will_parallelize)
+							EIDOS_BENCHMARK_START(EidosBenchmarkType::k_WF_REPRO);
+							EIDOS_THREAD_COUNT(gEidos_OMP_threads_WF_REPRO);
+#pragma omp parallel default(none) shared(gEidos_RNG_PERTHREAD, migrants_to_generate, base_child_count, base_pedigree_id, pedigrees_enabled, p_subpop, source_subpop, child_sex, prevent_incidental_selfing) if(will_parallelize) num_threads(thread_count)
 							{
 								gsl_rng *parallel_rng = EIDOS_GSL_RNG(omp_get_thread_num());
 								
@@ -2181,12 +2188,15 @@ void Population::EvolveSubpopulation(Subpopulation &p_subpop, bool p_mate_choice
 									DoCrossoverMutation(&source_subpop, *p_subpop.child_genomes_[2 * this_child_index + 1], parent2, child_sex, IndividualSex::kMale, nullptr, nullptr);
 								}
 							}
+							EIDOS_BENCHMARK_END(EidosBenchmarkType::k_WF_REPRO);
 							
 							child_count += migrants_to_generate;
 						}
 						else
 						{
-#pragma omp parallel default(none) shared(gEidos_RNG_PERTHREAD, migrants_to_generate, base_child_count, base_pedigree_id, pedigrees_enabled, p_subpop, source_subpop, child_sex, prevent_incidental_selfing) if(will_parallelize)
+							EIDOS_BENCHMARK_START(EidosBenchmarkType::k_WF_REPRO);
+							EIDOS_THREAD_COUNT(gEidos_OMP_threads_WF_REPRO);
+#pragma omp parallel default(none) shared(gEidos_RNG_PERTHREAD, migrants_to_generate, base_child_count, base_pedigree_id, pedigrees_enabled, p_subpop, source_subpop, child_sex, prevent_incidental_selfing) if(will_parallelize) num_threads(thread_count)
 							{
 								gsl_rng *parallel_rng = EIDOS_GSL_RNG(omp_get_thread_num());
 								
@@ -2216,6 +2226,7 @@ void Population::EvolveSubpopulation(Subpopulation &p_subpop, bool p_mate_choice
 									DoCrossoverMutation(&source_subpop, *p_subpop.child_genomes_[2 * this_child_index + 1], parent2, child_sex, IndividualSex::kHermaphrodite, nullptr, nullptr);
 								}
 							}
+							EIDOS_BENCHMARK_END(EidosBenchmarkType::k_WF_REPRO);
 							
 							child_count += migrants_to_generate;
 						}
@@ -2223,7 +2234,9 @@ void Population::EvolveSubpopulation(Subpopulation &p_subpop, bool p_mate_choice
 					else
 					{
 						// the full loop with support for selfing/cloning (but no callbacks, since we're in that overall branch)
-#pragma omp parallel default(none) shared(gEidos_RNG_PERTHREAD, migrants_to_generate, number_to_clone, number_to_self, base_child_count, base_pedigree_id, pedigrees_enabled, p_subpop, source_subpop, sex_enabled, child_sex, recording_tree_sequence, prevent_incidental_selfing) if(will_parallelize)
+						EIDOS_BENCHMARK_START(EidosBenchmarkType::k_WF_REPRO);
+						EIDOS_THREAD_COUNT(gEidos_OMP_threads_WF_REPRO);
+#pragma omp parallel default(none) shared(gEidos_RNG_PERTHREAD, migrants_to_generate, number_to_clone, number_to_self, base_child_count, base_pedigree_id, pedigrees_enabled, p_subpop, source_subpop, sex_enabled, child_sex, recording_tree_sequence, prevent_incidental_selfing) if(will_parallelize) num_threads(thread_count)
 						{
 							gsl_rng *parallel_rng = EIDOS_GSL_RNG(omp_get_thread_num());
 							
@@ -2325,6 +2338,7 @@ void Population::EvolveSubpopulation(Subpopulation &p_subpop, bool p_mate_choice
 								}
 							}
 						}
+						EIDOS_BENCHMARK_END(EidosBenchmarkType::k_WF_REPRO);
 						
 						child_count += migrants_to_generate;
 					}
@@ -2950,6 +2964,10 @@ void Population::DoCrossoverMutation(Subpopulation *p_source_subpop, Genome &p_c
 		bool saw_error_in_critical = false;
 #endif
 		
+		// BCH 7/29/2023: I tried making a simple code path here that generated the new MutationIndex values in a critical region and then
+		// did all the rest of the work outside the critical region.  It wasn't a noticeable win; mutation generation just isn't that
+		// central of a bottleneck.  If you're making so many mutations that contention for this critical region matters, you're probably
+		// completely bogged down in recombination and mutation registry maintenance.  Not worth the added code complexity.
 #pragma omp critical (MutationAlloc)
 		{
 			try {
@@ -5216,7 +5234,9 @@ void Population::ClearParentalGenomes(void)
 {
 	if (species_.HasGenetics())
 	{
-#pragma omp parallel default(none)
+		EIDOS_BENCHMARK_START(EidosBenchmarkType::k_PARENTS_CLEAR);
+		EIDOS_THREAD_COUNT(gEidos_OMP_threads_PARENTS_CLEAR);
+#pragma omp parallel default(none) num_threads(thread_count)
 		{
 			for (const std::pair<const slim_objectid_t,Subpopulation*> &subpop_pair : subpops_)
 			{
@@ -5251,6 +5271,7 @@ void Population::ClearParentalGenomes(void)
 				}
 			}
 		}
+		EIDOS_BENCHMARK_END(EidosBenchmarkType::k_PARENTS_CLEAR);
 	}
 }
 
@@ -5272,7 +5293,9 @@ void Population::UniqueMutationRuns(void)
 	
 	// Each mutation run index is now uniqued individually, because mutation runs cannot be used at more than one position.
 	// This prevents empty mutation runs, in particular, from getting shared across positions, a necessary restriction.
-#pragma omp parallel for schedule(dynamic) default(none) shared(mutrun_count) firstprivate(operation_id) reduction(+: total_mutruns) reduction(+: total_hash_collisions) reduction(+: total_identical) reduction(+: total_uniqued_away) reduction(+: total_preexisting) reduction(+: total_final)
+	EIDOS_BENCHMARK_START(EidosBenchmarkType::k_UNIQUE_MUTRUNS);
+	EIDOS_THREAD_COUNT(gEidos_OMP_threads_UNIQUE_MUTRUNS);
+#pragma omp parallel for schedule(dynamic) default(none) shared(mutrun_count) firstprivate(operation_id) reduction(+: total_mutruns) reduction(+: total_hash_collisions) reduction(+: total_identical) reduction(+: total_uniqued_away) reduction(+: total_preexisting) reduction(+: total_final) num_threads(thread_count)
 	for (int mutrun_index = 0; mutrun_index < mutrun_count; ++mutrun_index)
 	{
 		std::unordered_multimap<int64_t, const MutationRun *> runmap;	// BCH 4/30/2023: switched to unordered, it is faster
@@ -5363,6 +5386,7 @@ void Population::UniqueMutationRuns(void)
 			}
 		}
 	}
+	EIDOS_BENCHMARK_END(EidosBenchmarkType::k_UNIQUE_MUTRUNS);
 	
 #if SLIM_DEBUG_MUTATION_RUNS
 	std::clock_t end = std::clock();
@@ -5752,13 +5776,25 @@ void Population::MaintainMutationRegistry(void)
 	
 	// go through all genomes and increment mutation reference counts; this updates total_genome_count_
 	// this calls TallyMutationRunReferencesForPopulation() as a side effect, forced by the "true" argument
-	TallyMutationReferencesAcrossPopulation(true);
+	{
+		EIDOS_BENCHMARK_START(EidosBenchmarkType::k_MUT_TALLY);
+		TallyMutationReferencesAcrossPopulation(true);
+		EIDOS_BENCHMARK_END(EidosBenchmarkType::k_MUT_TALLY);
+	}
 	
 	// free unused mutation runs, relying upon the tally done above
-	FreeUnusedMutationRuns();
+	{
+		EIDOS_BENCHMARK_START(EidosBenchmarkType::k_MUTRUN_FREE);
+		FreeUnusedMutationRuns();
+		EIDOS_BENCHMARK_END(EidosBenchmarkType::k_MUTRUN_FREE);
+	}
 	
 	// remove any mutations that have been eliminated or have fixed
-	RemoveAllFixedMutations();
+	{
+		EIDOS_BENCHMARK_START(EidosBenchmarkType::k_MUT_FREE);
+		RemoveAllFixedMutations();
+		EIDOS_BENCHMARK_END(EidosBenchmarkType::k_MUT_FREE);
+	}
 	
 	// check that the mutation registry does not have any "zombies" – mutations that have been removed and should no longer be there
 	// also check for any mutations that are in the registry but do not have the state MutationState::kInRegistry
@@ -6159,7 +6195,11 @@ void Population::FreeUnusedMutationRuns(void)
 	
 	// free all in-use MutationRun objects that are not actually in use (use count == 0)
 	// each thread does its own checking and freeing, for its own MutationRunContext
-#pragma omp parallel default(none) num_threads(species_.SpeciesMutationRunContextCount())
+#ifdef _OPENMP
+	int mutrun_context_count = species_.SpeciesMutationRunContextCount();
+#endif
+	
+#pragma omp parallel default(none) num_threads(mutrun_context_count)
 	{
 		MutationRunContext &mutrun_context = species_.SpeciesMutationRunContextForThread(omp_get_thread_num());
 		MutationRunPool &inuse_pool = mutrun_context.in_use_pool_;
@@ -6305,7 +6345,7 @@ slim_refcount_t Population::TallyMutationReferencesAcrossPopulation(bool p_force
 	else
 	{
 		// SLOW PATH: Increment the refcounts through all pointers to Mutation in all genomes
-		SLiM_ZeroRefcountBlock(mutation_registry_);
+		SLiM_ZeroRefcountBlock(mutation_registry_, /* p_registry_only */ community_.AllSpecies().size() > 1);
 		
 #ifdef SLIMGUI
 		Mutation *mut_block_ptr = gSLiM_Mutation_Block;
@@ -6484,7 +6524,7 @@ slim_refcount_t Population::TallyMutationReferencesAcrossSubpopulations(std::vec
 	else
 	{
 		// SLOW PATH: Increment the refcounts through all pointers to Mutation in all genomes
-		SLiM_ZeroRefcountBlock(mutation_registry_);
+		SLiM_ZeroRefcountBlock(mutation_registry_, /* p_registry_only */ community_.AllSpecies().size() > 1);
 		
 		for (Subpopulation *subpop : *p_subpops_to_tally)
 		{
@@ -6553,7 +6593,7 @@ slim_refcount_t Population::TallyMutationReferencesAcrossGenomes(std::vector<Gen
 	else
 	{
 		// SLOW PATH: Increment the refcounts through all pointers to Mutation in all genomes
-		SLiM_ZeroRefcountBlock(mutation_registry_);
+		SLiM_ZeroRefcountBlock(mutation_registry_, /* p_registry_only */ community_.AllSpecies().size() > 1);
 		
 		for (slim_popsize_t i = 0; i < genome_count; i++)
 		{
@@ -6592,10 +6632,14 @@ slim_refcount_t Population::TallyMutationReferencesAcrossGenomes(std::vector<Gen
 void Population::_TallyMutationReferences_FAST_FromMutationRunUsage(void)
 {
 	// first zero out the refcounts in all registered Mutation objects
-	SLiM_ZeroRefcountBlock(mutation_registry_);
+	SLiM_ZeroRefcountBlock(mutation_registry_, /* p_registry_only */ community_.AllSpecies().size() > 1);
 	
 	// each thread does its own tallying, for its own MutationRunContext
-#pragma omp parallel default(none) shared(gSLiM_Mutation_Refcounts) num_threads(species_.SpeciesMutationRunContextCount())
+#ifdef _OPENMP
+	int mutrun_context_count = species_.SpeciesMutationRunContextCount();
+#endif
+	
+#pragma omp parallel default(none) shared(gSLiM_Mutation_Refcounts) num_threads(mutrun_context_count)
 	{
 		MutationRunContext &mutrun_context = species_.SpeciesMutationRunContextForThread(omp_get_thread_num());
 		MutationRunPool &inuse_pool = mutrun_context.in_use_pool_;

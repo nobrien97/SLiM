@@ -32,19 +32,16 @@
 #include <numeric>
 #include <algorithm>
 #include <unordered_map>
-
-#if (SLIMPROFILING == 1)
+#include <cstdint>
 
 #if defined(__APPLE__) && defined(__MACH__)
-// On macOS we use mach_absolute_time() for profiling (only in SLiMgui when profiling is enabled)
+// On macOS we use mach_absolute_time() for profiling and benchmarking
 #include <mach/mach_time.h>
 #define MACH_PROFILING
 #else
-// On other platforms we use std::chrono::steady_clock (only in QtSLiM when profiling is enabled)
+// On other platforms we use std::chrono::steady_clock
 #include <chrono>
 #define CHRONO_PROFILING
-#endif
-
 #endif
 
 #include "eidos_openmp.h"
@@ -59,9 +56,24 @@ class EidosToken;
 #define EIDOS_VERSION_FLOAT		(3.01)
 
 
-// These should be called once at startup to give Eidos an opportunity to initialize static state
 #ifdef _OPENMP
-void Eidos_WarmUpOpenMP(std::ostream *outstream, bool changed_max_thread_count, int new_max_thread_count, bool active_threads);
+typedef enum {
+	kDefault = 0,				// indicates that one of the other values should be chosen heuristically
+	kMaxThreads,				// use EIDOS_OMP_MAX_THREADS for everything
+	kMacStudio2022_16,			// Mac Studio 2022 (Mac13,2), 20-core M1 Ultra (16 performance cores)
+	kXeonGold2_40,				// two 20-core (40-hyperthreaded) Intel Xeon Gold 6148 2.4GHz (40 physical cores)
+} EidosPerTaskThreadCounts;
+
+// Some state variables for user output regarding the OpenMP configuration
+extern EidosPerTaskThreadCounts gEidosDefaultPerTaskThreadCounts;	// the default set on the command line, or kDefault
+extern std::string gEidosPerTaskThreadCountsSetName;
+extern int gEidosPerTaskOriginalMaxThreadCount, gEidosPerTaskClippedMaxThreadCount;
+
+// Eidos_WarmUpOpenMP() should be called once at startup to give Eidos an opportunity to initialize static state
+void _Eidos_SetOpenMPThreadCounts(EidosPerTaskThreadCounts per_task_thread_counts);
+void _Eidos_ChooseDefaultOpenMPThreadCounts(void);
+void _Eidos_ClipOpenMPThreadCounts(void);
+void Eidos_WarmUpOpenMP(std::ostream *outstream, bool changed_max_thread_count, int new_max_thread_count, bool active_threads, std::string thread_count_set_name);
 #endif
 
 void Eidos_WarmUp(void);
@@ -257,6 +269,84 @@ void Eidos_CheckRSSAgainstMax(std::string p_message1, std::string p_message2);
 
 // BCH 1/22/2023: Note that profiling can now be enabled for both command-line and GUI builds.  It is enabled
 // when SLIMPROFILING is defined to 1; if it is undefined, 0, or any other value, profiling is disabled.
+// BCH 8/5/2023: Also, note that the foundational profiling code is now also used for the EidosBenchmark facility,
+// even when SLiM is not built for profiling, so that foundational code is now always included in the build.
+
+#if defined(MACH_PROFILING)
+
+// This is the fastest clock, is available across OS X versions, and gives us nanoseconds.  The only disadvantage to
+// it is that it is platform-specific, so we can only use this clock in SLiMgui and Eidos_GUI.  That is OK.  This
+// returns uint64_t in CPU-specific time units; see https://developer.apple.com/library/content/qa/qa1398/_index.html
+typedef uint64_t eidos_profile_t;
+
+// Get an uncorrected profile clock measurement (for EidosBenchmark), to be used as a start or end time
+inline __attribute__((always_inline)) eidos_profile_t Eidos_BenchmarkTime(void) { return mach_absolute_time(); }
+
+#elif defined(CHRONO_PROFILING)
+
+// For the <chrono> steady_clock time point representation, we will convert time points to nanoseconds since epoch
+typedef uint64_t eidos_profile_t;
+
+// Get an uncorrected profile clock measurement (for EidosBenchmark), to be used as a start or end time
+inline __attribute__((always_inline)) eidos_profile_t Eidos_BenchmarkTime(void) { return std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count(); }
+
+#endif
+
+#define EIDOS_BENCHMARK_START(x)	eidos_profile_t slim__benchmark_start = ((gEidosBenchmarkType == (x)) ? Eidos_BenchmarkTime() : 0);
+#define EIDOS_BENCHMARK_END(x)	if (gEidosBenchmarkType == (x)) gEidosBenchmarkAccumulator += (Eidos_BenchmarkTime() - slim__benchmark_start);
+
+// Convert an elapsed profiling time (the difference between two Eidos_ProfileTime() results) to seconds
+double Eidos_ElapsedProfileTime(eidos_profile_t p_elapsed_profile_time);
+
+
+// For benchmarking purposes, we now have a small timing facility that can time one selected
+// piece of code, reporting the total time taken in that one piece of code as the total runtime
+// of the SLiM model.  This is entirely separate from the user-level profiling feature that
+// generates a profile report of a whole running model, and it is not user-visible.  The piece
+// of code selected for timing is chosen with an internal Eidos function, _startBenchmark().
+// You can either end benchmarking with _stopBenchmark() and get the elapsed seconds inside
+// the code benchmarked, as the return value, or let a command-line run finish and get the
+// total benchmarked time as console output.  Note that EidosBenchmark does not attempt to
+// correct for its own overhead/lag, so it is less accurate than profiling; it should be
+// used where relative times are more important than absolute times, and where the time spent
+// for one execution of the benchmarked code block takes a significant amount of time (making
+// overhead/lag negligible).  The enum has stuff for SLiM as well, for convenience.
+
+typedef enum {
+	kNone = 0,
+	
+	// Eidos internal
+	k_SAMPLE_INDEX,					// making an index buffer for sample(), to use in the sampling algorithm
+	k_TABULATE_MAXBIN,				// calculating the maxbin value for tabulate(), if not user-supplied
+	
+	// SLiM internal parallel loops
+	k_AGE_INCR,						// age increment, at end of tick
+	k_DEFERRED_REPRO,				// deferred reproduction (without callbacks) in nonWF models
+	k_WF_REPRO,						// WF reproduction (without callbacks)
+	k_FITNESS_ASEX_1,				// fitness calculation, asexual, with individual fitnessScaling values but no non-neutral mutations
+	k_FITNESS_ASEX_2,				// fitness calculation, asexual, with neither individual fitnessScaling nor non-neutral mutations
+	k_FITNESS_ASEX_3,				// fitness calculation, asexual, with individual fitnessScaling values and non-neutral mutations
+	k_FITNESS_SEX_1,				// fitness calculation, sexual, with individual fitnessScaling values but no non-neutral mutations
+	k_FITNESS_SEX_2,				// fitness calculation, sexual, with neither individual fitnessScaling nor non-neutral mutations
+	k_FITNESS_SEX_3,				// fitness calculation, sexual, with individual fitnessScaling values and non-neutral mutations
+	k_MIGRANT_CLEAR,				// clearing the migrant flag of individuals, at end of tick
+	k_PARENTS_CLEAR,				// clearing the genomes of parents at generation switch, in WF models
+	k_UNIQUE_MUTRUNS,				// uniquing mutation runs (periodic bookkeeping)
+	k_SURVIVAL,						// evaluating survival in nonWF models (without callbacks)
+	
+	// SLiM, whole tasks (not parallel loops)
+	k_MUT_TALLY,					// tally mutation reference counts, in Population::MaintainMutationRegistry()
+	k_MUTRUN_FREE,					// free unused mutation runs, in Population::MaintainMutationRegistry()
+	k_MUT_FREE,						// free fixed or unused mutations, in Population::MaintainMutationRegistry()
+	k_SIMPLIFY_SORT_PRE,			// pre-sorting for simplification, in slim_sort_edges()
+	k_SIMPLIFY_SORT,				// sorting for simplification, in slim_sort_edges()
+	k_SIMPLIFY_SORT_POST,			// post-sorting for simplification, in slim_sort_edges()
+	k_SIMPLIFY_CORE,				// the core simplification algorithm, in Species::SimplifyTreeSequence()
+} EidosBenchmarkType;
+
+extern EidosBenchmarkType gEidosBenchmarkType;			// which code is being benchmarked in this run; kNone by default
+extern eidos_profile_t gEidosBenchmarkAccumulator;		// accumulated profile counts for the benchmarked code
+
 
 #if (SLIMPROFILING == 1)
 // PROFILING
@@ -273,26 +363,15 @@ extern double gEidos_ProfileLagSeconds;			// the clocked length of an empty prof
 
 #if defined(MACH_PROFILING)
 
-// This is the fastest clock, is available across OS X versions, and gives us nanoseconds.  The only disadvantage to
-// it is that it is platform-specific, so we can only use this clock in SLiMgui and Eidos_GUI.  That is OK.  This
-// returns uint64_t in CPU-specific time units; see https://developer.apple.com/library/content/qa/qa1398/_index.html
-typedef uint64_t eidos_profile_t;
-
 // Get a profile clock measurement, to be used as a start or end time
 inline __attribute__((always_inline)) eidos_profile_t Eidos_ProfileTime(void) { gEidos_ProfileCounter++; return mach_absolute_time(); }
 
 #elif defined(CHRONO_PROFILING)
 
-// For the <chrono> steady_clock time point representation, we will convert time points to nanoseconds since epoch
-typedef uint64_t eidos_profile_t;
-
 // Get a profile clock measurement, to be used as a start or end time
 inline __attribute__((always_inline)) eidos_profile_t Eidos_ProfileTime(void) { gEidos_ProfileCounter++; return std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count(); }
 
 #endif
-
-// Convert an elapsed profiling time (the difference between two Eidos_ProfileTime() results) to seconds
-double Eidos_ElapsedProfileTime(eidos_profile_t p_elapsed_profile_time);
 
 // This should be called immediately before profiling to measure the overhead and lag for profile blocks
 void Eidos_PrepareForProfiling(void);
@@ -513,73 +592,6 @@ std::string Eidos_string_escaped_CSV(const std::string &unescapedString);							
 // BCH 13 December 2017: no longer used, commenting this out
 //std::string Eidos_Exec(const char *p_cmd);
 
-// Get indexes that would result in sorted ordering of a vector.  This rather nice code is adapted from http://stackoverflow.com/a/12399290/2752221
-template <typename T>
-std::vector<int64_t> EidosSortIndexes(const std::vector<T> &p_v, bool p_ascending = true)
-{
-	// initialize original index locations
-	std::vector<int64_t> idx(p_v.size());
-	std::iota(idx.begin(), idx.end(), 0);
-	
-	// sort indexes based on comparing values in v
-	if (p_ascending)
-		std::sort(idx.begin(), idx.end(), [&p_v](int64_t i1, int64_t i2) {return p_v[i1] < p_v[i2];});
-	else
-		std::sort(idx.begin(), idx.end(), [&p_v](int64_t i1, int64_t i2) {return p_v[i1] > p_v[i2];});
-	
-	return idx;
-}
-
-template <>
-inline std::vector<int64_t> EidosSortIndexes<double>(const std::vector<double> &p_v, bool p_ascending)
-{
-	// initialize original index locations
-	std::vector<int64_t> idx(p_v.size());
-	std::iota(idx.begin(), idx.end(), 0);
-	
-	// sort indexes based on comparing values in v
-	// this specialization for type double sorts NaNs to the end
-	if (p_ascending)
-		std::sort(idx.begin(), idx.end(), [&p_v](int64_t i1, int64_t i2) {return std::isnan(p_v[i2]) || (p_v[i1] < p_v[i2]);});
-	else
-		std::sort(idx.begin(), idx.end(), [&p_v](int64_t i1, int64_t i2) {return std::isnan(p_v[i2]) || (p_v[i1] > p_v[i2]);});
-	
-	return idx;
-}
-
-template <typename T>
-std::vector<int64_t> EidosSortIndexes(const T *p_v, size_t p_size, bool p_ascending = true)
-{
-	// initialize original index locations
-	std::vector<int64_t> idx(p_size);
-	std::iota(idx.begin(), idx.end(), 0);
-	
-	// sort indexes based on comparing values in v
-	if (p_ascending)
-		std::sort(idx.begin(), idx.end(), [p_v](int64_t i1, int64_t i2) {return p_v[i1] < p_v[i2];});
-	else
-		std::sort(idx.begin(), idx.end(), [p_v](int64_t i1, int64_t i2) {return p_v[i1] > p_v[i2];});
-	
-	return idx;
-}
-
-template <>
-inline std::vector<int64_t> EidosSortIndexes<double>(const double *p_v, size_t p_size, bool p_ascending)
-{
-	// initialize original index locations
-	std::vector<int64_t> idx(p_size);
-	std::iota(idx.begin(), idx.end(), 0);
-	
-	// sort indexes based on comparing values in v
-	// this specialization for type double sorts NaNs to the end
-	if (p_ascending)
-		std::sort(idx.begin(), idx.end(), [p_v](int64_t i1, int64_t i2) {return std::isnan(p_v[i2]) || (p_v[i1] < p_v[i2]);});
-	else
-		std::sort(idx.begin(), idx.end(), [p_v](int64_t i1, int64_t i2) {return std::isnan(p_v[i2]) || (p_v[i1] > p_v[i2]);});
-	
-	return idx;
-}
-
 extern int gEidosFloatOutputPrecision;		// precision used for output of float values in Eidos; not user-visible at present
 
 std::string EidosStringForFloat(double p_value);
@@ -611,10 +623,6 @@ BidiIter Eidos_random_unique(BidiIter begin, BidiIter end, size_t num_random)
 
 // The <regex> library does not work on Ubuntu 18.04, annoyingly; probably a very old compiler or something.  So we have to check.
 bool Eidos_RegexWorks(void);
-
-// Parallel sorting; these use std::sort when we are not running parallel, or for small jobs
-void Eidos_ParallelQuicksort_I(int64_t *values, int64_t nelements);
-void Eidos_ParallelMergesort_I(int64_t *values, int64_t nelements);
 
 
 // *******************************************************************************************************************

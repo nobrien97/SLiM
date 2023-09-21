@@ -1661,6 +1661,26 @@ void _RunIndividualTests(void)
 	SLiMAssertScriptRaise(gen1_setup_p1 + "1 early() { i = p1.individuals; i[0].tagF; }", "before being set", __LINE__);
 	SLiMAssertScriptRaise(gen1_setup_p1 + "1 early() { i = p1.individuals; i.tagF; }", "before being set", __LINE__);
 	SLiMAssertScriptStop(gen1_setup_p1 + "1 early() { i = p1.individuals; i.tagF = 135.0; if (all(i.tagF == 135.0)) stop(); }", __LINE__);
+	SLiMAssertScriptRaise(gen1_setup_p1 + "1 early() { i = p1.individuals; i[0].tagL0; }", "before being set", __LINE__);
+	SLiMAssertScriptRaise(gen1_setup_p1 + "1 early() { i = p1.individuals; i.tagL0; }", "before being set", __LINE__);
+	SLiMAssertScriptStop(gen1_setup_p1 + "1 early() { i = p1.individuals; i.tagL0 = T; if (all(i.tagL0 == T)) stop(); }", __LINE__);
+	SLiMAssertScriptStop(gen1_setup_p1 + "1 early() { i = p1.individuals; i.tagL0 = F; if (all(i.tagL0 == F)) stop(); }", __LINE__);
+	SLiMAssertScriptRaise(gen1_setup_p1 + "1 early() { i = p1.individuals; i[0].tagL1; }", "before being set", __LINE__);
+	SLiMAssertScriptRaise(gen1_setup_p1 + "1 early() { i = p1.individuals; i.tagL1; }", "before being set", __LINE__);
+	SLiMAssertScriptStop(gen1_setup_p1 + "1 early() { i = p1.individuals; i.tagL1 = T; if (all(i.tagL1 == T)) stop(); }", __LINE__);
+	SLiMAssertScriptStop(gen1_setup_p1 + "1 early() { i = p1.individuals; i.tagL1 = F; if (all(i.tagL1 == F)) stop(); }", __LINE__);
+	SLiMAssertScriptRaise(gen1_setup_p1 + "1 early() { i = p1.individuals; i[0].tagL2; }", "before being set", __LINE__);
+	SLiMAssertScriptRaise(gen1_setup_p1 + "1 early() { i = p1.individuals; i.tagL2; }", "before being set", __LINE__);
+	SLiMAssertScriptStop(gen1_setup_p1 + "1 early() { i = p1.individuals; i.tagL2 = T; if (all(i.tagL2 == T)) stop(); }", __LINE__);
+	SLiMAssertScriptStop(gen1_setup_p1 + "1 early() { i = p1.individuals; i.tagL2 = F; if (all(i.tagL2 == F)) stop(); }", __LINE__);
+	SLiMAssertScriptRaise(gen1_setup_p1 + "1 early() { i = p1.individuals; i[0].tagL3; }", "before being set", __LINE__);
+	SLiMAssertScriptRaise(gen1_setup_p1 + "1 early() { i = p1.individuals; i.tagL3; }", "before being set", __LINE__);
+	SLiMAssertScriptStop(gen1_setup_p1 + "1 early() { i = p1.individuals; i.tagL3 = T; if (all(i.tagL3 == T)) stop(); }", __LINE__);
+	SLiMAssertScriptStop(gen1_setup_p1 + "1 early() { i = p1.individuals; i.tagL3 = F; if (all(i.tagL3 == F)) stop(); }", __LINE__);
+	SLiMAssertScriptRaise(gen1_setup_p1 + "1 early() { i = p1.individuals; i[0].tagL4; }", "before being set", __LINE__);
+	SLiMAssertScriptRaise(gen1_setup_p1 + "1 early() { i = p1.individuals; i.tagL4; }", "before being set", __LINE__);
+	SLiMAssertScriptStop(gen1_setup_p1 + "1 early() { i = p1.individuals; i.tagL4 = T; if (all(i.tagL4 == T)) stop(); }", __LINE__);
+	SLiMAssertScriptStop(gen1_setup_p1 + "1 early() { i = p1.individuals; i.tagL4 = F; if (all(i.tagL4 == F)) stop(); }", __LINE__);
 	SLiMAssertScriptStop(gen1_setup_p1 + "1 early() { i = p1.individuals; if (size(i.migrant) == 10) stop(); }", __LINE__);
 	SLiMAssertScriptStop(gen1_setup_p1 + "1 early() { i = p1.individuals; if (all(i.migrant == F)) stop(); }", __LINE__);
 	SLiMAssertScriptStop(gen1_setup_p1 + "1 early() { i = p1.individuals; i.fitnessScaling = 135.0; if (all(i.fitnessScaling == 135.0)) stop(); }", __LINE__);
@@ -1791,14 +1811,18 @@ void _RunIndividualTests(void)
 	SLiMAssertScriptRaise(gen1_setup_norel + "5 early() { if (all(p1.individuals.pedigreeGrandparentIDs == -1)) stop(); }", "has not been enabled", __LINE__);
 	SLiMAssertScriptRaise(gen1_setup_norel + "5 early() { if (all(p1.individuals.genomes.genomePedigreeID == -1)) stop(); }", "is not available", __LINE__);
 	SLiMAssertScriptStop(gen1_setup_norel + "5 early() { if (p1.individuals[0].relatedness(p1.individuals[0]) == 1.0) stop(); }", __LINE__);
+	SLiMAssertScriptStop(gen1_setup_norel + "5 early() { if (p1.individuals[0].sharedParentCount(p1.individuals[0]) == 2) stop(); }", __LINE__);
 	SLiMAssertScriptStop(gen1_setup_norel + "5 early() { if (p1.individuals[0].relatedness(p1.individuals[1]) == 0.0) stop(); }", __LINE__);
+	SLiMAssertScriptStop(gen1_setup_norel + "5 early() { if (p1.individuals[0].sharedParentCount(p1.individuals[1]) == 0) stop(); }", __LINE__);
 	SLiMAssertScriptStop(gen1_setup_norel + "5 early() { if (all(p1.individuals[0].relatedness(p1.individuals[1:9]) == 0.0)) stop(); }", __LINE__);
+	SLiMAssertScriptStop(gen1_setup_norel + "5 early() { if (all(p1.individuals[0].sharedParentCount(p1.individuals[1:9]) == 0)) stop(); }", __LINE__);
 	
 	SLiMAssertScriptStop(gen1_setup_rel + "5 early() { if (all(p1.individuals.pedigreeID != -1)) stop(); }", __LINE__);
 	SLiMAssertScriptStop(gen1_setup_rel + "5 early() { if (all(p1.individuals.pedigreeParentIDs != -1)) stop(); }", __LINE__);
 	SLiMAssertScriptStop(gen1_setup_rel + "5 early() { if (all(p1.individuals.pedigreeGrandparentIDs != -1)) stop(); }", __LINE__);
 	SLiMAssertScriptStop(gen1_setup_rel + "5 early() { if (all(p1.individuals.genomes.genomePedigreeID != -1)) stop(); }", __LINE__);
 	SLiMAssertScriptStop(gen1_setup_rel + "5 early() { if (p1.individuals[0].relatedness(p1.individuals[0]) == 1.0) stop(); }", __LINE__);
+	SLiMAssertScriptStop(gen1_setup_rel + "5 early() { if (p1.individuals[0].sharedParentCount(p1.individuals[0]) == 2) stop(); }", __LINE__);
 	// In certain inbreeding scenarios, which can happen by chance, relatedness of individuals can be 1.0 (maybe even higher?) so these tests are no good
 	//SLiMAssertScriptStop(gen1_setup_rel + "5 early() { if (p1.individuals[0].relatedness(p1.individuals[1]) < 1.0) stop(); }", __LINE__);
 	//SLiMAssertScriptStop(gen1_setup_rel + "5 early() { if (all(p1.individuals[0].relatedness(p1.individuals[1:9]) < 1.0)) stop(); }", __LINE__);

@@ -28,6 +28,7 @@
 
 
 #include <stdio.h>
+#include <cstdint>
 
 #include "eidos_globals.h"
 #include "eidos_value.h"
@@ -494,7 +495,7 @@ void AccumulateMemoryUsageIntoTotal_Community(SLiMMemoryUsage_Community &p_usage
 #define DO_MEMORY_CHECKS	1
 #endif
 
-// If 1, and SLiM_verbose_output == true, additional output will be generated regarding the mutation run count
+// If 1, and SLiM_verbosity_level >= 2, additional output will be generated regarding the mutation run count
 // experiments performed by Species.
 #define MUTRUN_EXPERIMENT_OUTPUT	0
 
@@ -562,7 +563,7 @@ std::ostream& operator<<(std::ostream& p_out, GenomeType p_genome_type);
 
 // This enumeration represents the sex of an individual: hermaphrodite, female, or male.  It also includes an "unspecified"
 // value that is useful in situations where the code wants to say that it doesn't care what sex is present.
-enum class IndividualSex : int32_t
+enum class IndividualSex : int8_t
 {
 	kUnspecified = -2,
 	kHermaphrodite = -1,
@@ -806,6 +807,11 @@ extern const std::string &gStr_colorSubstitution;
 extern const std::string &gStr_verbosity;
 extern const std::string &gStr_tag;
 extern const std::string &gStr_tagF;
+extern const std::string &gStr_tagL0;
+extern const std::string &gStr_tagL1;
+extern const std::string &gStr_tagL2;
+extern const std::string &gStr_tagL3;
+extern const std::string &gStr_tagL4;
 extern const std::string &gStr_migrant;
 extern const std::string &gStr_fitnessScaling;
 extern const std::string &gStr_firstMaleIndex;
@@ -857,6 +863,7 @@ extern const std::string &gStr_countOfMutationsOfType;
 extern const std::string &gStr_positionsOfMutationsOfType;
 extern const std::string &gStr_containsMarkerMutation;
 extern const std::string &gStr_relatedness;
+extern const std::string &gStr_sharedParentCount;
 extern const std::string &gStr_mutationsOfType;
 extern const std::string &gStr_setSpatialPosition;
 extern const std::string &gStr_sumOfMutationsOfType;
@@ -1172,6 +1179,11 @@ enum _SLiMGlobalStringID : int {
 	gID_verbosity,
 	gID_tag,
 	gID_tagF,
+	gID_tagL0,
+	gID_tagL1,
+	gID_tagL2,
+	gID_tagL3,
+	gID_tagL4,
 	gID_migrant,
 	gID_fitnessScaling,
 	gID_firstMaleIndex,
@@ -1223,6 +1235,7 @@ enum _SLiMGlobalStringID : int {
 	gID_positionsOfMutationsOfType,
 	gID_containsMarkerMutation,
 	gID_relatedness,
+	gID_sharedParentCount,
 	gID_mutationsOfType,
 	gID_setSpatialPosition,
 	gID_sumOfMutationsOfType,
@@ -1443,7 +1456,10 @@ static_assert((int)gID_LastSLiMEntry <= (int)gEidosID_LastContextEntry, "the Con
 #pragma mark Profiling
 #pragma mark -
 
+#if (SLIMPROFILING == 1)
 void WriteProfileResults(std::string profile_output_path, std::string model_name, Community *community);
+#endif
+
 
 #endif /* defined(__SLiM__slim_globals__) */
 

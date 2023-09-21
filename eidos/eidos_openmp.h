@@ -38,7 +38,7 @@
 	 if building in Xcode, use the provided separate version of the project, SLiM_OpenMP.xcodeproj, and the separate targets eidos_multi and slim_multi
 	 with -DPARALLEL=ON, the built executables will be slim_multi and eidos_multi, to make it easier to distinguish them; but of course you may rename them as you see fit
 	 on macOS, you may (several times!) get a system alert that libomp was blocked for security; after that, go to System Preferences, Security & Privacy, tab General, click "Allow Anyway", and then click "Open" back in the system panel
-	 use the -maxthreads <x> command-line option to change the maximum number of threads from OpenMP's default
+	 use the -maxThreads <x> command-line option to change the maximum number of threads from OpenMP's default
 
  We allocate per-thread storage (for gEidosMaxThreads threads) at the global/species level for these facilities:
  
@@ -59,7 +59,14 @@
 
 #include <signal.h>
 #include <limits.h>
+#include <errno.h>
+#include <string.h>
+#include <iostream>
 
+
+// This is the largest number of threads we allow the user to set.  There is no hard limit in the code;
+// this is primarily just to prevent people from doing anything stupid.
+#define EIDOS_OMP_MAX_THREADS	1024
 
 // This is a cached result from omp_get_max_threads() after warmup, providing the final number of threads that we will
 // be using (maximum) in parallel regions.  This can be used to preallocate per-thread data structures.
@@ -67,8 +74,13 @@ extern int gEidosMaxThreads;
 
 // This is the number of threads that will be used in the next parallel region to execute, as set by the Eidos
 // function parallelSetNumThreads().  This will generally be equal to omp_get_max_threads().  It will be clamped
-// to the interval [1, gEidosMaxThreads].
+// to the interval [1, gEidosMaxThreads].  If it has been set explicitly, gEidosNumThreadsOverride is set to true;
+// if not, gEidosNumThreadsOverride is false.  This allows Eidos to distinguish between gEidosNumThreads == gEidosMaxThreads
+// simply because it hasn't been set (gEidosNumThreadsOverride == false), indicating a desire to receive the default
+// number of threads, versus having been explicitly set to gEidosMaxThreads (gEidosNumThreadsOverride == true),
+// indicating a desire to force the maximum number of threads to be used even if it normally wouldn't.
 extern int gEidosNumThreads;
+extern bool gEidosNumThreadsOverride;
 
 
 // We want to use SIGTRAP to catch problems in the debugger in a few key spots, but it doesn't exist on Windows.
@@ -109,15 +121,24 @@ extern int gEidosNumThreads;
 #define THREAD_SAFETY_IN_ACTIVE_PARALLEL(s) if (omp_in_parallel()) { std::cerr << "THREAD_SAFETY_IN_ACTIVE_PARALLEL error in " << s; raise(SIGTRAP); }
 #define THREAD_SAFETY_IN_ANY_PARALLEL(s) if (omp_get_level() > 0) { std::cerr << "THREAD_SAFETY_IN_ANY_PARALLEL error in " << s; raise(SIGTRAP); }
 #else
-#define THREAD_SAFETY_IN_ACTIVE_PARALLEL(s)
-#define THREAD_SAFETY_IN_ANY_PARALLEL(s)
+#define THREAD_SAFETY_IN_ACTIVE_PARALLEL(s)	;
+#define THREAD_SAFETY_IN_ANY_PARALLEL(s)	;
 #endif
 
 #else
 
-#define THREAD_SAFETY_IN_ACTIVE_PARALLEL(s)
-#define THREAD_SAFETY_IN_ANY_PARALLEL(s)
+#define THREAD_SAFETY_IN_ACTIVE_PARALLEL(s)	;
+#define THREAD_SAFETY_IN_ANY_PARALLEL(s)	;
 
+#endif
+
+
+// This macro is for calculating the correct number of threads to use for a given loop; it uses a thread count set with
+// parallelSetNumThreads() if it exists, otherwise uses the thread count provided by (x), expected to be <= gEidosMaxThreads.
+#ifdef _OPENMP
+#define EIDOS_THREAD_COUNT(x) int thread_count = (gEidosNumThreadsOverride ? gEidosNumThreads : (x))
+#else
+#define EIDOS_THREAD_COUNT(x)
 #endif
 
 
@@ -218,7 +239,11 @@ private:
 // here a bit; a slim_openmp.h header could be created to alleviate that if it's a problem, but it seems harmless for now.
 // These counts are collected in one place to make it easier to optimize their values in a pre-build optimization pass.
 
-#if 1
+// Set this flag to 0 to switch to running parallel loops with the maximum number of threads, regardless of the per-task
+// default thread counts or the task size thresholds (but not regardless of the user's parallelSetNumThreads() setting).
+#define USE_OMP_LIMITS	1
+
+#if USE_OMP_LIMITS
 // This set of minimum counts is for production code
 
 // Eidos: math functions
@@ -255,13 +280,14 @@ private:
 #define EIDOS_OMPMIN_MATCH_FLOAT			2000
 #define EIDOS_OMPMIN_MATCH_STRING			2000
 #define EIDOS_OMPMIN_MATCH_OBJECT			2000
-#define EIDOS_OMPMIN_SAMPLE_1				2000
+#define EIDOS_OMPMIN_SAMPLE_INDEX			2000
 #define EIDOS_OMPMIN_SAMPLE_R_INT			2000
 #define EIDOS_OMPMIN_SAMPLE_R_FLOAT			2000
 #define EIDOS_OMPMIN_SAMPLE_R_OBJECT		2000
 #define EIDOS_OMPMIN_SAMPLE_WR_INT			2000
 #define EIDOS_OMPMIN_SAMPLE_WR_FLOAT		2000
 #define EIDOS_OMPMIN_SAMPLE_WR_OBJECT		2000
+#define EIDOS_OMPMIN_TABULATE_MAXBIN		2000
 #define EIDOS_OMPMIN_TABULATE				2000
 
 // SLiM methods/properties
@@ -272,8 +298,8 @@ private:
 #define EIDOS_OMPMIN_RELATEDNESS			2000
 #define EIDOS_OMPMIN_SAMPLE_INDIVIDUALS_1	2000
 #define EIDOS_OMPMIN_SAMPLE_INDIVIDUALS_2	2000
-#define EIDOS_OMPMIN_SET_FITNESS_S1			900
-#define EIDOS_OMPMIN_SET_FITNESS_S2			1500
+#define EIDOS_OMPMIN_SET_FITNESS_SCALE_1	900
+#define EIDOS_OMPMIN_SET_FITNESS_SCALE_2	1500
 #define EIDOS_OMPMIN_SUM_OF_MUTS_OF_TYPE	2
 
 // Distribution draws and related
@@ -296,23 +322,39 @@ private:
 #define EIDOS_OMPMIN_RUNIF_2				10000
 #define EIDOS_OMPMIN_RUNIF_3				10000
 
+// Sorting & ordering
+#define EIDOS_OMPMIN_SORT_INT				4000
+#define EIDOS_OMPMIN_SORT_FLOAT				4000
+#define EIDOS_OMPMIN_SORT_STRING			4000
+
 // Spatial point/map manipulation
-#define EIDOS_OMPMIN_POINT_IN_BOUNDS		2000
-#define EIDOS_OMPMIN_POINT_PERIODIC			2000
-#define EIDOS_OMPMIN_POINT_REFLECTED		2000
-#define EIDOS_OMPMIN_POINT_STOPPED			2000
-#define EIDOS_OMPMIN_POINT_UNIFORM			2000
-#define EIDOS_OMPMIN_SET_SPATIAL_POS_1		10000
-#define EIDOS_OMPMIN_SET_SPATIAL_POS_2		10000
+#define EIDOS_OMPMIN_POINT_IN_BOUNDS_1D		2000
+#define EIDOS_OMPMIN_POINT_IN_BOUNDS_2D		2000
+#define EIDOS_OMPMIN_POINT_IN_BOUNDS_3D		2000
+#define EIDOS_OMPMIN_POINT_PERIODIC_1D		2000
+#define EIDOS_OMPMIN_POINT_PERIODIC_2D		2000
+#define EIDOS_OMPMIN_POINT_PERIODIC_3D		2000
+#define EIDOS_OMPMIN_POINT_REFLECTED_1D		2000
+#define EIDOS_OMPMIN_POINT_REFLECTED_2D		2000
+#define EIDOS_OMPMIN_POINT_REFLECTED_3D		2000
+#define EIDOS_OMPMIN_POINT_STOPPED_1D		2000
+#define EIDOS_OMPMIN_POINT_STOPPED_2D		2000
+#define EIDOS_OMPMIN_POINT_STOPPED_3D		2000
+#define EIDOS_OMPMIN_POINT_UNIFORM_1D		2000
+#define EIDOS_OMPMIN_POINT_UNIFORM_2D		2000
+#define EIDOS_OMPMIN_POINT_UNIFORM_3D		2000
+#define EIDOS_OMPMIN_SET_SPATIAL_POS_1_1D	10000
+#define EIDOS_OMPMIN_SET_SPATIAL_POS_1_2D	10000
+#define EIDOS_OMPMIN_SET_SPATIAL_POS_1_3D	10000
+#define EIDOS_OMPMIN_SET_SPATIAL_POS_2_1D	10000
+#define EIDOS_OMPMIN_SET_SPATIAL_POS_2_2D	10000
+#define EIDOS_OMPMIN_SET_SPATIAL_POS_2_3D	10000
 #define EIDOS_OMPMIN_SPATIAL_MAP_VALUE		2000
 
 // Spatial queries
-#define EIDOS_OMPMIN_CLIPPEDINTEGRAL_1		10000
-#define EIDOS_OMPMIN_CLIPPEDINTEGRAL_2		10000
-#define EIDOS_OMPMIN_CLIPPEDINTEGRAL_3		10000
-#define EIDOS_OMPMIN_CLIPPEDINTEGRAL_4		10000
-#define EIDOS_OMPMIN_CLIPPEDINTEGRAL_5		10000
-#define EIDOS_OMPMIN_CLIPPEDINTEGRAL_6		10000
+#define EIDOS_OMPMIN_CLIPPEDINTEGRAL_1S		10000
+#define EIDOS_OMPMIN_CLIPPEDINTEGRAL_2S		10000
+//#define EIDOS_OMPMIN_CLIPPEDINTEGRAL_3S		10000
 #define EIDOS_OMPMIN_DRAWBYSTRENGTH			10
 #define EIDOS_OMPMIN_INTNEIGHCOUNT			10
 #define EIDOS_OMPMIN_LOCALPOPDENSITY		10
@@ -322,16 +364,19 @@ private:
 #define EIDOS_OMPMIN_TOTNEIGHSTRENGTH		10
 
 // SLiM core
-#define EIDOS_OMPMIN_AGEINC					10000
+#define EIDOS_OMPMIN_AGE_INCR				10000
 #define EIDOS_OMPMIN_DEFERRED_REPRO			100
+#define EIDOS_OMPMIN_WF_REPRO				100
 #define EIDOS_OMPMIN_FITNESS_ASEX_1			10000
 #define EIDOS_OMPMIN_FITNESS_ASEX_2			10000
-#define EIDOS_OMPMIN_FITNESS_SEX_F_1		10000
-#define EIDOS_OMPMIN_FITNESS_SEX_F_2		10000
-#define EIDOS_OMPMIN_FITNESS_SEX_M_1		10000
-#define EIDOS_OMPMIN_FITNESS_SEX_M_2		10000
-#define EIDOS_OMPMIN_MIGRANTCLEAR			10000
-#define EIDOS_OMPMIN_MUTTALLY				100000
+#define EIDOS_OMPMIN_FITNESS_ASEX_3			10000
+#define EIDOS_OMPMIN_FITNESS_SEX_1			10000
+#define EIDOS_OMPMIN_FITNESS_SEX_2			10000
+#define EIDOS_OMPMIN_FITNESS_SEX_3			10000
+#define EIDOS_OMPMIN_MIGRANT_CLEAR			10000
+#define EIDOS_OMPMIN_SIMPLIFY_SORT_PRE		4000
+#define EIDOS_OMPMIN_SIMPLIFY_SORT			4000
+#define EIDOS_OMPMIN_SIMPLIFY_SORT_POST		4000
 #define EIDOS_OMPMIN_SURVIVAL				10000
 
 #else
@@ -373,13 +418,14 @@ private:
 #define EIDOS_OMPMIN_MATCH_FLOAT			0
 #define EIDOS_OMPMIN_MATCH_STRING			0
 #define EIDOS_OMPMIN_MATCH_OBJECT			0
-#define EIDOS_OMPMIN_SAMPLE_1				0
+#define EIDOS_OMPMIN_SAMPLE_INDEX			0
 #define EIDOS_OMPMIN_SAMPLE_R_INT			0
 #define EIDOS_OMPMIN_SAMPLE_R_FLOAT			0
 #define EIDOS_OMPMIN_SAMPLE_R_OBJECT		0
 #define EIDOS_OMPMIN_SAMPLE_WR_INT			0
 #define EIDOS_OMPMIN_SAMPLE_WR_FLOAT		0
 #define EIDOS_OMPMIN_SAMPLE_WR_OBJECT		0
+#define EIDOS_OMPMIN_TABULATE_MAXBIN		0
 #define EIDOS_OMPMIN_TABULATE				0
 
 // SLiM methods/properties
@@ -390,8 +436,8 @@ private:
 #define EIDOS_OMPMIN_RELATEDNESS			0
 #define EIDOS_OMPMIN_SAMPLE_INDIVIDUALS_1	0
 #define EIDOS_OMPMIN_SAMPLE_INDIVIDUALS_2	0
-#define EIDOS_OMPMIN_SET_FITNESS_S1			0
-#define EIDOS_OMPMIN_SET_FITNESS_S2			0
+#define EIDOS_OMPMIN_SET_FITNESS_SCALE_1	0
+#define EIDOS_OMPMIN_SET_FITNESS_SCALE_2	0
 #define EIDOS_OMPMIN_SUM_OF_MUTS_OF_TYPE	0
 
 // Distribution draws and related
@@ -414,23 +460,39 @@ private:
 #define EIDOS_OMPMIN_RUNIF_2				0
 #define EIDOS_OMPMIN_RUNIF_3				0
 
+// Sorting & ordering
+#define EIDOS_OMPMIN_SORT_INT				0
+#define EIDOS_OMPMIN_SORT_FLOAT				0
+#define EIDOS_OMPMIN_SORT_STRING			0
+
 // Spatial point/map manipulation
-#define EIDOS_OMPMIN_POINT_IN_BOUNDS		0
-#define EIDOS_OMPMIN_POINT_PERIODIC			0
-#define EIDOS_OMPMIN_POINT_REFLECTED		0
-#define EIDOS_OMPMIN_POINT_STOPPED			0
-#define EIDOS_OMPMIN_POINT_UNIFORM			0
-#define EIDOS_OMPMIN_SET_SPATIAL_POS_1		0
-#define EIDOS_OMPMIN_SET_SPATIAL_POS_2		0
+#define EIDOS_OMPMIN_POINT_IN_BOUNDS_1D		0
+#define EIDOS_OMPMIN_POINT_IN_BOUNDS_2D		0
+#define EIDOS_OMPMIN_POINT_IN_BOUNDS_3D		0
+#define EIDOS_OMPMIN_POINT_PERIODIC_1D		0
+#define EIDOS_OMPMIN_POINT_PERIODIC_2D		0
+#define EIDOS_OMPMIN_POINT_PERIODIC_3D		0
+#define EIDOS_OMPMIN_POINT_REFLECTED_1D		0
+#define EIDOS_OMPMIN_POINT_REFLECTED_2D		0
+#define EIDOS_OMPMIN_POINT_REFLECTED_3D		0
+#define EIDOS_OMPMIN_POINT_STOPPED_1D		0
+#define EIDOS_OMPMIN_POINT_STOPPED_2D		0
+#define EIDOS_OMPMIN_POINT_STOPPED_3D		0
+#define EIDOS_OMPMIN_POINT_UNIFORM_1D		0
+#define EIDOS_OMPMIN_POINT_UNIFORM_2D		0
+#define EIDOS_OMPMIN_POINT_UNIFORM_3D		0
+#define EIDOS_OMPMIN_SET_SPATIAL_POS_1_1D	0
+#define EIDOS_OMPMIN_SET_SPATIAL_POS_1_2D	0
+#define EIDOS_OMPMIN_SET_SPATIAL_POS_1_3D	0
+#define EIDOS_OMPMIN_SET_SPATIAL_POS_2_1D	0
+#define EIDOS_OMPMIN_SET_SPATIAL_POS_2_2D	0
+#define EIDOS_OMPMIN_SET_SPATIAL_POS_2_3D	0
 #define EIDOS_OMPMIN_SPATIAL_MAP_VALUE		0
 
 // Spatial queries
-#define EIDOS_OMPMIN_CLIPPEDINTEGRAL_1		0
-#define EIDOS_OMPMIN_CLIPPEDINTEGRAL_2		0
-#define EIDOS_OMPMIN_CLIPPEDINTEGRAL_3		0
-#define EIDOS_OMPMIN_CLIPPEDINTEGRAL_4		0
-#define EIDOS_OMPMIN_CLIPPEDINTEGRAL_5		0
-#define EIDOS_OMPMIN_CLIPPEDINTEGRAL_6		0
+#define EIDOS_OMPMIN_CLIPPEDINTEGRAL_1S		0
+#define EIDOS_OMPMIN_CLIPPEDINTEGRAL_2S		0
+//#define EIDOS_OMPMIN_CLIPPEDINTEGRAL_3S		0
 #define EIDOS_OMPMIN_DRAWBYSTRENGTH			0
 #define EIDOS_OMPMIN_INTNEIGHCOUNT			0
 #define EIDOS_OMPMIN_LOCALPOPDENSITY		0
@@ -440,19 +502,165 @@ private:
 #define EIDOS_OMPMIN_TOTNEIGHSTRENGTH		0
 
 // SLiM core
-#define EIDOS_OMPMIN_AGEINC					0
+#define EIDOS_OMPMIN_AGE_INCR				0
 #define EIDOS_OMPMIN_DEFERRED_REPRO			0
+#define EIDOS_OMPMIN_WF_REPRO				0
 #define EIDOS_OMPMIN_FITNESS_ASEX_1			0
 #define EIDOS_OMPMIN_FITNESS_ASEX_2			0
-#define EIDOS_OMPMIN_FITNESS_SEX_F_1		0
-#define EIDOS_OMPMIN_FITNESS_SEX_F_2		0
-#define EIDOS_OMPMIN_FITNESS_SEX_M_1		0
-#define EIDOS_OMPMIN_FITNESS_SEX_M_2		0
-#define EIDOS_OMPMIN_MIGRANTCLEAR			0
-#define EIDOS_OMPMIN_MUTTALLY				0
+#define EIDOS_OMPMIN_FITNESS_ASEX_3			0
+#define EIDOS_OMPMIN_FITNESS_SEX_1			0
+#define EIDOS_OMPMIN_FITNESS_SEX_2			0
+#define EIDOS_OMPMIN_FITNESS_SEX_3			0
+#define EIDOS_OMPMIN_MIGRANT_CLEAR			0
+#define EIDOS_OMPMIN_SIMPLIFY_SORT_PRE		0
+#define EIDOS_OMPMIN_SIMPLIFY_SORT			0
+#define EIDOS_OMPMIN_SIMPLIFY_SORT_POST		0
 #define EIDOS_OMPMIN_SURVIVAL				0
 
 #endif
+
+
+// Here we declare variables that hold the number of threads we prefer to use for each parallel loop.
+// These have default values, which can be overridden with parallelSetTaskThreadCounts().
+
+// Eidos: math functions; benchmark section E
+extern int gEidos_OMP_threads_ABS_FLOAT;
+extern int gEidos_OMP_threads_CEIL;
+extern int gEidos_OMP_threads_EXP_FLOAT;
+extern int gEidos_OMP_threads_FLOOR;
+extern int gEidos_OMP_threads_LOG_FLOAT;
+extern int gEidos_OMP_threads_LOG10_FLOAT;
+extern int gEidos_OMP_threads_LOG2_FLOAT;
+extern int gEidos_OMP_threads_ROUND;
+extern int gEidos_OMP_threads_SQRT_FLOAT;
+extern int gEidos_OMP_threads_SUM_INTEGER;
+extern int gEidos_OMP_threads_SUM_FLOAT;
+extern int gEidos_OMP_threads_SUM_LOGICAL;
+extern int gEidos_OMP_threads_TRUNC;
+
+// Eidos: max(), min(), pmax(), pmin(); benchmark section X
+extern int gEidos_OMP_threads_MAX_INT;
+extern int gEidos_OMP_threads_MAX_FLOAT;
+extern int gEidos_OMP_threads_MIN_INT;
+extern int gEidos_OMP_threads_MIN_FLOAT;
+extern int gEidos_OMP_threads_PMAX_INT_1;
+extern int gEidos_OMP_threads_PMAX_INT_2;
+extern int gEidos_OMP_threads_PMAX_FLOAT_1;
+extern int gEidos_OMP_threads_PMAX_FLOAT_2;
+extern int gEidos_OMP_threads_PMIN_INT_1;
+extern int gEidos_OMP_threads_PMIN_INT_2;
+extern int gEidos_OMP_threads_PMIN_FLOAT_1;
+extern int gEidos_OMP_threads_PMIN_FLOAT_2;
+
+// Eidos: match(), sample(), tabulate(); benchmark section V
+extern int gEidos_OMP_threads_MATCH_INT;
+extern int gEidos_OMP_threads_MATCH_FLOAT;
+extern int gEidos_OMP_threads_MATCH_STRING;
+extern int gEidos_OMP_threads_MATCH_OBJECT;
+extern int gEidos_OMP_threads_SAMPLE_INDEX;
+extern int gEidos_OMP_threads_SAMPLE_R_INT;
+extern int gEidos_OMP_threads_SAMPLE_R_FLOAT;
+extern int gEidos_OMP_threads_SAMPLE_R_OBJECT;
+extern int gEidos_OMP_threads_SAMPLE_WR_INT;
+extern int gEidos_OMP_threads_SAMPLE_WR_FLOAT;
+extern int gEidos_OMP_threads_SAMPLE_WR_OBJECT;
+extern int gEidos_OMP_threads_TABULATE_MAXBIN;
+extern int gEidos_OMP_threads_TABULATE;
+
+// SLiM methods/properties; benchmark section C
+extern int gEidos_OMP_threads_CONTAINS_MARKER_MUT;
+extern int gEidos_OMP_threads_I_COUNT_OF_MUTS_OF_TYPE;
+extern int gEidos_OMP_threads_G_COUNT_OF_MUTS_OF_TYPE;
+extern int gEidos_OMP_threads_INDS_W_PEDIGREE_IDS;
+extern int gEidos_OMP_threads_RELATEDNESS;
+extern int gEidos_OMP_threads_SAMPLE_INDIVIDUALS_1;
+extern int gEidos_OMP_threads_SAMPLE_INDIVIDUALS_2;
+extern int gEidos_OMP_threads_SET_FITNESS_SCALE_1;
+extern int gEidos_OMP_threads_SET_FITNESS_SCALE_2;
+extern int gEidos_OMP_threads_SUM_OF_MUTS_OF_TYPE;
+
+// Distribution draws and related; benchmark section R
+extern int gEidos_OMP_threads_DNORM_1;
+extern int gEidos_OMP_threads_DNORM_2;
+extern int gEidos_OMP_threads_RBINOM_1;
+extern int gEidos_OMP_threads_RBINOM_2;
+extern int gEidos_OMP_threads_RBINOM_3;
+extern int gEidos_OMP_threads_RDUNIF_1;
+extern int gEidos_OMP_threads_RDUNIF_2;
+extern int gEidos_OMP_threads_RDUNIF_3;
+extern int gEidos_OMP_threads_REXP_1;
+extern int gEidos_OMP_threads_REXP_2;
+extern int gEidos_OMP_threads_RNORM_1;
+extern int gEidos_OMP_threads_RNORM_2;
+extern int gEidos_OMP_threads_RNORM_3;
+extern int gEidos_OMP_threads_RPOIS_1;
+extern int gEidos_OMP_threads_RPOIS_2;
+extern int gEidos_OMP_threads_RUNIF_1;
+extern int gEidos_OMP_threads_RUNIF_2;
+extern int gEidos_OMP_threads_RUNIF_3;
+
+// Sorting & ordering
+extern int gEidos_OMP_threads_SORT_INT;
+extern int gEidos_OMP_threads_SORT_FLOAT;
+extern int gEidos_OMP_threads_SORT_STRING;
+
+// Spatial point/map manipulation; benchmark section P
+extern int gEidos_OMP_threads_POINT_IN_BOUNDS_1D;
+extern int gEidos_OMP_threads_POINT_IN_BOUNDS_2D;
+extern int gEidos_OMP_threads_POINT_IN_BOUNDS_3D;
+extern int gEidos_OMP_threads_POINT_PERIODIC_1D;
+extern int gEidos_OMP_threads_POINT_PERIODIC_2D;
+extern int gEidos_OMP_threads_POINT_PERIODIC_3D;
+extern int gEidos_OMP_threads_POINT_REFLECTED_1D;
+extern int gEidos_OMP_threads_POINT_REFLECTED_2D;
+extern int gEidos_OMP_threads_POINT_REFLECTED_3D;
+extern int gEidos_OMP_threads_POINT_STOPPED_1D;
+extern int gEidos_OMP_threads_POINT_STOPPED_2D;
+extern int gEidos_OMP_threads_POINT_STOPPED_3D;
+extern int gEidos_OMP_threads_POINT_UNIFORM_1D;
+extern int gEidos_OMP_threads_POINT_UNIFORM_2D;
+extern int gEidos_OMP_threads_POINT_UNIFORM_3D;
+extern int gEidos_OMP_threads_SET_SPATIAL_POS_1_1D;
+extern int gEidos_OMP_threads_SET_SPATIAL_POS_1_2D;
+extern int gEidos_OMP_threads_SET_SPATIAL_POS_1_3D;
+extern int gEidos_OMP_threads_SET_SPATIAL_POS_2_1D;
+extern int gEidos_OMP_threads_SET_SPATIAL_POS_2_2D;
+extern int gEidos_OMP_threads_SET_SPATIAL_POS_2_3D;
+extern int gEidos_OMP_threads_SPATIAL_MAP_VALUE;
+
+// Spatial queries; benchmark sections D and S
+extern int gEidos_OMP_threads_CLIPPEDINTEGRAL_1S;
+extern int gEidos_OMP_threads_CLIPPEDINTEGRAL_2S;
+//extern int gEidos_OMP_threads_CLIPPEDINTEGRAL_3S;
+extern int gEidos_OMP_threads_DRAWBYSTRENGTH;
+extern int gEidos_OMP_threads_INTNEIGHCOUNT;
+extern int gEidos_OMP_threads_LOCALPOPDENSITY;
+extern int gEidos_OMP_threads_NEARESTINTNEIGH;
+extern int gEidos_OMP_threads_NEARESTNEIGH;
+extern int gEidos_OMP_threads_NEIGHCOUNT;
+extern int gEidos_OMP_threads_TOTNEIGHSTRENGTH;
+
+// SLiM internals; benchmark section I
+extern int gEidos_OMP_threads_AGE_INCR;
+extern int gEidos_OMP_threads_DEFERRED_REPRO;
+extern int gEidos_OMP_threads_WF_REPRO;
+extern int gEidos_OMP_threads_FITNESS_ASEX_1;
+extern int gEidos_OMP_threads_FITNESS_ASEX_2;
+extern int gEidos_OMP_threads_FITNESS_ASEX_3;
+extern int gEidos_OMP_threads_FITNESS_SEX_1;
+extern int gEidos_OMP_threads_FITNESS_SEX_2;
+extern int gEidos_OMP_threads_FITNESS_SEX_3;
+extern int gEidos_OMP_threads_MIGRANT_CLEAR;
+extern int gEidos_OMP_threads_SIMPLIFY_SORT_PRE;
+extern int gEidos_OMP_threads_SIMPLIFY_SORT;
+extern int gEidos_OMP_threads_SIMPLIFY_SORT_POST;
+extern int gEidos_OMP_threads_PARENTS_CLEAR;
+extern int gEidos_OMP_threads_UNIQUE_MUTRUNS;
+extern int gEidos_OMP_threads_SURVIVAL;
+
+// benchmark section M is for "models", whole SLiM models that test overall scaling
+// for different model types; they do not correspond to per-task keys
+
 
 #else /* ifdef _OPENMP */
 

@@ -21,9 +21,12 @@
 #include "eidos_functions.h"
 #include "eidos_interpreter.h"
 #include "eidos_rng.h"
+#include "eidos_sorting.h"
 
 #include <unordered_map>
 #include <vector>
+#include <algorithm>
+#include <utility>
 
 #include "eidos_globals.h"
 #if EIDOS_ROBIN_HOOD_HASHING
@@ -383,9 +386,14 @@ EidosValue_SP Eidos_ExecuteFunction_sample(const std::vector<EidosValue_SP> &p_a
 				EIDOS_TERMINATION << "ERROR (Eidos_ExecuteFunction_sample): allocation failed; you may need to raise the memory limit for SLiM." << EidosTerminate(nullptr);
 		}
 		
-#pragma omp parallel for schedule(static) default(none) shared(index_buffer, x_count) if(x_count > EIDOS_OMPMIN_SAMPLE_1)
+		EIDOS_BENCHMARK_START(EidosBenchmarkType::k_SAMPLE_INDEX);
+		EIDOS_THREAD_COUNT(gEidos_OMP_threads_SAMPLE_INDEX);
+#pragma omp parallel for schedule(static) default(none) shared(index_buffer, x_count) if(x_count > EIDOS_OMPMIN_SAMPLE_INDEX) num_threads(thread_count)
 		for (int value_index = 0; value_index < x_count; ++value_index)
+		{
 			index_buffer[value_index] = value_index;
+		}
+		EIDOS_BENCHMARK_END(EidosBenchmarkType::k_SAMPLE_INDEX);
 	}
 	
 	// the algorithm used depends on whether weights were supplied
@@ -445,7 +453,8 @@ EidosValue_SP Eidos_ExecuteFunction_sample(const std::vector<EidosValue_SP> &p_a
 				int64_t *int_result_data = int_result->data();
 				result_SP = EidosValue_SP(int_result);
 				
-#pragma omp parallel default(none) shared(gEidos_RNG_PERTHREAD, sample_size) firstprivate(discrete_draw, int_data, int_result_data) if(sample_size >= EIDOS_OMPMIN_SAMPLE_WR_INT)
+				EIDOS_THREAD_COUNT(gEidos_OMP_threads_SAMPLE_WR_INT);
+#pragma omp parallel default(none) shared(gEidos_RNG_PERTHREAD, sample_size) firstprivate(discrete_draw, int_data, int_result_data) if(sample_size >= EIDOS_OMPMIN_SAMPLE_WR_INT) num_threads(thread_count)
 				{
 					gsl_rng *rng = EIDOS_GSL_RNG(omp_get_thread_num());
 					
@@ -465,7 +474,8 @@ EidosValue_SP Eidos_ExecuteFunction_sample(const std::vector<EidosValue_SP> &p_a
 				double *float_result_data = float_result->data();
 				result_SP = EidosValue_SP(float_result);
 				
-#pragma omp parallel default(none) shared(gEidos_RNG_PERTHREAD, sample_size) firstprivate(discrete_draw, float_data, float_result_data) if(sample_size >= EIDOS_OMPMIN_SAMPLE_WR_FLOAT)
+				EIDOS_THREAD_COUNT(gEidos_OMP_threads_SAMPLE_WR_FLOAT);
+#pragma omp parallel default(none) shared(gEidos_RNG_PERTHREAD, sample_size) firstprivate(discrete_draw, float_data, float_result_data) if(sample_size >= EIDOS_OMPMIN_SAMPLE_WR_FLOAT) num_threads(thread_count)
 				{
 					gsl_rng *rng = EIDOS_GSL_RNG(omp_get_thread_num());
 					
@@ -486,7 +496,8 @@ EidosValue_SP Eidos_ExecuteFunction_sample(const std::vector<EidosValue_SP> &p_a
 				EidosObject **object_result_data = object_result->data();
 				result_SP = EidosValue_SP(object_result);
 				
-#pragma omp parallel default(none) shared(gEidos_RNG_PERTHREAD, sample_size) firstprivate(discrete_draw, object_data, object_result_data) if(sample_size >= EIDOS_OMPMIN_SAMPLE_WR_OBJECT)
+				EIDOS_THREAD_COUNT(gEidos_OMP_threads_SAMPLE_WR_OBJECT);
+#pragma omp parallel default(none) shared(gEidos_RNG_PERTHREAD, sample_size) firstprivate(discrete_draw, object_data, object_result_data) if(sample_size >= EIDOS_OMPMIN_SAMPLE_WR_OBJECT) num_threads(thread_count)
 				{
 					gsl_rng *rng = EIDOS_GSL_RNG(omp_get_thread_num());
 					
@@ -759,7 +770,8 @@ EidosValue_SP Eidos_ExecuteFunction_sample(const std::vector<EidosValue_SP> &p_a
 				int64_t *int_result_data = int_result->data();
 				result_SP = EidosValue_SP(int_result);
 				
-#pragma omp parallel default(none) shared(gEidos_RNG_PERTHREAD, sample_size) firstprivate(int_data, int_result_data, x_count) if(sample_size >= EIDOS_OMPMIN_SAMPLE_R_INT)
+				EIDOS_THREAD_COUNT(gEidos_OMP_threads_SAMPLE_R_INT);
+#pragma omp parallel default(none) shared(gEidos_RNG_PERTHREAD, sample_size) firstprivate(int_data, int_result_data, x_count) if(sample_size >= EIDOS_OMPMIN_SAMPLE_R_INT) num_threads(thread_count)
 				{
 					gsl_rng *rng = EIDOS_GSL_RNG(omp_get_thread_num());
 					
@@ -778,7 +790,8 @@ EidosValue_SP Eidos_ExecuteFunction_sample(const std::vector<EidosValue_SP> &p_a
 				double *float_result_data = float_result->data();
 				result_SP = EidosValue_SP(float_result);
 				
-#pragma omp parallel default(none) shared(gEidos_RNG_PERTHREAD, sample_size) firstprivate(float_data, float_result_data, x_count) if(sample_size >= EIDOS_OMPMIN_SAMPLE_R_FLOAT)
+				EIDOS_THREAD_COUNT(gEidos_OMP_threads_SAMPLE_R_FLOAT);
+#pragma omp parallel default(none) shared(gEidos_RNG_PERTHREAD, sample_size) firstprivate(float_data, float_result_data, x_count) if(sample_size >= EIDOS_OMPMIN_SAMPLE_R_FLOAT) num_threads(thread_count)
 				{
 					gsl_rng *rng = EIDOS_GSL_RNG(omp_get_thread_num());
 					
@@ -798,7 +811,8 @@ EidosValue_SP Eidos_ExecuteFunction_sample(const std::vector<EidosValue_SP> &p_a
 				EidosObject **object_result_data = object_result->data();
 				result_SP = EidosValue_SP(object_result);
 				
-#pragma omp parallel default(none) shared(gEidos_RNG_PERTHREAD, sample_size) firstprivate(object_data, object_result_data, x_count) if(sample_size >= EIDOS_OMPMIN_SAMPLE_R_OBJECT)
+				EIDOS_THREAD_COUNT(gEidos_OMP_threads_SAMPLE_R_OBJECT);
+#pragma omp parallel default(none) shared(gEidos_RNG_PERTHREAD, sample_size) firstprivate(object_data, object_result_data, x_count) if(sample_size >= EIDOS_OMPMIN_SAMPLE_R_OBJECT) num_threads(thread_count)
 				{
 					gsl_rng *rng = EIDOS_GSL_RNG(omp_get_thread_num());
 					
@@ -1916,7 +1930,8 @@ EidosValue_SP Eidos_ExecuteFunction_match(const std::vector<EidosValue_SP> &p_ar
 					EIDOS_TERMINATION << "ERROR (Eidos_ExecuteFunction_match): (internal error) function match() encountered a raise from its internal hash table (kValueInt); please report this." << EidosTerminate(nullptr);
 				}
 				
-#pragma omp parallel for schedule(static) default(none) shared(x_count, fromValueToIndex) firstprivate(int_data0, int_result_data) if(x_count >= EIDOS_OMPMIN_MATCH_INT)
+				EIDOS_THREAD_COUNT(gEidos_OMP_threads_MATCH_INT);
+#pragma omp parallel for schedule(static) default(none) shared(x_count, fromValueToIndex) firstprivate(int_data0, int_result_data) if(x_count >= EIDOS_OMPMIN_MATCH_INT) num_threads(thread_count)
 				for (int value_index = 0; value_index < x_count; ++value_index)
 				{
 					auto find_iter = fromValueToIndex.find(int_data0[value_index]);
@@ -1963,7 +1978,8 @@ EidosValue_SP Eidos_ExecuteFunction_match(const std::vector<EidosValue_SP> &p_ar
 					EIDOS_TERMINATION << "ERROR (Eidos_ExecuteFunction_match): (internal error) function match() encountered a raise from its internal hash table (kValueFloat); please report this." << EidosTerminate(nullptr);
 				}
 				
-#pragma omp parallel for schedule(static) default(none) shared(x_count, fromValueToIndex) firstprivate(float_data0, int_result_data) if(x_count >= EIDOS_OMPMIN_MATCH_FLOAT)
+				EIDOS_THREAD_COUNT(gEidos_OMP_threads_MATCH_FLOAT);
+#pragma omp parallel for schedule(static) default(none) shared(x_count, fromValueToIndex) firstprivate(float_data0, int_result_data) if(x_count >= EIDOS_OMPMIN_MATCH_FLOAT) num_threads(thread_count)
 				for (int value_index = 0; value_index < x_count; ++value_index)
 				{
 					auto find_iter = fromValueToIndex.find(float_data0[value_index]);
@@ -2013,7 +2029,8 @@ EidosValue_SP Eidos_ExecuteFunction_match(const std::vector<EidosValue_SP> &p_ar
 				}
 				
 				// Note that if string_vec0 were firstprivate, OpenMP would copy the data, NOT the reference!!!
-#pragma omp parallel for schedule(static) default(none) shared(x_count, fromValueToIndex, string_vec0) firstprivate(int_result_data) if(x_count >= EIDOS_OMPMIN_MATCH_STRING)
+				EIDOS_THREAD_COUNT(gEidos_OMP_threads_MATCH_STRING);
+#pragma omp parallel for schedule(static) default(none) shared(x_count, fromValueToIndex, string_vec0) firstprivate(int_result_data) if(x_count >= EIDOS_OMPMIN_MATCH_STRING) num_threads(thread_count)
 				for (int value_index = 0; value_index < x_count; ++value_index)
 				{
 					auto find_iter = fromValueToIndex.find(string_vec0[value_index]);
@@ -2058,7 +2075,8 @@ EidosValue_SP Eidos_ExecuteFunction_match(const std::vector<EidosValue_SP> &p_ar
 					EIDOS_TERMINATION << "ERROR (Eidos_ExecuteFunction_match): (internal error) function match() encountered a raise from its internal hash table (kValueObject); please report this." << EidosTerminate(nullptr);
 				}
 				
-#pragma omp parallel for schedule(static) default(none) shared(x_count, fromValueToIndex) firstprivate(objelement_vec0, int_result_data) if(x_count >= EIDOS_OMPMIN_MATCH_OBJECT)
+				EIDOS_THREAD_COUNT(gEidos_OMP_threads_MATCH_OBJECT);
+#pragma omp parallel for schedule(static) default(none) shared(x_count, fromValueToIndex) firstprivate(objelement_vec0, int_result_data) if(x_count >= EIDOS_OMPMIN_MATCH_OBJECT) num_threads(thread_count)
 				for (int value_index = 0; value_index < x_count; ++value_index)
 				{
 					auto find_iter = fromValueToIndex.find(objelement_vec0[value_index]);
@@ -2225,6 +2243,248 @@ EidosValue_SP Eidos_ExecuteFunction_print(const std::vector<EidosValue_SP> &p_ar
 	return gStaticEidosValueVOID;
 }
 
+//	(integer)rank(numeric x, [string$ tiesMethod = "average"])
+EidosValue_SP Eidos_ExecuteFunction_rank(const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter __attribute__((unused)) &p_interpreter)
+{
+	// Note that this function ignores matrix/array attributes, and always returns a vector, by design
+	
+	EidosValue_SP result_SP(nullptr);
+	
+	EidosValue *x_value = p_arguments[0].get();
+	EidosValue *tiesMethod_value = p_arguments[1].get();
+	int x_count = x_value->Count();
+	
+	// figure out how we will resolve ties
+	typedef enum {
+		kTiesAverage,		// produces a result of type float, unlike all the others
+		kTiesFirst,
+		kTiesLast,
+		kTiesRandom,		// not currently supported, but supported in R
+		kTiesMax,
+		kTiesMin
+	} TiesMethod;
+	
+	std::string tiesMethod_string = tiesMethod_value->StringAtIndex(0, nullptr);
+	TiesMethod tiesMethod;
+	
+	if (tiesMethod_string == "average")
+		tiesMethod = TiesMethod::kTiesAverage;
+	else if (tiesMethod_string == "first")
+		tiesMethod = TiesMethod::kTiesFirst;
+	else if (tiesMethod_string == "last")
+		tiesMethod = TiesMethod::kTiesLast;
+	else if (tiesMethod_string == "random")
+		tiesMethod = TiesMethod::kTiesRandom;
+	else if (tiesMethod_string == "max")
+		tiesMethod = TiesMethod::kTiesMax;
+	else if (tiesMethod_string == "min")
+		tiesMethod = TiesMethod::kTiesMin;
+	else
+		EIDOS_TERMINATION << "ERROR (Eidos_ExecuteFunction_rank): function rank() requires tiesMethod to be 'average', 'first', 'last', 'random', 'max', or 'min'." << EidosTerminate(nullptr);
+	
+	if (tiesMethod == TiesMethod::kTiesRandom)
+		EIDOS_TERMINATION << "ERROR (Eidos_ExecuteFunction_rank): tiesMethod == 'random' is not currently supported." << EidosTerminate(nullptr);
+	
+	if (x_count == 0)
+	{
+		// This handles all the zero-length cases by returning float(0) or integer(0)
+		if (tiesMethod == TiesMethod::kTiesAverage)
+			result_SP = gStaticEidosValue_Float_ZeroVec;
+		else
+			result_SP = gStaticEidosValue_Integer_ZeroVec;
+	}
+	else if (x_count == 1)
+	{
+		// This handles all the singleton cases by returning 1.0 or 1
+		if (tiesMethod == TiesMethod::kTiesAverage)
+			result_SP = gStaticEidosValue_Float1;
+		else
+			result_SP = gStaticEidosValue_Integer1;
+	}
+	else
+	{
+		// Here we handle the vector cases, which can be done with direct access
+		EidosValue_Float_vector *float_result = nullptr;
+		EidosValue_Int_vector *int_result = nullptr;
+		EidosValueType x_type = x_value->Type();
+		
+		if (tiesMethod == TiesMethod::kTiesAverage)
+		{
+			float_result = (new (gEidosValuePool->AllocateChunk()) EidosValue_Float_vector())->resize_no_initialize(x_count);
+			result_SP = EidosValue_SP(float_result);
+		}
+		else
+		{
+			int_result = (new (gEidosValuePool->AllocateChunk()) EidosValue_Int_vector())->resize_no_initialize(x_count);
+			result_SP = EidosValue_SP(int_result);
+		}
+		
+		// Handle integer and float; note that this is unrelated to the type of the result!
+		if (x_type == EidosValueType::kValueInt)
+		{
+			std::vector<std::pair<int64_t, size_t>> pairs;
+			
+			{
+				// construct our vector of pairs: std::pair<original x value, index in x>
+				const int64_t *int_data = x_value->IntVector()->data();
+				
+				for (int index = 0; index < x_count; ++index)
+					pairs.emplace_back(std::pair<int64_t, size_t>(int_data[index], index));
+				
+				// sort by the original x value; we use a stable sort if needed by the ties method
+				if ((tiesMethod == TiesMethod::kTiesFirst) || (tiesMethod == TiesMethod::kTiesLast))
+					std::stable_sort(pairs.begin(), pairs.end(), [](const std::pair<int64_t, size_t> &l, const std::pair<int64_t, size_t> &r) { return l.first < r.first; });
+				else
+					std::sort(pairs.begin(), pairs.end(), [](const std::pair<int64_t, size_t> &l, const std::pair<int64_t, size_t> &r) { return l.first < r.first; });
+			}
+			
+			// handle shared ranks one at a time, starting with rank 1
+			for (int run_start = 0; run_start < x_count; )
+			{
+				// look for runs of equal x values, which get handled as a block
+				int64_t run_value = pairs[run_start].first;
+				int run_end;
+				
+				for (run_end = run_start + 1; run_end < x_count; ++run_end)
+					if (pairs[run_end].first != run_value)
+						break;
+				run_end--;
+				
+				// the run ranges from run_start to run_end
+				switch (tiesMethod)
+				{
+					case TiesMethod::kTiesAverage:
+					{
+						double rank = (run_end + run_start) / 2.0;
+						
+						for (int run_pos = run_start; run_pos <= run_end; ++run_pos)
+							float_result->set_float_no_check((double)rank + 1, pairs[run_pos].second);
+						break;
+					}
+					case TiesMethod::kTiesFirst:
+					{
+						for (int run_pos = run_start; run_pos <= run_end; ++run_pos)
+							int_result->set_int_no_check((int64_t)run_pos + 1, pairs[run_pos].second);
+						break;
+					}
+					case TiesMethod::kTiesLast:
+					{
+						for (int run_pos = run_start; run_pos <= run_end; ++run_pos)
+							int_result->set_int_no_check((int64_t)(run_end - (run_pos - run_start)) + 1, pairs[run_pos].second);
+						break;
+					}
+					case TiesMethod::kTiesRandom:
+					{
+						// not currently supported, errors out above
+						break;
+					}
+					case TiesMethod::kTiesMax:
+					{
+						int64_t rank = run_end;
+						
+						for (int run_pos = run_start; run_pos <= run_end; ++run_pos)
+							int_result->set_int_no_check((int64_t)rank + 1, pairs[run_pos].second);
+						break;
+					}
+					case TiesMethod::kTiesMin:
+					{
+						int64_t rank = run_start;
+						
+						for (int run_pos = run_start; run_pos <= run_end; ++run_pos)
+							int_result->set_int_no_check((int64_t)rank + 1, pairs[run_pos].second);
+						break;
+					}
+				}
+				
+				// go to the next element to handle the next rank
+				run_start = run_end + 1;
+			}
+		}
+		else if (x_type == EidosValueType::kValueFloat)
+		{
+			std::vector<std::pair<double, size_t>> pairs;
+			
+			{
+				// construct our vector of pairs: std::pair<original x value, index in x>
+				const double *float_data = x_value->FloatVector()->data();
+				
+				for (int index = 0; index < x_count; ++index)
+					pairs.emplace_back(std::pair<double, size_t>(float_data[index], index));
+				
+				// sort by the original x value; we use a stable sort if needed by the ties method
+				if ((tiesMethod == TiesMethod::kTiesFirst) || (tiesMethod == TiesMethod::kTiesLast))
+					std::stable_sort(pairs.begin(), pairs.end(), [](const std::pair<double, size_t> &l, const std::pair<double, size_t> &r) { return l.first < r.first; });
+				else
+					std::sort(pairs.begin(), pairs.end(), [](const std::pair<double, size_t> &l, const std::pair<double, size_t> &r) { return l.first < r.first; });
+			}
+			
+			// handle shared ranks one at a time, starting with rank 1
+			for (int run_start = 0; run_start < x_count; )
+			{
+				// look for runs of equal x values, which get handled as a block
+				double run_value = pairs[run_start].first;
+				int run_end;
+				
+				for (run_end = run_start + 1; run_end < x_count; ++run_end)
+					if (pairs[run_end].first != run_value)
+						break;
+				run_end--;
+				
+				// the run ranges from run_start to run_end
+				switch (tiesMethod)
+				{
+					case TiesMethod::kTiesAverage:
+					{
+						double rank = (run_end + run_start) / 2.0;
+						
+						for (int run_pos = run_start; run_pos <= run_end; ++run_pos)
+							float_result->set_float_no_check((double)rank + 1, pairs[run_pos].second);
+						break;
+					}
+					case TiesMethod::kTiesFirst:
+					{
+						for (int run_pos = run_start; run_pos <= run_end; ++run_pos)
+							int_result->set_int_no_check((int64_t)run_pos + 1, pairs[run_pos].second);
+						break;
+					}
+					case TiesMethod::kTiesLast:
+					{
+						for (int run_pos = run_start; run_pos <= run_end; ++run_pos)
+							int_result->set_int_no_check((int64_t)(run_end - (run_pos - run_start)) + 1, pairs[run_pos].second);
+						break;
+					}
+					case TiesMethod::kTiesRandom:
+					{
+						// not currently supported, errors out above
+						break;
+					}
+					case TiesMethod::kTiesMax:
+					{
+						int64_t rank = run_end;
+						
+						for (int run_pos = run_start; run_pos <= run_end; ++run_pos)
+							int_result->set_int_no_check((int64_t)rank + 1, pairs[run_pos].second);
+						break;
+					}
+					case TiesMethod::kTiesMin:
+					{
+						int64_t rank = run_start;
+						
+						for (int run_pos = run_start; run_pos <= run_end; ++run_pos)
+							int_result->set_int_no_check((int64_t)rank + 1, pairs[run_pos].second);
+						break;
+					}
+				}
+				
+				// go to the next element to handle the next rank
+				run_start = run_end + 1;
+			}
+		}
+	}
+	
+	return result_SP;
+}
+
 //	(*)rev(* x)
 EidosValue_SP Eidos_ExecuteFunction_rev(const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter __attribute__((unused)) &p_interpreter)
 {
@@ -2344,13 +2604,16 @@ EidosValue_SP Eidos_ExecuteFunction_tabulate(const std::vector<EidosValue_SP> &p
 	{
 		maxbin = 0;		// note that if the parallel loop runs, this gets reinitialized to the most negative number!
 		
-#pragma omp parallel for schedule(static) default(none) shared(value_count) firstprivate(int_data) reduction(max: maxbin) if(value_count >= EIDOS_OMPMIN_TABULATE)
+		EIDOS_BENCHMARK_START(EidosBenchmarkType::k_TABULATE_MAXBIN);
+		EIDOS_THREAD_COUNT(gEidos_OMP_threads_TABULATE_MAXBIN);
+#pragma omp parallel for schedule(static) default(none) shared(value_count) firstprivate(int_data) reduction(max: maxbin) if(value_count >= EIDOS_OMPMIN_TABULATE_MAXBIN) num_threads(thread_count)
 		for (int value_index = 0; value_index < value_count; ++value_index)
 		{
 			int64_t value = int_data[value_index];
 			if (value > maxbin)
 				maxbin = value;
 		}
+		EIDOS_BENCHMARK_END(EidosBenchmarkType::k_TABULATE_MAXBIN);
 	}
 	else
 	{
@@ -2376,7 +2639,8 @@ EidosValue_SP Eidos_ExecuteFunction_tabulate(const std::vector<EidosValue_SP> &p
 		// Our custom OpenMP implementation has some extra overhead that we want to avoid when running single-threaded
 		// We make completely separate tallies in each thread, and then do a reduction at the end into result_data.
 		// I tried some other approaches – per-thread locks, and atomic updates – and they were much slower.
-#pragma omp parallel default(none) shared(value_count, num_bins) firstprivate(int_data, result_data)
+		EIDOS_THREAD_COUNT(gEidos_OMP_threads_TABULATE);
+#pragma omp parallel default(none) shared(value_count, num_bins) firstprivate(int_data, result_data) num_threads(thread_count) // if(EIDOS_OMPMIN_TABULATE) is above
 		{
 			int64_t *perthread_tallies = (int64_t *)calloc(num_bins, sizeof(int64_t));
 			

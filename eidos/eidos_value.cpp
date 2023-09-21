@@ -19,6 +19,7 @@
 
 #include "eidos_value.h"
 #include "eidos_functions.h"
+#include "eidos_sorting.h"
 #include "eidos_interpreter.h"
 #include "eidos_call_signature.h"
 #include "eidos_property_signature.h"
@@ -77,6 +78,7 @@ EidosValue_String_SP gStaticEidosValue_StringPeriod;
 EidosValue_String_SP gStaticEidosValue_StringDoubleQuote;
 EidosValue_String_SP gStaticEidosValue_String_ECMAScript;
 EidosValue_String_SP gStaticEidosValue_String_indices;
+EidosValue_String_SP gStaticEidosValue_String_average;
 
 EidosClass *gEidosObject_Class = nullptr;
 
@@ -1398,10 +1400,8 @@ void EidosValue_String_vector::PushValueFromIndexOfEidosValue(int p_idx, const E
 
 void EidosValue_String_vector::Sort(bool p_ascending)
 {
-	if (p_ascending)
-		std::sort(values_.begin(), values_.end());
-	else
-		std::sort(values_.begin(), values_.end(), std::greater<std::string>());
+	// This will sort in parallel if the task is large enough (and we're running parallel)
+	Eidos_ParallelSort(values_.data(), values_.size(), p_ascending);
 }
 
 
@@ -1659,19 +1659,8 @@ void EidosValue_Int_vector::PushValueFromIndexOfEidosValue(int p_idx, const Eido
 
 void EidosValue_Int_vector::Sort(bool p_ascending)
 {
-	if (p_ascending)
-	{
-		// For the ascending int64_t case specifically, we now have a parallel quicksort
-		// algorithm that gives a little speedup.  This is kind of experimental, but has
-		// been tested and seems to be correct.  I wrote a parallel mergesort algorithm
-		// too; its performance is kind of comparable but quicksort gives a bit more
-		// speed with a small number of threads (2-10 threads), so I chose it for now.
-		// This is the only place that sorting has been parallelized so far.  Note that
-		// this function automatically falls back to std::sort when single-threaded.
-		Eidos_ParallelQuicksort_I(values_, count_);
-	}
-	else
-		std::sort(values_, values_ + count_, std::greater<int64_t>());
+	// This will sort in parallel if the task is large enough (and we're running parallel)
+	Eidos_ParallelSort(values_, count_, p_ascending);
 }
 
 EidosValue_Int_vector *EidosValue_Int_vector::reserve(size_t p_reserved_size)
@@ -1957,10 +1946,11 @@ void EidosValue_Float_vector::PushValueFromIndexOfEidosValue(int p_idx, const Ei
 
 void EidosValue_Float_vector::Sort(bool p_ascending)
 {
+	// Unfortunately a custom comparator is needed to make the sort order with NANs match that of R
 	if (p_ascending)
-		std::sort(values_, values_ + count_, [](const double& a, const double& b) { return std::isnan(b) || (a < b); });
+		Eidos_ParallelSort_Comparator(values_, count_, [](const double& a, const double& b) { return std::isnan(b) || (a < b); });
 	else
-		std::sort(values_, values_ + count_, [](const double& a, const double& b) { return std::isnan(b) || (a > b); });
+		Eidos_ParallelSort_Comparator(values_, count_, [](const double& a, const double& b) { return std::isnan(b) || (a > b); });
 }
 
 EidosValue_Float_vector *EidosValue_Float_vector::reserve(size_t p_reserved_size)

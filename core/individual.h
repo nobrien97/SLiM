@@ -101,11 +101,25 @@ public:
 	// accessors for them seems excessively complicated / slow, and friending the whole class is too invasive.
 	// Basically I think of the Individual class as just being a struct-like bag in some aspects.
 	
-	eidos_logical_t migrant_;			// T if the individual has migrated in the current cycle, F otherwise
-	eidos_logical_t killed_;			// T if the individual has been killed by killIndividuals(), F otherwise
 	uint8_t scratch_;					// available for use by algorithms
+	IndividualSex sex_;					// must correspond to our position in the Subpopulation vector we live in
+	unsigned int migrant_ : 1;			// T if the individual has migrated in the current cycle, F otherwise
+	unsigned int killed_ : 1;			// T if the individual has been killed by killIndividuals(), F otherwise
 	
-	slim_usertag_t tag_value_;			// a user-defined tag value
+	// note there are 4 bits free here for other logical flags
+	
+	unsigned tagL0_set_ : 1;			// T if tagL0 has been set by the user
+	unsigned tagL0_value_ : 1;			// a user-defined tag value of logical type
+	unsigned tagL1_set_ : 1;			// T if tagL1 has been set by the user
+	unsigned tagL1_value_ : 1;			// a user-defined tag value of logical type
+	unsigned tagL2_set_ : 1;			// T if tagL2 has been set by the user
+	unsigned tagL2_value_ : 1;			// a user-defined tag value of logical type
+	unsigned tagL3_set_ : 1;			// T if tagL3 has been set by the user
+	unsigned tagL3_value_ : 1;			// a user-defined tag value of logical type
+	unsigned tagL4_set_ : 1;			// T if tagL4 has been set by the user
+	unsigned tagL4_value_ : 1;			// a user-defined tag value of logical type
+	
+	slim_usertag_t tag_value_;			// a user-defined tag value of integer type
 	double tagF_value_;					// a user-defined tag value of float type
 	
 	double fitness_scaling_ = 1.0;		// the fitnessScaling property value
@@ -119,7 +133,6 @@ public:
 #endif
 	
 	Genome *genome1_, *genome2_;		// NOT OWNED; must correspond to the entries in the Subpopulation we live in
-	IndividualSex sex_;					// must correspond to our position in the Subpopulation vector we live in
 	slim_age_t age_;					// nonWF only: the age of the individual, in cycles; -1 in WF models
 	
 	slim_popsize_t index_;				// the individual index in that subpop (0-based, and not multiplied by 2)
@@ -140,8 +153,6 @@ public:
 	inline virtual ~Individual(void) override { }
 	
 	inline __attribute__((always_inline)) void ClearColor(void) { color_set_ = false; }
-	
-	inline __attribute__((always_inline)) double TagFloat(void) { return tagF_value_; }
 	
 	// This sets the receiver up as a new individual, with a newly assigned pedigree id, and gets
 	// parental and grandparental information from the supplied parents.
@@ -218,11 +229,15 @@ public:
 		// just for parallel design, no parentage to revoke
 	}
 	
-	// Relatedness using pedigree data.  Most clients will use RelatednessToIndividual(); _Relatedness() is internal API made public for unit testing.
+	// Relatedness using pedigree data.  Most clients will use RelatednessToIndividual() and SharedParentCountWithIndividual;
+	// _Relatedness() and _SharedParentCount() are internal API made public for unit testing.
 	double RelatednessToIndividual(Individual &p_ind);
 	static double _Relatedness(slim_pedigreeid_t A, slim_pedigreeid_t A_P1, slim_pedigreeid_t A_P2, slim_pedigreeid_t A_G1, slim_pedigreeid_t A_G2, slim_pedigreeid_t A_G3, slim_pedigreeid_t A_G4,
 							   slim_pedigreeid_t B, slim_pedigreeid_t B_P1, slim_pedigreeid_t B_P2, slim_pedigreeid_t B_G1, slim_pedigreeid_t B_G2, slim_pedigreeid_t B_G3, slim_pedigreeid_t B_G4,
 							   IndividualSex A_sex, IndividualSex B_sex, GenomeType modeledChromosomeType);
+	
+	int SharedParentCountWithIndividual(Individual &p_ind);
+	static int _SharedParentCount(slim_pedigreeid_t X_P1, slim_pedigreeid_t X_P2, slim_pedigreeid_t Y_P1, slim_pedigreeid_t Y_P2);
 	
 	inline __attribute__((always_inline)) slim_pedigreeid_t PedigreeID()			{ return pedigree_id_; }
 	inline __attribute__((always_inline)) void SetPedigreeID(slim_pedigreeid_t p_new_id)		{ pedigree_id_ = p_new_id; }	// should basically never be called
@@ -247,12 +262,18 @@ public:
 	EidosValue_SP ExecuteMethod_containsMutations(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter);
 	static EidosValue_SP ExecuteMethod_Accelerated_countOfMutationsOfType(EidosObject **p_values, size_t p_values_size, EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter);
 	EidosValue_SP ExecuteMethod_relatedness(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter);
+	EidosValue_SP ExecuteMethod_sharedParentCount(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter);
 	static EidosValue_SP ExecuteMethod_Accelerated_sumOfMutationsOfType(EidosObject **p_values, size_t p_values_size, EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter);
 	EidosValue_SP ExecuteMethod_uniqueMutationsOfType(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter);
 	
 	// Accelerated property access; see class EidosObject for comments on this mechanism
 	static EidosValue *GetProperty_Accelerated_index(EidosObject **p_values, size_t p_values_size);
 	static EidosValue *GetProperty_Accelerated_pedigreeID(EidosObject **p_values, size_t p_values_size);
+	static EidosValue *GetProperty_Accelerated_tagL0(EidosObject **p_values, size_t p_values_size);
+	static EidosValue *GetProperty_Accelerated_tagL1(EidosObject **p_values, size_t p_values_size);
+	static EidosValue *GetProperty_Accelerated_tagL2(EidosObject **p_values, size_t p_values_size);
+	static EidosValue *GetProperty_Accelerated_tagL3(EidosObject **p_values, size_t p_values_size);
+	static EidosValue *GetProperty_Accelerated_tagL4(EidosObject **p_values, size_t p_values_size);
 	static EidosValue *GetProperty_Accelerated_tag(EidosObject **p_values, size_t p_values_size);
 	static EidosValue *GetProperty_Accelerated_age(EidosObject **p_values, size_t p_values_size);
 	static EidosValue *GetProperty_Accelerated_reproductiveOutput(EidosObject **p_values, size_t p_values_size);
@@ -270,6 +291,11 @@ public:
 	// Accelerated property writing; see class EidosObject for comments on this mechanism
 	static void SetProperty_Accelerated_tag(EidosObject **p_values, size_t p_values_size, const EidosValue &p_source, size_t p_source_size);
 	static void SetProperty_Accelerated_tagF(EidosObject **p_values, size_t p_values_size, const EidosValue &p_source, size_t p_source_size);
+	static void SetProperty_Accelerated_tagL0(EidosObject **p_values, size_t p_values_size, const EidosValue &p_source, size_t p_source_size);
+	static void SetProperty_Accelerated_tagL1(EidosObject **p_values, size_t p_values_size, const EidosValue &p_source, size_t p_source_size);
+	static void SetProperty_Accelerated_tagL2(EidosObject **p_values, size_t p_values_size, const EidosValue &p_source, size_t p_source_size);
+	static void SetProperty_Accelerated_tagL3(EidosObject **p_values, size_t p_values_size, const EidosValue &p_source, size_t p_source_size);
+	static void SetProperty_Accelerated_tagL4(EidosObject **p_values, size_t p_values_size, const EidosValue &p_source, size_t p_source_size);
 	static bool _SetFitnessScaling_1(double source_value, EidosObject **p_values, size_t p_values_size);
 	static bool _SetFitnessScaling_N(const double *source_data, EidosObject **p_values, size_t p_values_size);
 	static void SetProperty_Accelerated_fitnessScaling(EidosObject **p_values, size_t p_values_size, const EidosValue &p_source, size_t p_source_size);
@@ -285,7 +311,10 @@ public:
 	// species will suffer the associated speed penalty for it.  This is a bit unfortunate, but keeps the design simple.
 	static bool s_any_individual_color_set_;
 	static bool s_any_individual_dictionary_set_;
-	static bool s_any_individual_or_genome_tag_set_;
+	static bool s_any_individual_tag_set_;
+	static bool s_any_individual_tagF_set_;
+	static bool s_any_individual_tagL_set_;
+	static bool s_any_genome_tag_set_;
 	static bool s_any_individual_fitness_scaling_set_;
 	
 	// for Subpopulation::ExecuteMethod_takeMigrants()

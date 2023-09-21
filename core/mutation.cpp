@@ -74,7 +74,10 @@ void SLiM_IncreaseMutationBlockCapacity(void)
 {
 	// We do not use a THREAD_SAFETY macro here because this needs to be checked in release builds also;
 	// we are not able to completely protect against this occurring at runtime, and it corrupts the run.
-	if (omp_get_level() > 0)
+	// It's OK for this to be called when we're inside an inactive parallel region; there is then no
+	// race condition.  When a parallel region is active, even inside a critical region, reallocating
+	// the mutation block has the potential for a race with other threads.
+	if (omp_in_parallel())
 	{
 		std::cerr << "ERROR (SLiM_IncreaseMutationBlockCapacity): (internal error) SLiM_IncreaseMutationBlockCapacity() was called to reallocate gSLiM_Mutation_Block inside a parallel section.  If you see this message, you need to increase the pre-allocation margin for your simulation, because it is generating such an unexpectedly large number of new mutations.  Please contact the SLiM developers for guidance on how to do this." << std::endl;
 		raise(SIGTRAP);
@@ -106,12 +109,24 @@ void SLiM_IncreaseMutationBlockCapacity(void)
 	std::uintptr_t old_mutation_block = reinterpret_cast<std::uintptr_t>(gSLiM_Mutation_Block);
 	MutationIndex old_block_capacity = gSLiM_Mutation_Block_Capacity;
 	
+	//std::cout << "old capacity: " << old_block_capacity << std::endl;
+	
+	// BCH 25 July 2023: check for increasing our block beyond the maximum size of 2^31 mutations.
+	// See https://github.com/MesserLab/SLiM/issues/361.  Note that the initial size should be
+	// a power of 2, so that we actually reach the maximum; see SLIM_MUTATION_BLOCK_INITIAL_SIZE.
+	// In other words, we expect to be at exactly 0x0000000040000000UL here, and thus to double
+	// to 0x0000000080000000UL, which is a capacity of 2^31, which is the limit of int32_t.
+	if ((size_t)old_block_capacity > 0x0000000040000000UL)	// >2^30 means >2^31 when doubled
+		EIDOS_TERMINATION << "ERROR (SLiM_IncreaseMutationBlockCapacity): too many mutations; there is a limit of 2^31 (2147483648) segregating mutations in SLiM." << EidosTerminate(nullptr);
+	
 	gSLiM_Mutation_Block_Capacity *= 2;
 	gSLiM_Mutation_Block = (Mutation *)realloc((void*)gSLiM_Mutation_Block, gSLiM_Mutation_Block_Capacity * sizeof(Mutation));
 	gSLiM_Mutation_Refcounts = (slim_refcount_t *)realloc(gSLiM_Mutation_Refcounts, gSLiM_Mutation_Block_Capacity * sizeof(slim_refcount_t));
 	
 	if (!gSLiM_Mutation_Block || !gSLiM_Mutation_Refcounts)
 		EIDOS_TERMINATION << "ERROR (SLiM_IncreaseMutationBlockCapacity): allocation failed; you may need to raise the memory limit for SLiM." << EidosTerminate(nullptr);
+	
+	//std::cout << "new capacity: " << gSLiM_Mutation_Block_Capacity << std::endl;
 	
 	std::uintptr_t new_mutation_block = reinterpret_cast<std::uintptr_t>(gSLiM_Mutation_Block);
 	
@@ -150,26 +165,35 @@ void SLiM_IncreaseMutationBlockCapacity(void)
 #endif
 }
 
-void SLiM_ZeroRefcountBlock(__attribute__((unused)) MutationRun &p_mutation_registry)
+void SLiM_ZeroRefcountBlock(MutationRun &p_mutation_registry, bool p_registry_only)
 {
 	THREAD_SAFETY_IN_ANY_PARALLEL("SLiM_ZeroRefcountBlock(): gSLiM_Mutation_Block change");
 	
 #ifdef SLIMGUI
-	// This version zeros out refcounts just for the mutations currently in use in the registry.
-	// It is thus minimal, but probably quite a bit slower than just zeroing out the whole thing.
 	// BCH 11/25/2017: This code path needs to be used in SLiMgui to avoid modifying the refcounts
 	// for mutations in other simulations sharing the mutation block.
-	slim_refcount_t *refcount_block_ptr = gSLiM_Mutation_Refcounts;
-	const MutationIndex *registry_iter = p_mutation_registry.begin_pointer_const();
-	const MutationIndex *registry_iter_end = p_mutation_registry.end_pointer_const();
-	
-	while (registry_iter != registry_iter_end)
-		*(refcount_block_ptr + (*registry_iter++)) = 0;
-#else
-	// Zero out the whole thing with EIDOS_BZERO(), without worrying about which bits are in use.
-	// This hits more memory, but avoids having to read the registry, and should write whole cache lines.
-	EIDOS_BZERO(gSLiM_Mutation_Refcounts, (gSLiM_Mutation_Block_LastUsedIndex + 1) * sizeof(slim_refcount_t));
+	p_registry_only = true;
 #endif
+	
+	if (p_registry_only)
+	{
+		// This code path zeros out refcounts just for the mutations currently in use in the registry.
+		// It is thus minimal, but probably quite a bit slower than just zeroing out the whole thing.
+		// BCH 6/8/2023: This is necessary in SLiMgui, as noted above, but also in multispecies sims
+		// so that one species does not step on the toes of another species.
+		slim_refcount_t *refcount_block_ptr = gSLiM_Mutation_Refcounts;
+		const MutationIndex *registry_iter = p_mutation_registry.begin_pointer_const();
+		const MutationIndex *registry_iter_end = p_mutation_registry.end_pointer_const();
+		
+		while (registry_iter != registry_iter_end)
+			*(refcount_block_ptr + (*registry_iter++)) = 0;
+	}
+	else
+	{
+		// Zero out the whole thing with EIDOS_BZERO(), without worrying about which bits are in use.
+		// This hits more memory, but avoids having to read the registry, and should write whole cache lines.
+		EIDOS_BZERO(gSLiM_Mutation_Refcounts, (gSLiM_Mutation_Block_LastUsedIndex + 1) * sizeof(slim_refcount_t));
+	}
 }
 
 size_t SLiMMemoryUsageForMutationBlock(void)

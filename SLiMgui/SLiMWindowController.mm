@@ -141,10 +141,12 @@
 {
 	if (self = [super initWithWindowNibName:@"SLiMWindow"])
 	{
+		NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+		
 		// observe preferences that we care about
-		[[NSUserDefaults standardUserDefaults] addObserver:self forKeyPath:defaultsSyntaxHighlightScriptKey options:0 context:NULL];
-		[[NSUserDefaults standardUserDefaults] addObserver:self forKeyPath:defaultsSyntaxHighlightOutputKey options:0 context:NULL];
-		[[NSUserDefaults standardUserDefaults] addObserver:self forKeyPath:defaultsDisplayFontSizeKey options:0 context:NULL];
+		[defaults addObserver:self forKeyPath:defaultsSyntaxHighlightScriptKey options:0 context:NULL];
+		[defaults addObserver:self forKeyPath:defaultsSyntaxHighlightOutputKey options:0 context:NULL];
+		[defaults addObserver:self forKeyPath:defaultsDisplayFontSizeKey options:0 context:NULL];
 		
 		observingKeyPaths = YES;
 		
@@ -461,6 +463,13 @@
 		slimgui = nullptr;
 	}
 	
+	// Reset the number of threads to be used in parallel regions, if it has been changed by parallelSetNumThreads();
+	// note that we do not save/restore the value across context switches between models, as we do RNGs and such,
+	// since we don't support end users running SLiMgui multithreaded anyhow
+	gEidosNumThreads = gEidosMaxThreads;
+	gEidosNumThreadsOverride = false;
+	omp_set_num_threads(gEidosMaxThreads);
+	
 	// Free the old simulation RNG and make a new one, to have clean state
 	if (sim_RNG_initialized)
 	{
@@ -486,10 +495,6 @@
 #else
 	sim_RNG_PERTHREAD.resize(gEidosMaxThreads);
 	
-	// We want to try to guarantee that every thread sets up its RNG, even if OMP_DYNAMIC is true
-	int old_dynamic = omp_get_dynamic();
-	omp_set_dynamic(false);
-	
 #pragma omp parallel default(none) shared(gEidos_RNG_PERTHREAD) num_threads(gEidosMaxThreads)
 	{
 		// Each thread allocates and initializes its own Eidos_RNG_State, for "first touch" optimization
@@ -498,8 +503,6 @@
 		_Eidos_InitializeOneRNG(*rng_state);
 		sim_RNG_PERTHREAD[threadnum] = rng_state;
 	}
-	
-	omp_set_dynamic(old_dynamic);
 #endif
 	sim_RNG_initialized = true;
 	//NSLog(@"-[SLiMWindowController startNewSimulationFromScript]: initialized sim_RNG");
@@ -1080,6 +1083,9 @@
 	
 	[scriptTextView setSyntaxColoring:([defaults boolForKey:defaultsSyntaxHighlightScriptKey] ? kEidosSyntaxColoringEidos : kEidosSyntaxColoringNone)];
 	[outputTextView setSyntaxColoring:([defaults boolForKey:defaultsSyntaxHighlightOutputKey] ? kEidosSyntaxColoringOutput : kEidosSyntaxColoringNone)];
+	
+	// fire the observer message for font size, to make it correct; seems like this used to happen automatically but now doesn't?
+	[self observeValueForKeyPath:defaultsDisplayFontSizeKey ofObject:defaults change:nullptr context:nullptr];
 	
 	// Set the script textview to show its string, with correct formatting
 	[scriptTextView setString:scriptString];

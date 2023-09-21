@@ -41,7 +41,10 @@ slim_pedigreeid_t gSLiM_next_pedigree_id = 0;
 // Static member bools that track whether any individual has ever sustained a particular type of change
 bool Individual::s_any_individual_color_set_ = false;
 bool Individual::s_any_individual_dictionary_set_ = false;
-bool Individual::s_any_individual_or_genome_tag_set_ = false;
+bool Individual::s_any_individual_tag_set_ = false;
+bool Individual::s_any_individual_tagF_set_ = false;
+bool Individual::s_any_individual_tagL_set_ = false;
+bool Individual::s_any_genome_tag_set_ = false;
 bool Individual::s_any_individual_fitness_scaling_set_ = false;
 
 
@@ -66,6 +69,12 @@ Individual::Individual(Subpopulation *p_subpopulation, slim_popsize_t p_individu
 	// Initialize tag values to the "unset" value
 	tag_value_ = SLIM_TAG_UNSET_VALUE;
 	tagF_value_ = SLIM_TAGF_UNSET_VALUE;
+	tagL0_set_ = false;
+	tagL1_set_ = false;
+	tagL2_set_ = false;
+	tagL3_set_ = false;
+	tagL4_set_ = false;
+	
 	p_genome1->tag_value_ = SLIM_TAG_UNSET_VALUE;
 	p_genome1->tag_value_ = SLIM_TAG_UNSET_VALUE;
     
@@ -240,6 +249,57 @@ double Individual::RelatednessToIndividual(Individual &p_ind)
 	GenomeType chrtype = subpopulation_->species_.ModeledChromosomeType();
 	
 	return _Relatedness(A, A_P1, A_P2, A_G1, A_G2, A_G3, A_G4, B, B_P1, B_P2, B_G1, B_G2, B_G3, B_G4, indA.sex_, indB.sex_, chrtype);
+}
+
+int Individual::_SharedParentCount(slim_pedigreeid_t X_P1, slim_pedigreeid_t X_P2, slim_pedigreeid_t Y_P1, slim_pedigreeid_t Y_P2)
+{
+	// This is the top-level internal API here.  It is separate from RelatednessToIndividual(), and
+	// implemented as a static member function, for unit testing; we want an
+	// API that unit tests can call without needing to actually have a constructed Individual object.
+	
+	// If one individual is missing parent information, return 0
+	if ((X_P1 == -1) || (X_P2 == -1) || (Y_P1 == -1) || (Y_P2 == -1))
+		return 0;
+	
+	// If both parents match, in one way or another, then they must be full siblings
+	if ((X_P1 == Y_P1) && (X_P2 == Y_P2))
+		return 2;
+	if ((X_P1 == Y_P2) && (X_P2 == Y_P1))
+		return 2;
+	
+	// Otherwise, if one parent matches, they must be half siblings
+	if ((X_P1 == Y_P1) || (X_P1 == Y_P2) || (X_P2 == Y_P1) || (X_P2 == Y_P2))
+		return 1;
+	
+	// Otherwise, they are not siblings
+	return 0;
+}
+
+int Individual::SharedParentCountWithIndividual(Individual &p_ind)
+{
+	// This is much simpler than Individual::RelatednessToIndividual(); we just want the shared parent count.  That is
+	// defined, for two individuals X and Y with parents in {A, B, C, D}, as:
+	//
+	//	AB CD -> 0 (no shared parents)
+	//	AB CC -> 0 (no shared parents)
+	//	AB AC -> 1 (half siblings)
+	//	AB AA -> 1 (half siblings)
+	//	AA AB -> 1 (half siblings)
+	//	AB AB -> 2 (full siblings)
+	//	AB BA -> 2 (full siblings)
+	//	AA AA -> 2 (full siblings)
+	//
+	// If X is itself a parent of Y, or vice versa, that is irrelevant for this method; we are not measuring
+	// consanguinity here.
+	//
+	Individual &indX = *this, &indY = p_ind;
+	
+	slim_pedigreeid_t X_P1 = indX.pedigree_p1_;
+	slim_pedigreeid_t X_P2 = indX.pedigree_p2_;
+	slim_pedigreeid_t Y_P1 = indY.pedigree_p1_;
+	slim_pedigreeid_t Y_P2 = indY.pedigree_p2_;
+	
+	return _SharedParentCount(X_P1, X_P2, Y_P1, Y_P2);
 }
 
 
@@ -612,6 +672,36 @@ EidosValue_SP Individual::GetProperty(EidosGlobalStringID p_property_id)
 			
 			return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float_singleton(tagF_value));
 		}
+		case gID_tagL0:				// ACCELERATED
+		{
+			if (!tagL0_set_)
+				EIDOS_TERMINATION << "ERROR (Individual::GetProperty): property tagL0 accessed on individual before being set." << EidosTerminate();
+			return (tagL0_value_ ? gStaticEidosValue_LogicalT : gStaticEidosValue_LogicalF);
+		}
+		case gID_tagL1:				// ACCELERATED
+		{
+			if (!tagL1_set_)
+				EIDOS_TERMINATION << "ERROR (Individual::GetProperty): property tagL1 accessed on individual before being set." << EidosTerminate();
+			return (tagL1_value_ ? gStaticEidosValue_LogicalT : gStaticEidosValue_LogicalF);
+		}
+		case gID_tagL2:				// ACCELERATED
+		{
+			if (!tagL2_set_)
+				EIDOS_TERMINATION << "ERROR (Individual::GetProperty): property tagL2 accessed on individual before being set." << EidosTerminate();
+			return (tagL2_value_ ? gStaticEidosValue_LogicalT : gStaticEidosValue_LogicalF);
+		}
+		case gID_tagL3:				// ACCELERATED
+		{
+			if (!tagL3_set_)
+				EIDOS_TERMINATION << "ERROR (Individual::GetProperty): property tagL3 accessed on individual before being set." << EidosTerminate();
+			return (tagL3_value_ ? gStaticEidosValue_LogicalT : gStaticEidosValue_LogicalF);
+		}
+		case gID_tagL4:				// ACCELERATED
+		{
+			if (!tagL4_set_)
+				EIDOS_TERMINATION << "ERROR (Individual::GetProperty): property tagL4 accessed on individual before being set." << EidosTerminate();
+			return (tagL4_value_ ? gStaticEidosValue_LogicalT : gStaticEidosValue_LogicalF);
+		}
 		case gID_migrant:			// ACCELERATED
 		{
 			return (migrant_ ? gStaticEidosValue_LogicalT : gStaticEidosValue_LogicalF);
@@ -748,6 +838,91 @@ EidosValue *Individual::GetProperty_Accelerated_tagF(EidosObject **p_values, siz
 	}
 	
 	return float_result;
+}
+
+EidosValue *Individual::GetProperty_Accelerated_tagL0(EidosObject **p_values, size_t p_values_size)
+{
+	EidosValue_Logical *logical_result = (new (gEidosValuePool->AllocateChunk()) EidosValue_Logical())->resize_no_initialize(p_values_size);
+	
+	for (size_t value_index = 0; value_index < p_values_size; ++value_index)
+	{
+		Individual *value = (Individual *)(p_values[value_index]);
+		
+		if (!value->tagL0_set_)
+			EIDOS_TERMINATION << "ERROR (Individual::GetProperty): property tagL0 accessed on individual before being set." << EidosTerminate();
+		
+		logical_result->set_logical_no_check(value->tagL0_value_, value_index);
+	}
+	
+	return logical_result;
+}
+
+EidosValue *Individual::GetProperty_Accelerated_tagL1(EidosObject **p_values, size_t p_values_size)
+{
+	EidosValue_Logical *logical_result = (new (gEidosValuePool->AllocateChunk()) EidosValue_Logical())->resize_no_initialize(p_values_size);
+	
+	for (size_t value_index = 0; value_index < p_values_size; ++value_index)
+	{
+		Individual *value = (Individual *)(p_values[value_index]);
+		
+		if (!value->tagL1_set_)
+			EIDOS_TERMINATION << "ERROR (Individual::GetProperty): property tagL1 accessed on individual before being set." << EidosTerminate();
+		
+		logical_result->set_logical_no_check(value->tagL1_value_, value_index);
+	}
+	
+	return logical_result;
+}
+
+EidosValue *Individual::GetProperty_Accelerated_tagL2(EidosObject **p_values, size_t p_values_size)
+{
+	EidosValue_Logical *logical_result = (new (gEidosValuePool->AllocateChunk()) EidosValue_Logical())->resize_no_initialize(p_values_size);
+	
+	for (size_t value_index = 0; value_index < p_values_size; ++value_index)
+	{
+		Individual *value = (Individual *)(p_values[value_index]);
+		
+		if (!value->tagL2_set_)
+			EIDOS_TERMINATION << "ERROR (Individual::GetProperty): property tagL2 accessed on individual before being set." << EidosTerminate();
+		
+		logical_result->set_logical_no_check(value->tagL2_value_, value_index);
+	}
+	
+	return logical_result;
+}
+
+EidosValue *Individual::GetProperty_Accelerated_tagL3(EidosObject **p_values, size_t p_values_size)
+{
+	EidosValue_Logical *logical_result = (new (gEidosValuePool->AllocateChunk()) EidosValue_Logical())->resize_no_initialize(p_values_size);
+	
+	for (size_t value_index = 0; value_index < p_values_size; ++value_index)
+	{
+		Individual *value = (Individual *)(p_values[value_index]);
+		
+		if (!value->tagL3_set_)
+			EIDOS_TERMINATION << "ERROR (Individual::GetProperty): property tagL3 accessed on individual before being set." << EidosTerminate();
+		
+		logical_result->set_logical_no_check(value->tagL3_value_, value_index);
+	}
+	
+	return logical_result;
+}
+
+EidosValue *Individual::GetProperty_Accelerated_tagL4(EidosObject **p_values, size_t p_values_size)
+{
+	EidosValue_Logical *logical_result = (new (gEidosValuePool->AllocateChunk()) EidosValue_Logical())->resize_no_initialize(p_values_size);
+	
+	for (size_t value_index = 0; value_index < p_values_size; ++value_index)
+	{
+		Individual *value = (Individual *)(p_values[value_index]);
+		
+		if (!value->tagL4_set_)
+			EIDOS_TERMINATION << "ERROR (Individual::GetProperty): property tagL4 accessed on individual before being set." << EidosTerminate();
+		
+		logical_result->set_logical_no_check(value->tagL4_value_, value_index);
+	}
+	
+	return logical_result;
 }
 
 EidosValue *Individual::GetProperty_Accelerated_migrant(EidosObject **p_values, size_t p_values_size)
@@ -973,13 +1148,58 @@ void Individual::SetProperty(EidosGlobalStringID p_property_id, const EidosValue
 			slim_usertag_t value = SLiMCastToUsertagTypeOrRaise(p_value.IntAtIndex(0, nullptr));
 			
 			tag_value_ = value;
-			s_any_individual_or_genome_tag_set_ = true;
+			s_any_individual_tag_set_ = true;
 			return;
 		}
 		case gID_tagF:				// ACCELERATED
 		{
 			tagF_value_ = p_value.FloatAtIndex(0, nullptr);
-			s_any_individual_or_genome_tag_set_ = true;
+			s_any_individual_tagF_set_ = true;
+			return;
+		}
+		case gID_tagL0:				// ACCELERATED
+		{
+			eidos_logical_t value = p_value.LogicalAtIndex(0, nullptr);
+			
+			tagL0_set_ = true;
+			tagL0_value_ = value;
+			s_any_individual_tagL_set_ = true;
+			return;
+		}
+		case gID_tagL1:				// ACCELERATED
+		{
+			eidos_logical_t value = p_value.LogicalAtIndex(0, nullptr);
+			
+			tagL1_set_ = true;
+			tagL1_value_ = value;
+			s_any_individual_tagL_set_ = true;
+			return;
+		}
+		case gID_tagL2:				// ACCELERATED
+		{
+			eidos_logical_t value = p_value.LogicalAtIndex(0, nullptr);
+			
+			tagL2_set_ = true;
+			tagL2_value_ = value;
+			s_any_individual_tagL_set_ = true;
+			return;
+		}
+		case gID_tagL3:				// ACCELERATED
+		{
+			eidos_logical_t value = p_value.LogicalAtIndex(0, nullptr);
+			
+			tagL3_set_ = true;
+			tagL3_value_ = value;
+			s_any_individual_tagL_set_ = true;
+			return;
+		}
+		case gID_tagL4:				// ACCELERATED
+		{
+			eidos_logical_t value = p_value.LogicalAtIndex(0, nullptr);
+			
+			tagL4_set_ = true;
+			tagL4_value_ = value;
+			s_any_individual_tagL_set_ = true;
 			return;
 		}
 		case gID_fitnessScaling:	// ACCELERATED
@@ -1023,7 +1243,7 @@ void Individual::SetProperty(EidosGlobalStringID p_property_id, const EidosValue
 
 void Individual::SetProperty_Accelerated_tag(EidosObject **p_values, size_t p_values_size, const EidosValue &p_source, size_t p_source_size)
 {
-	s_any_individual_or_genome_tag_set_ = true;
+	s_any_individual_tag_set_ = true;
 	
 	// SLiMCastToUsertagTypeOrRaise() is a no-op at present
 	if (p_source_size == 1)
@@ -1044,7 +1264,7 @@ void Individual::SetProperty_Accelerated_tag(EidosObject **p_values, size_t p_va
 
 void Individual::SetProperty_Accelerated_tagF(EidosObject **p_values, size_t p_values_size, const EidosValue &p_source, size_t p_source_size)
 {
-	s_any_individual_or_genome_tag_set_ = true;
+	s_any_individual_tagF_set_ = true;
 	
 	// SLiMCastToUsertagTypeOrRaise() is a no-op at present
 	if (p_source_size == 1)
@@ -1063,6 +1283,156 @@ void Individual::SetProperty_Accelerated_tagF(EidosObject **p_values, size_t p_v
 	}
 }
 
+void Individual::SetProperty_Accelerated_tagL0(EidosObject **p_values, size_t p_values_size, const EidosValue &p_source, size_t p_source_size)
+{
+	s_any_individual_tagL_set_ = true;
+	
+	if (p_source_size == 1)
+	{
+		eidos_logical_t source_value = p_source.LogicalAtIndex(0, nullptr);
+		
+		for (size_t value_index = 0; value_index < p_values_size; ++value_index)
+		{
+			Individual *individual = ((Individual *)(p_values[value_index]));
+			
+			individual->tagL0_set_ = true;
+			individual->tagL0_value_ = source_value;
+		}
+	}
+	else
+	{
+		const eidos_logical_t *source_data = p_source.LogicalVector()->data();
+		
+		for (size_t value_index = 0; value_index < p_values_size; ++value_index)
+		{
+			Individual *individual = ((Individual *)(p_values[value_index]));
+			
+			individual->tagL0_set_ = true;
+			individual->tagL0_value_ = source_data[value_index];
+		}
+	}
+}
+
+void Individual::SetProperty_Accelerated_tagL1(EidosObject **p_values, size_t p_values_size, const EidosValue &p_source, size_t p_source_size)
+{
+	s_any_individual_tagL_set_ = true;
+	
+	if (p_source_size == 1)
+	{
+		eidos_logical_t source_value = p_source.LogicalAtIndex(0, nullptr);
+		
+		for (size_t value_index = 0; value_index < p_values_size; ++value_index)
+		{
+			Individual *individual = ((Individual *)(p_values[value_index]));
+			
+			individual->tagL1_set_ = true;
+			individual->tagL1_value_ = source_value;
+		}
+	}
+	else
+	{
+		const eidos_logical_t *source_data = p_source.LogicalVector()->data();
+		
+		for (size_t value_index = 0; value_index < p_values_size; ++value_index)
+		{
+			Individual *individual = ((Individual *)(p_values[value_index]));
+			
+			individual->tagL1_set_ = true;
+			individual->tagL1_value_ = source_data[value_index];
+		}
+	}
+}
+
+void Individual::SetProperty_Accelerated_tagL2(EidosObject **p_values, size_t p_values_size, const EidosValue &p_source, size_t p_source_size)
+{
+	s_any_individual_tagL_set_ = true;
+	
+	if (p_source_size == 1)
+	{
+		eidos_logical_t source_value = p_source.LogicalAtIndex(0, nullptr);
+		
+		for (size_t value_index = 0; value_index < p_values_size; ++value_index)
+		{
+			Individual *individual = ((Individual *)(p_values[value_index]));
+			
+			individual->tagL2_set_ = true;
+			individual->tagL2_value_ = source_value;
+		}
+	}
+	else
+	{
+		const eidos_logical_t *source_data = p_source.LogicalVector()->data();
+		
+		for (size_t value_index = 0; value_index < p_values_size; ++value_index)
+		{
+			Individual *individual = ((Individual *)(p_values[value_index]));
+			
+			individual->tagL2_set_ = true;
+			individual->tagL2_value_ = source_data[value_index];
+		}
+	}
+}
+
+void Individual::SetProperty_Accelerated_tagL3(EidosObject **p_values, size_t p_values_size, const EidosValue &p_source, size_t p_source_size)
+{
+	s_any_individual_tagL_set_ = true;
+	
+	if (p_source_size == 1)
+	{
+		eidos_logical_t source_value = p_source.LogicalAtIndex(0, nullptr);
+		
+		for (size_t value_index = 0; value_index < p_values_size; ++value_index)
+		{
+			Individual *individual = ((Individual *)(p_values[value_index]));
+			
+			individual->tagL3_set_ = true;
+			individual->tagL3_value_ = source_value;
+		}
+	}
+	else
+	{
+		const eidos_logical_t *source_data = p_source.LogicalVector()->data();
+		
+		for (size_t value_index = 0; value_index < p_values_size; ++value_index)
+		{
+			Individual *individual = ((Individual *)(p_values[value_index]));
+			
+			individual->tagL3_set_ = true;
+			individual->tagL3_value_ = source_data[value_index];
+		}
+	}
+}
+
+void Individual::SetProperty_Accelerated_tagL4(EidosObject **p_values, size_t p_values_size, const EidosValue &p_source, size_t p_source_size)
+{
+	s_any_individual_tagL_set_ = true;
+	
+	if (p_source_size == 1)
+	{
+		eidos_logical_t source_value = p_source.LogicalAtIndex(0, nullptr);
+		
+		for (size_t value_index = 0; value_index < p_values_size; ++value_index)
+		{
+			Individual *individual = ((Individual *)(p_values[value_index]));
+			
+			individual->tagL4_set_ = true;
+			individual->tagL4_value_ = source_value;
+		}
+	}
+	else
+	{
+		const eidos_logical_t *source_data = p_source.LogicalVector()->data();
+		
+		for (size_t value_index = 0; value_index < p_values_size; ++value_index)
+		{
+			Individual *individual = ((Individual *)(p_values[value_index]));
+			
+			individual->tagL4_set_ = true;
+			individual->tagL4_value_ = source_data[value_index];
+		}
+	}
+}
+
 bool Individual::_SetFitnessScaling_1(double source_value, EidosObject **p_values, size_t p_values_size)
 {
 	if ((source_value < 0.0) || (std::isnan(source_value)))
@@ -1073,7 +1443,8 @@ bool Individual::_SetFitnessScaling_1(double source_value, EidosObject **p_value
 	// potential race condition if the same Individual is referenced more than once in
 	// p_values; that is considered a bug in the user's script, and we could check for it
 	// in DEBUG mode if we wanted to.
-#pragma omp parallel for simd schedule(simd:static) default(none) shared(p_values_size) firstprivate(p_values, source_value) if(parallel:p_values_size >= EIDOS_OMPMIN_SET_FITNESS_S1)
+	EIDOS_THREAD_COUNT(gEidos_OMP_threads_SET_FITNESS_SCALE_1);
+#pragma omp parallel for simd schedule(simd:static) default(none) shared(p_values_size) firstprivate(p_values, source_value) if(parallel:p_values_size >= EIDOS_OMPMIN_SET_FITNESS_SCALE_1) num_threads(thread_count)
 	for (size_t value_index = 0; value_index < p_values_size; ++value_index)
 		((Individual *)(p_values[value_index]))->fitness_scaling_ = source_value;
 	
@@ -1089,7 +1460,8 @@ bool Individual::_SetFitnessScaling_N(const double *source_data, EidosObject **p
 	// potential race condition if the same Individual is referenced more than once in
 	// p_values; that is considered a bug in the user's script, and we could check for it
 	// in DEBUG mode if we wanted to.
-#pragma omp parallel for schedule(static) default(none) shared(p_values_size) firstprivate(p_values, source_data) reduction(||: saw_error) if(p_values_size >= EIDOS_OMPMIN_SET_FITNESS_S2)
+	EIDOS_THREAD_COUNT(gEidos_OMP_threads_SET_FITNESS_SCALE_2);
+#pragma omp parallel for schedule(static) default(none) shared(p_values_size) firstprivate(p_values, source_data) reduction(||: saw_error) if(p_values_size >= EIDOS_OMPMIN_SET_FITNESS_SCALE_2) num_threads(thread_count)
 	for (size_t value_index = 0; value_index < p_values_size; ++value_index)
 	{
 		double source_value = source_data[value_index];
@@ -1258,6 +1630,7 @@ EidosValue_SP Individual::ExecuteInstanceMethod(EidosGlobalStringID p_method_id,
 		case gID_containsMutations:			return ExecuteMethod_containsMutations(p_method_id, p_arguments, p_interpreter);
 		//case gID_countOfMutationsOfType:	return ExecuteMethod_Accelerated_countOfMutationsOfType(p_method_id, p_arguments, p_interpreter);
 		case gID_relatedness:				return ExecuteMethod_relatedness(p_method_id, p_arguments, p_interpreter);
+		case gID_sharedParentCount:			return ExecuteMethod_sharedParentCount(p_method_id, p_arguments, p_interpreter);
 		//case gID_sumOfMutationsOfType:	return ExecuteMethod_Accelerated_sumOfMutationsOfType(p_method_id, p_arguments, p_interpreter);
 		case gID_uniqueMutationsOfType:		return ExecuteMethod_uniqueMutationsOfType(p_method_id, p_arguments, p_interpreter);
 			
@@ -1343,7 +1716,8 @@ EidosValue_SP Individual::ExecuteMethod_Accelerated_countOfMutationsOfType(Eidos
 	Mutation *mut_block_ptr = gSLiM_Mutation_Block;
 	EidosValue_Int_vector *integer_result = (new (gEidosValuePool->AllocateChunk()) EidosValue_Int_vector())->resize_no_initialize(p_elements_size);
 	
-#pragma omp parallel for schedule(dynamic, 1) default(none) shared(p_elements_size) firstprivate(p_elements, mut_block_ptr, mutation_type_ptr, integer_result) if(p_elements_size >= EIDOS_OMPMIN_I_COUNT_OF_MUTS_OF_TYPE)
+	EIDOS_THREAD_COUNT(gEidos_OMP_threads_I_COUNT_OF_MUTS_OF_TYPE);
+#pragma omp parallel for schedule(dynamic, 1) default(none) shared(p_elements_size) firstprivate(p_elements, mut_block_ptr, mutation_type_ptr, integer_result) if(p_elements_size >= EIDOS_OMPMIN_I_COUNT_OF_MUTS_OF_TYPE) num_threads(thread_count)
 	for (size_t element_index = 0; element_index < p_elements_size; ++element_index)
 	{
 		Individual *element = (Individual *)(p_elements[element_index]);
@@ -1427,7 +1801,8 @@ EidosValue_SP Individual::ExecuteMethod_relatedness(EidosGlobalStringID p_method
 		{
 			// this parallelizes the case of one_individual.relatedness(many_individuals)
 			// it would be nice to also parallelize the case of many_individuals.relatedness(one_individual); that would require accelerating this method
-#pragma omp parallel for schedule(dynamic, 128) default(none) shared(individuals_count, individuals_value) firstprivate(float_result) if(individuals_count >= EIDOS_OMPMIN_RELATEDNESS)
+			EIDOS_THREAD_COUNT(gEidos_OMP_threads_RELATEDNESS);
+#pragma omp parallel for schedule(dynamic, 128) default(none) shared(individuals_count, individuals_value) firstprivate(float_result) if(individuals_count >= EIDOS_OMPMIN_RELATEDNESS) num_threads(thread_count)
 			for (int value_index = 0; value_index < individuals_count; ++value_index)
 			{
 				Individual *ind = (Individual *)(individuals_value->ObjectElementAtIndex(value_index, nullptr));
@@ -1448,6 +1823,69 @@ EidosValue_SP Individual::ExecuteMethod_relatedness(EidosGlobalStringID p_method
 		}
 		
 		return EidosValue_SP(float_result);
+	}
+	
+	return gStaticEidosValueNULL;
+}
+
+//	*********************	- (integer)sharedParentCount(o<Individual> individuals)
+//
+EidosValue_SP Individual::ExecuteMethod_sharedParentCount(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter)
+{
+#pragma unused (p_method_id, p_arguments, p_interpreter)
+	EidosValue *individuals_value = p_arguments[0].get();
+	int individuals_count = individuals_value->Count();
+	
+	// SPECIES CONSISTENCY CHECK
+	if (individuals_count > 0)
+	{
+		Species *species = Community::SpeciesForIndividuals(individuals_value);
+		
+		if (species != &subpopulation_->species_)
+			EIDOS_TERMINATION << "ERROR (Individual::ExecuteMethod_sharedParentCount): sharedParentCount() requires that all individuals belong to the same species as the target individual." << EidosTerminate();
+	}
+	
+	bool pedigree_tracking_enabled = subpopulation_->species_.PedigreesEnabledByUser();
+	
+	if (individuals_count == 1)
+	{
+		Individual *ind = (Individual *)(individuals_value->ObjectElementAtIndex(0, nullptr));
+		int shared_count;
+		
+		if (pedigree_tracking_enabled)
+			shared_count = SharedParentCountWithIndividual(*ind);
+		else
+			shared_count = (ind == this) ? 2.0 : 0.0;
+		
+		return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Int_singleton(shared_count));
+	}
+	else
+	{
+		EidosValue_Int_vector *int_result = (new (gEidosValuePool->AllocateChunk()) EidosValue_Int_vector())->resize_no_initialize(individuals_count);
+		
+		if (pedigree_tracking_enabled)
+		{
+			// FIXME needs parallelization, see relatedness()
+			for (int value_index = 0; value_index < individuals_count; ++value_index)
+			{
+				Individual *ind = (Individual *)(individuals_value->ObjectElementAtIndex(value_index, nullptr));
+				int shared_count = SharedParentCountWithIndividual(*ind);
+				
+				int_result->set_int_no_check(shared_count, value_index);
+			}
+		}
+		else
+		{
+			for (int value_index = 0; value_index < individuals_count; ++value_index)
+			{
+				Individual *ind = (Individual *)(individuals_value->ObjectElementAtIndex(value_index, nullptr));
+				int shared_count = (ind == this) ? 2.0 : 0.0;
+				
+				int_result->set_int_no_check(shared_count, value_index);
+			}
+		}
+		
+		return EidosValue_SP(int_result);
 	}
 	
 	return gStaticEidosValueNULL;
@@ -1476,7 +1914,8 @@ EidosValue_SP Individual::ExecuteMethod_Accelerated_sumOfMutationsOfType(EidosOb
 	Mutation *mut_block_ptr = gSLiM_Mutation_Block;
 	EidosValue_Float_vector *float_result = (new (gEidosValuePool->AllocateChunk()) EidosValue_Float_vector())->resize_no_initialize(p_elements_size);
 	
-#pragma omp parallel for schedule(dynamic, 1) default(none) shared(p_elements_size) firstprivate(p_elements, mut_block_ptr, mutation_type_ptr, float_result) if(p_elements_size >= EIDOS_OMPMIN_SUM_OF_MUTS_OF_TYPE)
+	EIDOS_THREAD_COUNT(gEidos_OMP_threads_SUM_OF_MUTS_OF_TYPE);
+#pragma omp parallel for schedule(dynamic, 1) default(none) shared(p_elements_size) firstprivate(p_elements, mut_block_ptr, mutation_type_ptr, float_result) if(p_elements_size >= EIDOS_OMPMIN_SUM_OF_MUTS_OF_TYPE) num_threads(thread_count)
 	for (size_t element_index = 0; element_index < p_elements_size; ++element_index)
 	{
 		Individual *element = (Individual *)(p_elements[element_index]);
@@ -1771,6 +2210,11 @@ const std::vector<EidosPropertySignature_CSP> *Individual_Class::Properties(void
 		properties->emplace_back((EidosPropertySignature *)(new EidosPropertySignature(gStr_sex,					true,	kEidosValueMaskString | kEidosValueMaskSingleton)));
 		properties->emplace_back((EidosPropertySignature *)(new EidosPropertySignature(gStr_tag,					false,	kEidosValueMaskInt | kEidosValueMaskSingleton))->DeclareAcceleratedGet(Individual::GetProperty_Accelerated_tag)->DeclareAcceleratedSet(Individual::SetProperty_Accelerated_tag));
 		properties->emplace_back((EidosPropertySignature *)(new EidosPropertySignature(gStr_tagF,					false,	kEidosValueMaskFloat | kEidosValueMaskSingleton))->DeclareAcceleratedGet(Individual::GetProperty_Accelerated_tagF)->DeclareAcceleratedSet(Individual::SetProperty_Accelerated_tagF));
+		properties->emplace_back((EidosPropertySignature *)(new EidosPropertySignature(gStr_tagL0,					false,	kEidosValueMaskLogical | kEidosValueMaskSingleton))->DeclareAcceleratedGet(Individual::GetProperty_Accelerated_tagL0)->DeclareAcceleratedSet(Individual::SetProperty_Accelerated_tagL0));
+		properties->emplace_back((EidosPropertySignature *)(new EidosPropertySignature(gStr_tagL1,					false,	kEidosValueMaskLogical | kEidosValueMaskSingleton))->DeclareAcceleratedGet(Individual::GetProperty_Accelerated_tagL1)->DeclareAcceleratedSet(Individual::SetProperty_Accelerated_tagL1));
+		properties->emplace_back((EidosPropertySignature *)(new EidosPropertySignature(gStr_tagL2,					false,	kEidosValueMaskLogical | kEidosValueMaskSingleton))->DeclareAcceleratedGet(Individual::GetProperty_Accelerated_tagL2)->DeclareAcceleratedSet(Individual::SetProperty_Accelerated_tagL2));
+		properties->emplace_back((EidosPropertySignature *)(new EidosPropertySignature(gStr_tagL3,					false,	kEidosValueMaskLogical | kEidosValueMaskSingleton))->DeclareAcceleratedGet(Individual::GetProperty_Accelerated_tagL3)->DeclareAcceleratedSet(Individual::SetProperty_Accelerated_tagL3));
+		properties->emplace_back((EidosPropertySignature *)(new EidosPropertySignature(gStr_tagL4,					false,	kEidosValueMaskLogical | kEidosValueMaskSingleton))->DeclareAcceleratedGet(Individual::GetProperty_Accelerated_tagL4)->DeclareAcceleratedSet(Individual::SetProperty_Accelerated_tagL4));
 		properties->emplace_back((EidosPropertySignature *)(new EidosPropertySignature(gStr_migrant,				true,	kEidosValueMaskLogical | kEidosValueMaskSingleton))->DeclareAcceleratedGet(Individual::GetProperty_Accelerated_migrant));
 		properties->emplace_back((EidosPropertySignature *)(new EidosPropertySignature(gStr_fitnessScaling,			false,	kEidosValueMaskFloat | kEidosValueMaskSingleton))->DeclareAcceleratedGet(Individual::GetProperty_Accelerated_fitnessScaling)->DeclareAcceleratedSet(Individual::SetProperty_Accelerated_fitnessScaling));
 		properties->emplace_back((EidosPropertySignature *)(new EidosPropertySignature(gEidosStr_x,					false,	kEidosValueMaskFloat | kEidosValueMaskSingleton))->DeclareAcceleratedGet(Individual::GetProperty_Accelerated_x)->DeclareAcceleratedSet(Individual::SetProperty_Accelerated_x));
@@ -1806,6 +2250,7 @@ const std::vector<EidosMethodSignature_CSP> *Individual_Class::Methods(void) con
 		methods->emplace_back(((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_countOfMutationsOfType, kEidosValueMaskInt | kEidosValueMaskSingleton))->AddIntObject_S("mutType", gSLiM_MutationType_Class))->DeclareAcceleratedImp(Individual::ExecuteMethod_Accelerated_countOfMutationsOfType));
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_relatedness, kEidosValueMaskFloat))->AddObject("individuals", gSLiM_Individual_Class));
 		methods->emplace_back((EidosClassMethodSignature *)(new EidosClassMethodSignature(gStr_setSpatialPosition, kEidosValueMaskVOID))->AddFloat("position"));
+		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_sharedParentCount, kEidosValueMaskInt))->AddObject("individuals", gSLiM_Individual_Class));
 		methods->emplace_back(((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_sumOfMutationsOfType, kEidosValueMaskFloat | kEidosValueMaskSingleton))->AddIntObject_S("mutType", gSLiM_MutationType_Class))->DeclareAcceleratedImp(Individual::ExecuteMethod_Accelerated_sumOfMutationsOfType));
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_uniqueMutationsOfType, kEidosValueMaskObject, gSLiM_Mutation_Class))->AddIntObject_S("mutType", gSLiM_MutationType_Class));
 		
@@ -1901,7 +2346,8 @@ EidosValue_SP Individual_Class::ExecuteMethod_setSpatialPosition(EidosGlobalStri
 				{
 					double x = position_value->FloatAtIndex(0, nullptr);
 					
-#pragma omp parallel for simd schedule(simd:static) default(none) shared(target_size) firstprivate(targets, x) if(target_size >= EIDOS_OMPMIN_SET_SPATIAL_POS_1)
+					EIDOS_THREAD_COUNT(gEidos_OMP_threads_SET_SPATIAL_POS_1_1D);
+#pragma omp parallel for simd schedule(simd:static) default(none) shared(target_size) firstprivate(targets, x) if(target_size >= EIDOS_OMPMIN_SET_SPATIAL_POS_1_1D) num_threads(thread_count)
 					for (int target_index = 0; target_index < target_size; ++target_index)
 					{
 						Individual *target = targets[target_index];
@@ -1914,7 +2360,8 @@ EidosValue_SP Individual_Class::ExecuteMethod_setSpatialPosition(EidosGlobalStri
 					double x = position_value->FloatAtIndex(0, nullptr);
 					double y = position_value->FloatAtIndex(1, nullptr);
 					
-#pragma omp parallel for simd schedule(simd:static) default(none) shared(target_size) firstprivate(targets, x, y) if(target_size >= EIDOS_OMPMIN_SET_SPATIAL_POS_1)
+					EIDOS_THREAD_COUNT(gEidos_OMP_threads_SET_SPATIAL_POS_1_2D);
+#pragma omp parallel for simd schedule(simd:static) default(none) shared(target_size) firstprivate(targets, x, y) if(target_size >= EIDOS_OMPMIN_SET_SPATIAL_POS_1_2D) num_threads(thread_count)
 					for (int target_index = 0; target_index < target_size; ++target_index)
 					{
 						Individual *target = targets[target_index];
@@ -1929,7 +2376,8 @@ EidosValue_SP Individual_Class::ExecuteMethod_setSpatialPosition(EidosGlobalStri
 					double y = position_value->FloatAtIndex(1, nullptr);
 					double z = position_value->FloatAtIndex(2, nullptr);
 					
-#pragma omp parallel for simd schedule(simd:static) default(none) shared(target_size) firstprivate(targets, x, y, z) if(target_size >= EIDOS_OMPMIN_SET_SPATIAL_POS_1)
+					EIDOS_THREAD_COUNT(gEidos_OMP_threads_SET_SPATIAL_POS_1_3D);
+#pragma omp parallel for simd schedule(simd:static) default(none) shared(target_size) firstprivate(targets, x, y, z) if(target_size >= EIDOS_OMPMIN_SET_SPATIAL_POS_1_3D) num_threads(thread_count)
 					for (int target_index = 0; target_index < target_size; ++target_index)
 					{
 						Individual *target = targets[target_index];
@@ -1951,13 +2399,16 @@ EidosValue_SP Individual_Class::ExecuteMethod_setSpatialPosition(EidosGlobalStri
 		const double *positions = position_vec->data();
 		
 #ifdef _OPENMP
-		if (target_size >= EIDOS_OMPMIN_SET_SPATIAL_POS_2)
+		if (((dimensionality == 1) && (target_size >= EIDOS_OMPMIN_SET_SPATIAL_POS_2_1D)) ||
+			((dimensionality == 2) && (target_size >= EIDOS_OMPMIN_SET_SPATIAL_POS_2_2D)) ||
+			((dimensionality == 3) && (target_size >= EIDOS_OMPMIN_SET_SPATIAL_POS_2_3D)))
 		{
 			switch (dimensionality)
 			{
 				case 1:
 				{
-#pragma omp parallel for schedule(static) default(none) shared(target_size) firstprivate(targets, positions) // if(EIDOS_OMPMIN_SET_SPATIAL_POS_2)
+					EIDOS_THREAD_COUNT(gEidos_OMP_threads_SET_SPATIAL_POS_2_1D);
+#pragma omp parallel for schedule(static) default(none) shared(target_size) firstprivate(targets, positions) num_threads(thread_count) // if(EIDOS_OMPMIN_SET_SPATIAL_POS_2_1D) is above
 					for (int target_index = 0; target_index < target_size; ++target_index)
 					{
 						targets[target_index]->spatial_x_ = positions[target_index];
@@ -1966,7 +2417,8 @@ EidosValue_SP Individual_Class::ExecuteMethod_setSpatialPosition(EidosGlobalStri
 				}
 				case 2:
 				{
-#pragma omp parallel for schedule(static) default(none) shared(target_size) firstprivate(targets, positions) // if(EIDOS_OMPMIN_SET_SPATIAL_POS_2)
+					EIDOS_THREAD_COUNT(gEidos_OMP_threads_SET_SPATIAL_POS_2_2D);
+#pragma omp parallel for schedule(static) default(none) shared(target_size) firstprivate(targets, positions) num_threads(thread_count) // if(EIDOS_OMPMIN_SET_SPATIAL_POS_2_2D) is above
 					for (int target_index = 0; target_index < target_size; ++target_index)
 					{
 						Individual *target = targets[target_index];
@@ -1979,7 +2431,8 @@ EidosValue_SP Individual_Class::ExecuteMethod_setSpatialPosition(EidosGlobalStri
 				}
 				case 3:
 				{
-#pragma omp parallel for schedule(static) default(none) shared(target_size) firstprivate(targets, positions) // if(EIDOS_OMPMIN_SET_SPATIAL_POS_2)
+					EIDOS_THREAD_COUNT(gEidos_OMP_threads_SET_SPATIAL_POS_2_3D);
+#pragma omp parallel for schedule(static) default(none) shared(target_size) firstprivate(targets, positions) num_threads(thread_count) // if(EIDOS_OMPMIN_SET_SPATIAL_POS_2_3D) is above
 					for (int target_index = 0; target_index < target_size; ++target_index)
 					{
 						Individual *target = targets[target_index];

@@ -26,6 +26,7 @@
 #include "eidos_call_signature.h"
 #include "eidos_property_signature.h"
 #include "eidos_ast_node.h"
+#include "eidos_sorting.h"
 #include "individual.h"
 #include "polymorphism.h"
 #include "subpopulation.h"
@@ -2042,10 +2043,6 @@ void Species::SetUpMutationRunContexts(void)
 	
 	if (mutation_run_context_COUNT_ > 0)
 	{
-		// We want to try to guarantee that every thread sets up its MutationRunContext, even if OMP_DYNAMIC is true
-		int old_dynamic = omp_get_dynamic();
-		omp_set_dynamic(false);
-		
 		// Check that each RNG was initialized by a different thread, as intended below;
 		// this is not required, but it improves memory locality throughout the run
 		bool threadObserved[mutation_run_context_COUNT_];
@@ -2060,8 +2057,6 @@ void Species::SetUpMutationRunContexts(void)
 			omp_init_lock(&mutation_run_context_PERTHREAD[threadnum]->allocation_pool_lock_);
 			threadObserved[threadnum] = true;
 		}	// end omp parallel
-		
-		omp_set_dynamic(old_dynamic);
 		
 		for (int threadnum = 0; threadnum < mutation_run_context_COUNT_; ++threadnum)
 			if (!threadObserved[threadnum])
@@ -2450,9 +2445,14 @@ void Species::nonWF_MergeOffspring(void)
 		std::vector<Individual *> &parents = subpop->parent_individuals_;
 		size_t parent_count = parents.size();
 		
-#pragma omp parallel for schedule(static) default(none) shared(parent_count) firstprivate(parents)  if(parent_count >= EIDOS_OMPMIN_MIGRANTCLEAR)
+		EIDOS_BENCHMARK_START(EidosBenchmarkType::k_MIGRANT_CLEAR);
+		EIDOS_THREAD_COUNT(gEidos_OMP_threads_MIGRANT_CLEAR);
+#pragma omp parallel for schedule(static) default(none) shared(parent_count) firstprivate(parents)  if(parent_count >= EIDOS_OMPMIN_MIGRANT_CLEAR) num_threads(thread_count)
 		for (size_t parent_index = 0; parent_index < parent_count; ++parent_index)
+		{
 			parents[parent_index]->migrant_ = false;
+		}
+		EIDOS_BENCHMARK_END(EidosBenchmarkType::k_MIGRANT_CLEAR);
 	}
 	
 	// cached mutation counts/frequencies are no longer accurate; mark the cache as invalid
@@ -2561,7 +2561,7 @@ void Species::SimulationHasFinished(void)
 	
 #if MUTRUN_EXPERIMENT_OUTPUT
 	// Print a full mutation run count history if MUTRUN_EXPERIMENT_OUTPUT is enabled
-	if (SLiM_verbose_output && x_experiments_enabled_)
+	if ((SLiM_verbosity_level >= 2) && x_experiments_enabled_)
 	{
 		SLIM_OUTSTREAM << std::endl;
 		SLIM_OUTSTREAM << "// Mutrun count history:" << std::endl;
@@ -3250,7 +3250,7 @@ void Species::EnterStasisForMutationRunExperiments(void)
 		x_stasis_limit_ *= 2;
 		
 #if MUTRUN_EXPERIMENT_OUTPUT
-		if (SLiM_verbose_output)
+		if (SLiM_verbosity_level >= 2)
 			SLIM_OUTSTREAM << "// Remembered previous stasis at " << x_current_mutcount_ << ", strengthening stasis criteria" << std::endl;
 #endif
 	}
@@ -3261,7 +3261,7 @@ void Species::EnterStasisForMutationRunExperiments(void)
 		x_stasis_alpha_ = 0.01;
 		
 #if MUTRUN_EXPERIMENT_OUTPUT
-		if (SLiM_verbose_output)
+		if (SLiM_verbosity_level >= 2)
 			SLIM_OUTSTREAM << "// No memory of previous stasis at " << x_current_mutcount_ << ", resetting stasis criteria" << std::endl;
 #endif
 	}
@@ -3277,7 +3277,7 @@ void Species::EnterStasisForMutationRunExperiments(void)
 	x_prev1_stasis_mutcount_ = x_current_mutcount_;
 	
 #if MUTRUN_EXPERIMENT_OUTPUT
-	if (SLiM_verbose_output)
+	if (SLiM_verbosity_level >= 2)
 		SLIM_OUTSTREAM << "// ****** ENTERING STASIS AT " << x_current_mutcount_ << " : x_stasis_limit_ = " << x_stasis_limit_ << ", x_stasis_alpha_ = " << x_stasis_alpha_ << std::endl;
 #endif
 }
@@ -3309,7 +3309,7 @@ void Species::MaintainMutationRunExperiments(double p_last_gen_runtime)
 		if ((p < 0.01) && (current_mean > previous_mean))
 		{
 #if MUTRUN_EXPERIMENT_OUTPUT
-			if (SLiM_verbose_output)
+			if (SLiM_verbosity_level >= 2)
 			{
 				SLIM_OUTSTREAM << std::endl;
 				SLIM_OUTSTREAM << "// " << cycle_ << " : Early t-test yielded HIGHLY SIGNIFICANT p of " << p << " with negative results; terminating early." << std::endl;
@@ -3319,7 +3319,7 @@ void Species::MaintainMutationRunExperiments(double p_last_gen_runtime)
 			goto early_ttest_passed;
 		}
 #if MUTRUN_EXPERIMENT_OUTPUT
-		else if (SLiM_verbose_output)
+		else if (SLiM_verbosity_level >= 2)
 		{
 			if (p >= 0.01)
 			{
@@ -3342,7 +3342,7 @@ void Species::MaintainMutationRunExperiments(double p_last_gen_runtime)
 	{
 		// FINISHED OUR FIRST EXPERIMENT; move on to the next experiment, which is always double the number of mutruns
 #if MUTRUN_EXPERIMENT_OUTPUT
-		if (SLiM_verbose_output)
+		if (SLiM_verbosity_level >= 2)
 		{
 			SLIM_OUTSTREAM << std::endl;
 			SLIM_OUTSTREAM << "// ** " << cycle_ << " : First mutation run experiment completed with mutrun count " << x_current_mutcount_ << "; will now try " << (x_current_mutcount_ * 2) << std::endl;
@@ -3363,7 +3363,7 @@ void Species::MaintainMutationRunExperiments(double p_last_gen_runtime)
 			++x_stasis_counter_;
 			
 #if MUTRUN_EXPERIMENT_OUTPUT
-			if (SLiM_verbose_output)
+			if (SLiM_verbosity_level >= 2)
 			{
 				SLIM_OUTSTREAM << std::endl;
 				SLIM_OUTSTREAM << "// " << cycle_ << " : Mutation run experiment completed (second stasis cycle, no tests conducted)" << std::endl;
@@ -3379,7 +3379,7 @@ void Species::MaintainMutationRunExperiments(double p_last_gen_runtime)
 	early_ttest_passed:
 		
 #if MUTRUN_EXPERIMENT_OUTPUT
-		if (SLiM_verbose_output)
+		if (SLiM_verbosity_level >= 2)
 		{
 			SLIM_OUTSTREAM << std::endl;
 			SLIM_OUTSTREAM << "// " << cycle_ << " : Mutation run experiment completed:" << std::endl;
@@ -3396,7 +3396,7 @@ void Species::MaintainMutationRunExperiments(double p_last_gen_runtime)
 			bool means_different_stasis = (p < x_stasis_alpha_);
 			
 #if MUTRUN_EXPERIMENT_OUTPUT
-			if (SLiM_verbose_output)
+			if (SLiM_verbosity_level >= 2)
 				SLIM_OUTSTREAM << "//    p == " << p << " : " << (means_different_stasis ? "SIGNIFICANT DIFFERENCE" : "no significant difference") << " at stasis alpha " << x_stasis_alpha_ << std::endl;
 #endif
 			
@@ -3411,7 +3411,7 @@ void Species::MaintainMutationRunExperiments(double p_last_gen_runtime)
 					TransitionToNewExperimentAgainstCurrentExperiment(x_current_mutcount_ * 2);
 				
 #if MUTRUN_EXPERIMENT_OUTPUT
-				if (SLiM_verbose_output)
+				if (SLiM_verbosity_level >= 2)
 					SLIM_OUTSTREAM << "// ** " << cycle_ << " : Stasis mean changed, EXITING STASIS and trying new mutcount of " << x_current_mutcount_ << std::endl;
 #endif
 			}
@@ -3428,7 +3428,7 @@ void Species::MaintainMutationRunExperiments(double p_last_gen_runtime)
 						TransitionToNewExperimentAgainstCurrentExperiment(x_current_mutcount_ * 2);
 					
 #if MUTRUN_EXPERIMENT_OUTPUT
-					if (SLiM_verbose_output)
+					if (SLiM_verbosity_level >= 2)
 						SLIM_OUTSTREAM << "// ** " << cycle_ << " : Stasis limit reached, EXITING STASIS and trying new mutcount of " << x_current_mutcount_ << std::endl;
 #endif
 				}
@@ -3440,7 +3440,7 @@ void Species::MaintainMutationRunExperiments(double p_last_gen_runtime)
 					x_current_buflen_ = 0;
 					
 #if MUTRUN_EXPERIMENT_OUTPUT
-					if (SLiM_verbose_output)
+					if (SLiM_verbosity_level >= 2)
 						SLIM_OUTSTREAM << "//    " << cycle_ << " : Stasis limit not reached (" << x_stasis_counter_ << " of " << x_stasis_limit_ << "), running another stasis experiment at " << x_current_mutcount_ << std::endl;
 #endif
 				}
@@ -3455,7 +3455,7 @@ void Species::MaintainMutationRunExperiments(double p_last_gen_runtime)
 			bool means_different_05 = (p < alpha);
 			
 #if MUTRUN_EXPERIMENT_OUTPUT
-			if (SLiM_verbose_output)
+			if (SLiM_verbosity_level >= 2)
 				SLIM_OUTSTREAM << "//    p == " << p << " : " << (means_different_05 ? "SIGNIFICANT DIFFERENCE" : "no significant difference") << " at alpha " << alpha << std::endl;
 #endif
 			
@@ -3472,7 +3472,13 @@ void Species::MaintainMutationRunExperiments(double p_last_gen_runtime)
 				// But if the new mean is worse that the old mean and we're trending toward more mutation runs,
 				// we do NOT follow this case, because an inconclusive but negative increasing trend pushes up our
 				// peak memory usage and can be quite inefficient, and usually we just jump back down anyway.
-				if (x_current_mutcount_ == trend_limit)
+				// BCH 8/14/2023: The if() below is intended to diagnose if trend_next will go beyond trend_limit,
+				// and is thus not a legal move.  Just testing (x_current_mutcount_ == trend_limit) used to suffice,
+				// because the base count was always a power of 2.  Now that is no longer true, and so we can, e.g.,
+				// be at 768 and thinking about doubling to 1536.  We test for going beyond SLIM_MUTRUN_MAXIMUM_COUNT
+				// explicitly now, to address that case.  Going too low is still effectively prevented, since we
+				// will always reach the base count exactly before going below it.
+				if ((x_current_mutcount_ == trend_limit) || (trend_next > SLIM_MUTRUN_MAXIMUM_COUNT))
 				{
 					if (current_mean < previous_mean)
 					{
@@ -3481,7 +3487,7 @@ void Species::MaintainMutationRunExperiments(double p_last_gen_runtime)
 						TransitionToNewExperimentAgainstCurrentExperiment(x_current_mutcount_);
 						
 #if MUTRUN_EXPERIMENT_OUTPUT
-						if (SLiM_verbose_output)
+						if (SLiM_verbosity_level >= 2)
 							SLIM_OUTSTREAM << "// ****** " << cycle_ << " : Experiment " << (means_different_05 ? "successful" : "inconclusive but positive") << " at " << x_previous_mutcount_ << ", nowhere left to go; entering stasis at " << x_current_mutcount_ << "." << std::endl;
 #endif
 						
@@ -3495,7 +3501,7 @@ void Species::MaintainMutationRunExperiments(double p_last_gen_runtime)
 						TransitionToNewExperimentAgainstPreviousExperiment(x_previous_mutcount_);
 						
 #if MUTRUN_EXPERIMENT_OUTPUT
-						if (SLiM_verbose_output)
+						if (SLiM_verbosity_level >= 2)
 							SLIM_OUTSTREAM << "// ****** " << cycle_ << " : Experiment " << (means_different_05 ? "failed" : "inconclusive but negative") << " at " << x_previous_mutcount_ << ", nowhere left to go; entering stasis at " << x_current_mutcount_ << "." << std::endl;
 #endif
 						
@@ -3509,7 +3515,7 @@ void Species::MaintainMutationRunExperiments(double p_last_gen_runtime)
 						// Even if the difference is not significant, we appear to be moving in a beneficial direction,
 						// so we will run the next experiment against the current experiment's results
 #if MUTRUN_EXPERIMENT_OUTPUT
-						if (SLiM_verbose_output)
+						if (SLiM_verbosity_level >= 2)
 							SLIM_OUTSTREAM << "// ** " << cycle_ << " : Experiment " << (means_different_05 ? "successful" : "inconclusive but positive") << " at " << x_current_mutcount_ << " (against " << x_previous_mutcount_ << "), continuing trend with " << trend_next << " (against " << x_current_mutcount_ << ")" << std::endl;
 #endif
 						
@@ -3523,7 +3529,7 @@ void Species::MaintainMutationRunExperiments(double p_last_gen_runtime)
 						// the garden path.  To make sure that doesn't happen, we run successive inconclusive experiments
 						// against whichever preceding experiment had the lowest mean.
 #if MUTRUN_EXPERIMENT_OUTPUT
-						if (SLiM_verbose_output)
+						if (SLiM_verbosity_level >= 2)
 							SLIM_OUTSTREAM << "// ** " << cycle_ << " : Experiment inconclusive but negative at " << x_current_mutcount_ << " (against " << x_previous_mutcount_ << "), checking " << trend_next << " (against " << x_previous_mutcount_ << ")" << std::endl;
 #endif
 						
@@ -3542,7 +3548,7 @@ void Species::MaintainMutationRunExperiments(double p_last_gen_runtime)
 					TransitionToNewExperimentAgainstPreviousExperiment(x_previous_mutcount_);
 					
 #if MUTRUN_EXPERIMENT_OUTPUT
-					if (SLiM_verbose_output)
+					if (SLiM_verbosity_level >= 2)
 						SLIM_OUTSTREAM << "// ****** " << cycle_ << " : Experiment failed, already tried opposite side, so " << x_current_mutcount_ << " appears optimal; entering stasis at " << x_current_mutcount_ << "." << std::endl;
 #endif
 					
@@ -3562,7 +3568,7 @@ void Species::MaintainMutationRunExperiments(double p_last_gen_runtime)
 						TransitionToNewExperimentAgainstPreviousExperiment(x_previous_mutcount_);
 						
 #if MUTRUN_EXPERIMENT_OUTPUT
-						if (SLiM_verbose_output)
+						if (SLiM_verbosity_level >= 2)
 							SLIM_OUTSTREAM << "// ****** " << cycle_ << " : Experiment failed, opposite side blocked so " << x_current_mutcount_ << " appears optimal; entering stasis at " << x_current_mutcount_ << "." << std::endl;
 #endif
 						
@@ -3571,7 +3577,7 @@ void Species::MaintainMutationRunExperiments(double p_last_gen_runtime)
 					else
 					{
 #if MUTRUN_EXPERIMENT_OUTPUT
-						if (SLiM_verbose_output)
+						if (SLiM_verbosity_level >= 2)
 							SLIM_OUTSTREAM << "// ** " << cycle_ << " : Experiment failed at " << x_current_mutcount_ << ", opposite side untried, reversing trend back to " << new_mutcount << " (against " << x_previous_mutcount_ << ")" << std::endl;
 #endif
 						
@@ -3609,7 +3615,7 @@ void Species::MaintainMutationRunExperiments(double p_last_gen_runtime)
 			chromosome_->mutrun_length_ /= 2;
 			
 #if MUTRUN_EXPERIMENT_OUTPUT
-			if (SLiM_verbose_output)
+			if (SLiM_verbosity_level >= 2)
 				SLIM_OUTSTREAM << "// ++ Splitting to achieve new mutation run count of " << chromosome_->mutrun_count_ << " took " << ((std::clock() - start_clock) / (double)CLOCKS_PER_SEC) << " seconds" << std::endl;
 #endif
 		}
@@ -3633,7 +3639,7 @@ void Species::MaintainMutationRunExperiments(double p_last_gen_runtime)
 			chromosome_->mutrun_length_ *= 2;
 			
 #if MUTRUN_EXPERIMENT_OUTPUT
-			if (SLiM_verbose_output)
+			if (SLiM_verbosity_level >= 2)
 				SLIM_OUTSTREAM << "// ++ Joining to achieve new mutation run count of " << chromosome_->mutrun_count_ << " took " << ((std::clock() - start_clock) / (double)CLOCKS_PER_SEC) << " seconds" << std::endl;
 #endif
 		}
@@ -3869,6 +3875,92 @@ struct edge_plus_time {
 	double left, right;
 };
 
+// This parallel sorter is basically a clone of _Eidos_ParallelQuicksort_ASCENDING() in eidos_sorting.inc
+// The only difference (and the only reason we can't use that code directly) is we want to inline our comparator
+#ifdef _OPENMP
+static void _Eidos_ParallelQuicksort_ASCENDING(edge_plus_time *values, int64_t lo, int64_t hi, int64_t fallthrough)
+{
+	if (lo >= hi)
+		return;
+	
+	if (hi - lo + 1 <= fallthrough) {
+		// fall through to sorting with std::sort() below our threshold size
+		std::sort(values + lo, values + hi + 1,
+			[](const edge_plus_time &lhs, const edge_plus_time &rhs) {
+				if (lhs.time == rhs.time) {
+					if (lhs.parent == rhs.parent) {
+						if (lhs.child == rhs.child) {
+							return lhs.left < rhs.left;
+						}
+						return lhs.child < rhs.child;
+					}
+					return lhs.parent < rhs.parent;
+				}
+				return lhs.time < rhs.time;
+			});
+	} else {
+		// choose the middle of three pivots, in an attempt to avoid really bad pivots
+		edge_plus_time &pivot1 = *(values + lo);
+		edge_plus_time &pivot2 = *(values + hi);
+		edge_plus_time &pivot3 = *(values + ((lo + hi) >> 1));
+		edge_plus_time pivot;
+		
+		// we just use times to choose the middle pivot; pivots with the same time probably won't be very
+		// different in their sorted position anyway, except pathological models that record vast numbers
+		// of edges in very few ticks; for those, this will revert to random-ish pivot choice (not so bad?)
+		if (pivot1.time > pivot2.time)
+		{
+			if (pivot2.time > pivot3.time)		pivot = pivot2;
+			else if (pivot1.time > pivot3.time)	pivot = pivot3;
+			else								pivot = pivot1;
+		}
+		else
+		{
+			if (pivot1.time > pivot3.time)		pivot = pivot1;
+			else if (pivot2.time > pivot3.time)	pivot = pivot3;
+			else								pivot = pivot2;
+		}
+		
+		// note that std::partition is not guaranteed to leave the pivot value in position
+		// we do a second partition to exclude all duplicate pivot values, which seems to be one standard strategy
+		// this works particularly well when duplicate values are very common; it helps avoid O(n^2) performance
+		// note the partition is not parallelized; that is apparently a difficult problem for parallel quicksort
+		edge_plus_time *middle1 = std::partition(values + lo, values + hi + 1, [pivot](const edge_plus_time& em) {
+			//return em < pivot;
+			if (em.time == pivot.time) {
+				if (em.parent == pivot.parent) {
+					if (em.child == pivot.child) {
+						return em.left < pivot.left;
+					}
+					return em.child < pivot.child;
+				}
+				return em.parent < pivot.parent;
+			}
+			return em.time < pivot.time;
+		});
+		edge_plus_time *middle2 = std::partition(middle1, values + hi + 1, [pivot](const edge_plus_time& em) {
+			//return !(pivot < em);
+			if (pivot.time == em.time) {
+				if (pivot.parent == em.parent) {
+					if (pivot.child == em.child) {
+						return !(pivot.left < em.left);
+					}
+					return !(pivot.child < em.child);
+				}
+				return !(pivot.parent < em.parent);
+			}
+			return !(pivot.time < em.time);
+		});
+		int64_t mid1 = middle1 - values;
+		int64_t mid2 = middle2 - values;
+		#pragma omp task default(none) firstprivate(values, lo, mid1, fallthrough)
+		{ _Eidos_ParallelQuicksort_ASCENDING(values, lo, mid1 - 1, fallthrough); }	// Left branch
+		#pragma omp task default(none) firstprivate(values, hi, mid2, fallthrough)
+		{ _Eidos_ParallelQuicksort_ASCENDING(values, mid2, hi, fallthrough); }		// Right branch
+	}
+}
+#endif
+
 static int
 slim_sort_edges(tsk_table_sorter_t *sorter, tsk_size_t start)
 {
@@ -3877,17 +3969,65 @@ slim_sort_edges(tsk_table_sorter_t *sorter, tsk_size_t start)
 	if (start != 0)
 		throw std::invalid_argument("the sorter requires start==0");
 	
-	std::vector<edge_plus_time> temp;
-	temp.reserve(static_cast<std::size_t>(sorter->tables->edges.num_rows));
+	std::size_t num_rows = static_cast<std::size_t>(sorter->tables->edges.num_rows);
+	//std::cout << num_rows << " edge table rows to be sorted" << std::endl;
 	
-	auto edges = &sorter->tables->edges;
-	auto nodes = &sorter->tables->nodes;
+	edge_plus_time *temp_edge_data = (edge_plus_time *)malloc(num_rows * sizeof(edge_plus_time));
+	if (!temp_edge_data)
+		EIDOS_TERMINATION << "ERROR (slim_sort_edges): allocation failed; you may need to raise the memory limit for SLiM." << EidosTerminate(nullptr);
 	
-	for (tsk_size_t i = 0; i < sorter->tables->edges.num_rows; ++i)
-		temp.emplace_back(edge_plus_time{ nodes->time[edges->parent[i]], edges->parent[i], edges->child[i], edges->left[i], edges->right[i] });
+	tsk_edge_table_t *edges = &sorter->tables->edges;
+	double *node_times = sorter->tables->nodes.time;
 	
-	std::sort(begin(temp), end(temp),
-		[](const edge_plus_time &lhs, const edge_plus_time &rhs) {
+	// pre-sort: assemble the temp_edge_data vector
+	{
+		EIDOS_BENCHMARK_START(EidosBenchmarkType::k_SIMPLIFY_SORT_PRE);
+		EIDOS_THREAD_COUNT(gEidos_OMP_threads_SIMPLIFY_SORT_PRE);
+#pragma omp parallel for schedule(static) default(none) shared(num_rows, temp_edge_data, edges, node_times) if(num_rows >= EIDOS_OMPMIN_SIMPLIFY_SORT_PRE) num_threads(thread_count)
+		for (tsk_size_t i = 0; i < num_rows; ++i)
+		{
+			temp_edge_data[i] = edge_plus_time{ node_times[edges->parent[i]], edges->parent[i], edges->child[i], edges->left[i], edges->right[i] };
+		}
+		EIDOS_BENCHMARK_END(EidosBenchmarkType::k_SIMPLIFY_SORT_PRE);
+	}
+	
+	// sort with std::sort when not running parallel, or if the task is small;
+	// sort in parallel for big tasks if we can; see Eidos_ParallelSort() which
+	// this is patterned after, but we want the (faster) inlined comparator...
+	{
+		EIDOS_BENCHMARK_START(EidosBenchmarkType::k_SIMPLIFY_SORT);
+		
+#ifdef _OPENMP
+		if (num_rows >= EIDOS_OMPMIN_SIMPLIFY_SORT)
+		{
+			EIDOS_THREAD_COUNT(gEidos_OMP_threads_SIMPLIFY_SORT);
+#pragma omp parallel default(none) shared(num_rows, temp_edge_data) num_threads(thread_count)
+			{
+				// We fall through to using std::sort when below a threshold interval size.
+				// The larger the threshold, the less time we spend thrashing tasks on small
+				// intervals, which is good; but it also sets a limit on how many threads we
+				// we bring to bear on relatively small sorts, which is bad.  We try to
+				// calculate the optimal fall-through heuristically here; basically we want
+				// to subdivide with tasks enough that the workload is shared well, and then
+				// do the rest of the work with std::sort().  The more threads there are,
+				// the smaller we want to subdivide.
+				int64_t fallthrough = num_rows / (EIDOS_FALLTHROUGH_FACTOR * omp_get_num_threads());
+				
+				if (fallthrough < 1000)
+					fallthrough = 1000;
+				
+#pragma omp single nowait
+				{
+					_Eidos_ParallelQuicksort_ASCENDING(temp_edge_data, 0, num_rows - 1, fallthrough);
+				}
+			} // End of parallel region
+			
+			goto didParallelSort;
+		}
+#endif
+		
+		std::sort(temp_edge_data, temp_edge_data + num_rows,
+				  [](const edge_plus_time &lhs, const edge_plus_time &rhs) {
 			if (lhs.time == rhs.time) {
 				if (lhs.parent == rhs.parent) {
 					if (lhs.child == rhs.child) {
@@ -3899,14 +4039,30 @@ slim_sort_edges(tsk_table_sorter_t *sorter, tsk_size_t start)
 			}
 			return lhs.time < rhs.time;
 		});
-	
-	for (std::size_t i = 0; i < temp.size(); ++i)
-	{
-		edges->left[i] = temp[i].left;
-		edges->right[i] = temp[i].right;
-		edges->parent[i] = temp[i].parent;
-		edges->child[i] = temp[i].child;
+		
+#ifdef _OPENMP
+		// If we did a parallel sort, we jump here to skip the single-threaded sort
+	didParallelSort:
+#endif
+		EIDOS_BENCHMARK_END(EidosBenchmarkType::k_SIMPLIFY_SORT);
 	}
+	
+	// post-sort: copy the sorted temp_edge_data vector back into the edge table
+	{
+		EIDOS_BENCHMARK_START(EidosBenchmarkType::k_SIMPLIFY_SORT_POST);
+		EIDOS_THREAD_COUNT(gEidos_OMP_threads_SIMPLIFY_SORT_POST);
+#pragma omp parallel for schedule(static) default(none) shared(num_rows, temp_edge_data, edges) if(num_rows >= EIDOS_OMPMIN_SIMPLIFY_SORT_POST) num_threads(thread_count)
+		for (std::size_t i = 0; i < num_rows; ++i)
+		{
+			edges->left[i] = temp_edge_data[i].left;
+			edges->right[i] = temp_edge_data[i].right;
+			edges->parent[i] = temp_edge_data[i].parent;
+			edges->child[i] = temp_edge_data[i].child;
+		}
+		EIDOS_BENCHMARK_END(EidosBenchmarkType::k_SIMPLIFY_SORT_POST);
+	}
+	
+	free(temp_edge_data);
 	
 	return 0;
 }
@@ -3979,50 +4135,60 @@ void Species::SimplifyTreeSequence(void)
 	WritePopulationTable(&tables_);
 	
 	// sort the table collection
-	tsk_flags_t flags = TSK_NO_CHECK_INTEGRITY;
+	{
+		tsk_flags_t flags = TSK_NO_CHECK_INTEGRITY;
 #if DEBUG
-	// in DEBUG mode, we do a standard consistency check for tree-seq integrity after each simplify; unlike in
-	// CheckTreeSeqIntegrity(), this does not need TSK_NO_CHECK_POPULATION_REFS since we have a valid population table
-	// we don't need/want order checks for the tables, since we sort them here; if that doesn't do the right thing,
-	// that would be a bug in tskit, and would be caught by their tests, presumably, so no point in wasting time on it...
-	flags = 0;
+		// in DEBUG mode, we do a standard consistency check for tree-seq integrity after each simplify; unlike in
+		// CheckTreeSeqIntegrity(), this does not need TSK_NO_CHECK_POPULATION_REFS since we have a valid population table
+		// we don't need/want order checks for the tables, since we sort them here; if that doesn't do the right thing,
+		// that would be a bug in tskit, and would be caught by their tests, presumably, so no point in wasting time on it...
+		flags = 0;
 #endif
-	
+		
 #if 0
-	// sort the tables using tsk_table_collection_sort() to get the default behavior
-	int ret = tsk_table_collection_sort(&tables_, /* edge_start */ NULL, /* flags */ flags);
-	if (ret < 0) handle_error("tsk_table_collection_sort", ret);
+		// sort the tables using tsk_table_collection_sort() to get the default behavior
+		int ret = tsk_table_collection_sort(&tables_, /* edge_start */ NULL, /* flags */ flags);
+		if (ret < 0) handle_error("tsk_table_collection_sort", ret);
 #else
-	// sort the tables using our own custom edge sorter, for additional speed through inlining of the comparison function
-	// see https://github.com/tskit-dev/tskit/pull/627, https://github.com/tskit-dev/tskit/pull/711
-	// FIXME for additional speed we could perhaps be smart about only sorting the portions of the edge table
-	// that need it, but the tricky thing is that all the old stuff has to be at the bottom of the table, not the top...
-	tsk_table_sorter_t sorter;
-	int ret = tsk_table_sorter_init(&sorter, &tables_, /* flags */ flags);
-	if (ret != 0) handle_error("tsk_table_sorter_init", ret);
-	
-	sorter.sort_edges = slim_sort_edges;
-	
-	try {
-		ret = tsk_table_sorter_run(&sorter, NULL);
-	} catch (std::exception &e) {
-		EIDOS_TERMINATION << "ERROR (Species::SimplifyTreeSequence): (internal error) exception raised during tsk_table_sorter_run(): " << e.what() << "." << EidosTerminate();
-	}
-	if (ret != 0) handle_error("tsk_table_sorter_run", ret);
-	
-	tsk_table_sorter_free(&sorter);
-	if (ret != 0) handle_error("tsk_table_sorter_free", ret);
+		// sort the tables using our own custom edge sorter, for additional speed through inlining of the comparison function
+		// see https://github.com/tskit-dev/tskit/pull/627, https://github.com/tskit-dev/tskit/pull/711
+		// FIXME for additional speed we could perhaps be smart about only sorting the portions of the edge table
+		// that need it, but the tricky thing is that all the old stuff has to be at the bottom of the table, not the top...
+		tsk_table_sorter_t sorter;
+		int ret = tsk_table_sorter_init(&sorter, &tables_, /* flags */ flags);
+		if (ret != 0) handle_error("tsk_table_sorter_init", ret);
+		
+		sorter.sort_edges = slim_sort_edges;
+		
+		try {
+			ret = tsk_table_sorter_run(&sorter, NULL);
+		} catch (std::exception &e) {
+			EIDOS_TERMINATION << "ERROR (Species::SimplifyTreeSequence): (internal error) exception raised during tsk_table_sorter_run(): " << e.what() << "." << EidosTerminate();
+		}
+		if (ret != 0) handle_error("tsk_table_sorter_run", ret);
+		
+		tsk_table_sorter_free(&sorter);
+		if (ret != 0) handle_error("tsk_table_sorter_free", ret);
 #endif
+	}
 	
 	// remove redundant sites we added
-	ret = tsk_table_collection_deduplicate_sites(&tables_, 0);
-	if (ret < 0) handle_error("tsk_table_collection_deduplicate_sites", ret);
+	{
+		int ret = tsk_table_collection_deduplicate_sites(&tables_, 0);
+		if (ret < 0) handle_error("tsk_table_collection_deduplicate_sites", ret);
+	}
 	
 	// simplify
-	flags = TSK_SIMPLIFY_FILTER_SITES | TSK_SIMPLIFY_FILTER_INDIVIDUALS | TSK_SIMPLIFY_KEEP_INPUT_ROOTS;
-	if (!retain_coalescent_only_) flags |= TSK_SIMPLIFY_KEEP_UNARY;
-	ret = tsk_table_collection_simplify(&tables_, samples.data(), (tsk_size_t)samples.size(), flags, NULL);
-	if (ret != 0) handle_error("tsk_table_collection_simplify", ret);
+	{
+		EIDOS_BENCHMARK_START(EidosBenchmarkType::k_SIMPLIFY_CORE);
+		
+		tsk_flags_t flags = TSK_SIMPLIFY_FILTER_SITES | TSK_SIMPLIFY_FILTER_INDIVIDUALS | TSK_SIMPLIFY_KEEP_INPUT_ROOTS;
+		if (!retain_coalescent_only_) flags |= TSK_SIMPLIFY_KEEP_UNARY;
+		int ret = tsk_table_collection_simplify(&tables_, samples.data(), (tsk_size_t)samples.size(), flags, NULL);
+		if (ret != 0) handle_error("tsk_table_collection_simplify", ret);
+		
+		EIDOS_BENCHMARK_END(EidosBenchmarkType::k_SIMPLIFY_CORE);
+	}
 	
 	// update map of remembered_genomes_, which are now the first n entries in the node table
 	for (tsk_id_t i = 0; i < (tsk_id_t)remembered_genomes_.size(); i++)
@@ -4691,7 +4857,7 @@ void Species::TreeSequenceDataFromAscii(std::string NodeFileName,
 			metarec.pedigree_p2_ = (slim_pedigreeid_t)std::stoll(metadata_parts[2]);
 			metarec.age_ = (slim_age_t)std::stoll(metadata_parts[3]);
 			metarec.subpopulation_id_ = (slim_objectid_t)std::stoll(metadata_parts[4]);
-			metarec.sex_ = (IndividualSex)std::stoll(metadata_parts[5]);
+			metarec.sex_ = (int32_t)std::stoll(metadata_parts[5]);		// IndividualSex, but int32_t in the record
 			metarec.flags_ = (uint32_t)std::stoull(metadata_parts[6]);
 			
 			binary_metadata.emplace_back(metarec);
@@ -4923,32 +5089,36 @@ void Species::DerivedStatesFromAscii(tsk_table_collection_t *p_tables)
 		
 		binary_derived_state_offset.emplace_back(0);
 		
-		for (size_t j = 0; j < p_tables->mutations.num_rows; j++)
-		{
-			std::string string_derived_state(derived_state + derived_state_offset[j], derived_state_offset[j+1] - derived_state_offset[j]);
-			
-			if (string_derived_state.size() == 0)
+		try {
+			for (size_t j = 0; j < p_tables->mutations.num_rows; j++)
 			{
-				// nothing to do for an empty derived state
-			}
-			else if (string_derived_state.find(",") == std::string::npos)
-			{
-				// a single mutation can be handled more efficiently, and this is the common case so it's worth optimizing
-				binary_derived_state.emplace_back((slim_mutationid_t)std::stoll(string_derived_state));
-				derived_state_total_part_count++;
-			}
-			else
-			{
-				// stacked mutations require that the derived state be separated to parse it
-				std::vector<std::string> derived_state_parts = Eidos_string_split(string_derived_state, ",");
+				std::string string_derived_state(derived_state + derived_state_offset[j], derived_state_offset[j+1] - derived_state_offset[j]);
 				
-				for (std::string &derived_state_part : derived_state_parts)
-					binary_derived_state.emplace_back((slim_mutationid_t)std::stoll(derived_state_part));
+				if (string_derived_state.size() == 0)
+				{
+					// nothing to do for an empty derived state
+				}
+				else if (string_derived_state.find(",") == std::string::npos)
+				{
+					// a single mutation can be handled more efficiently, and this is the common case so it's worth optimizing
+					binary_derived_state.emplace_back((slim_mutationid_t)std::stoll(string_derived_state));
+					derived_state_total_part_count++;
+				}
+				else
+				{
+					// stacked mutations require that the derived state be separated to parse it
+					std::vector<std::string> derived_state_parts = Eidos_string_split(string_derived_state, ",");
+					
+					for (std::string &derived_state_part : derived_state_parts)
+						binary_derived_state.emplace_back((slim_mutationid_t)std::stoll(derived_state_part));
+					
+					derived_state_total_part_count += derived_state_parts.size();
+				}
 				
-				derived_state_total_part_count += derived_state_parts.size();
+				binary_derived_state_offset.emplace_back((tsk_size_t)(derived_state_total_part_count * sizeof(slim_mutationid_t)));
 			}
-			
-			binary_derived_state_offset.emplace_back((tsk_size_t)(derived_state_total_part_count * sizeof(slim_mutationid_t)));
+		} catch (...) {
+			EIDOS_TERMINATION << "ERROR (Species::DerivedStatesFromAscii): a mutation derived state was not convertible into an int64_t mutation id.  The tree-sequence data may not be annotated for SLiM, or may be corrupted." << EidosTerminate();
 		}
 		
 		if (binary_derived_state.size() == 0)
@@ -6307,7 +6477,7 @@ void Species::MetadataForIndividual(Individual *p_individual, IndividualMetadata
 	p_metadata->pedigree_p2_ = p_individual->Parent2PedigreeID();
 	p_metadata->age_ = p_individual->age_;
 	p_metadata->subpopulation_id_ = p_individual->subpopulation_->subpopulation_id_;
-	p_metadata->sex_ = p_individual->sex_;
+	p_metadata->sex_ = (int32_t)p_individual->sex_;		// IndividualSex, but int32_t in the record
 	
 	p_metadata->flags_ = 0;
 	if (p_individual->migrant_)
@@ -7375,7 +7545,7 @@ void Species::__TabulateSubpopulationsFromTreeSequence(std::unordered_map<slim_o
 		ts_subpop_info &subpop_info = subpop_info_iter->second;
 		
 		// check and tabulate sex within each subpop
-		IndividualSex sex = metadata->sex_;
+		IndividualSex sex = (IndividualSex)metadata->sex_;			// IndividualSex, but int32_t in the record
 		
 		switch (sex)
 		{
@@ -8464,16 +8634,16 @@ slim_tick_t Species::_InitializePopulationFromTskitBinaryFile(const char *p_file
 
 	RecordTablePosition();
 	
-	// convert ASCII derived-state data, which is the required format on disk, back to our in-memory binary format
-	DerivedStatesFromAscii(&tables_);
-	
-	// read in the tree sequence metadata first so we have file version information
+	// read in the tree sequence metadata first so we have file version information and check for SLiM compliance and such
 	slim_tick_t metadata_tick;
 	slim_tick_t metadata_cycle;
 	SLiMModelType file_model_type;
 	int file_version;
 	
 	ReadTreeSequenceMetadata(&tables_, &metadata_tick, &metadata_cycle, &file_model_type, &file_version);
+	
+	// convert ASCII derived-state data, which is the required format on disk, back to our in-memory binary format
+	DerivedStatesFromAscii(&tables_);
 	
 	// in nucleotide-based models, read the ancestral sequence; we do this ourselves, directly from kastore, to avoid having
 	// tskit make a full ASCII copy of the reference sequences from kastore into tables_; see tsk_table_collection_load() above

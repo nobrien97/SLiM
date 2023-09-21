@@ -30,7 +30,7 @@ PARALLEL changes (now in the master branch):
 	modify CMakeLists.txt to add /usr/local/include to all targets (through GSL_INCLUDES, which should maybe get cleaned up somehow)
 	modify CMakeLists.txt to build executables eidos_multi and slim_multi when PARALLEL is ON, and to link in libomp
 	disable parallel builds of EidosScribe, SLiMgui, and SLiMguiLegacy with #error directives; parallelization is for the command line only (active threads peg the CPU, passive threads are slower than single-threaded)
-	add a command-line option, -maxthreads <n>, to control the maximum number of threads used in OpenMP
+	add a command-line option, -maxThreads <n>, to control the maximum number of threads used in OpenMP
 	add a header eidos_openmp.h that should be used instead of #include "omp.h", providing various useful definitions etc.
 	add an initialization function for OpenMP, Eidos_WarmUpOpenMP(), that must be called when warming up; sets various options, logs diagnostic info
 	set default values for OMP_WAIT_POLICY (active) and OMP_PROC_BIND (false) and OMP_DYNAMIC (false) for slim and eidos
@@ -77,6 +77,16 @@ PARALLEL changes (now in the master branch):
 		this is achieved by passing defer=T to addCrossed(), addCloned(), addSelfed(), or addRecombinant()
 	thread-safety work - break in backward reproducibility for scripts that use a type 's' DFE, because the code path for that shifted
 	algorithm change for nearestNeighbors() and nearestNeighborsOfPoint(), when count is >1 and <N; the old algorithm was not thread-safe, and was inefficient; breaks backward reproducibility for the relevant case
+		the break in backward reproducibility is because the old algorithm returned the neighbors in a scrambled order, whereas the new algorithm returns them in sorted order; the order is not documented, so both are compliant
+	add max thread counts for each parallel loop, allowing flexible customization both by Eidos and by the user
+	tweak the semantics of parallelSetNumThreads(): an integer requests that exact number of threads, whereas NULL requests "up to" the max number of threads (the default behavior)
+		add gEidosNumThreadsOverride flag indicating whether the number of threads has been overridden explicitly
+	add parallelSetTaskThreadCounts() function to set per-task thread counts, and parallelGetTaskThreadCounts() to get them
+	add recipe 22.7, Parallelizing nonWF reproduction and spatial interactions
+	add internal EidosBenchmark facility for timing of internal loops, for benchmarking of parallelization scaling
+	add a command-line option, -perTaskThreads, to let the user control how many threads to use for different tasks (if not overridden)
+	parallelize sorting, where possible/efficient, add requisite per-task thread count keys
+	parallelize edge table sorting during simplification, add requisite per-task thread count keys
 
 development head (in the master branch):
 	fix a minor bug with autofix when opening multiple .slim documents at once in SLiMgui
@@ -94,7 +104,9 @@ development head (in the master branch):
 	clean up some old usage that is now flagged by Xcode (sprintf to snprintf, deprecated Cocoa API, old build-numbering scripts in the project)
 	advance copyrights to 2023
 	add the ability to generate profiles at the command line as well as in SLiMgui, making it possible to profile SLiM when running parallel
-	extend the Eidos Dictionary class (and DataFrame) to allow integer keys, making it more of a general "associative array" class that can represent ragged arrays and similar structures
+		to turn this on in CMake, add "-DPROFILE=ON" to the CMake command line
+		to turn this on in Xcode, set "-DSLIMPROFILING=1" in "Other C Flags" in each target you want to enable it in (not at the project level!)
+	extend the Eidos Dictionary class (but not DataFrame) to allow integer keys, making it more of a general "associative array" class that can represent ragged arrays and similar structures
 		as a side effect, "slim" type dictionary serialization now *always* quotes string keys (policy change), to distinguish, e.g., "10" (string) from 10 (integer) in serialized output
 	extend the Eidos Dictionary class (and DataFrame) to allow objects of all classes to be added; dictionaries containing objects that are not under retain-release just can't be kept long-term
 	improve InteractionType performance for certain queries, especially drawByStrength() with fixed interaction strength
@@ -106,11 +118,24 @@ development head (in the master branch):
 	update the zlib code in eidos_zlib to version 1.2.13 (13 Oct 2022), fixing some issues (see zlib ChangeLog file)
 	change to DWARF, not DWARF with dSYM, even for Release builds; I don't use the dSYM file to reverse-symbolicate crash reports, so it just slows down my Release builds (but turning it off is unusual, so I'm noting it here)
 	add an optimized case for sample() with replacement, when using a weights vector; orders of magnitude speedup for large tasks
-	shift GitHub Actions for macOS to macos-11 and macos-13; macos-10.15 stopped working in early May 2023, deprecated
+	shift GitHub Actions for macOS to macos-11 and macos-12; macos-10.15 stopped working in early May 2023, deprecated
 	add an optional parameter to initializeGeneConversion(), [l$ redrawLengthsOnFailure = F], to avoid failures to lay out tracts in some models; no behavior change by default
 	add an optional parameter, [integer$ count = 1], to addCrossed(), addSelfed(), addCloned(), addRecombinant(), and addEmpty() to produce multiple offspring in one call
 		this entails a policy change: if no children are generated (due to rejection by modifyChild(), in particular), object<Individual>(0) is returned, not NULL
 	add a method -(integer)compactIndices(void) to Dictionary, to compact result dictionaries down to their non-empty values with sequential keys
+	add a new recipe, 17.11, on changing the tree-sequence simplification interval
+	fix a bug with the Species methods mutationCounts() / mutationFrequences(), only for multispecies models; counts/frequencies would be zero for some species
+		this did not occur when running under SLiMgui (different code path), but always happened at the command line
+	add rank() function to Eidos (https://github.com/MesserLab/SLiM/issues/379); identical to R except that logical and string are not supported, and "random" is not supported; can be added later as needed
+	bug fix: #361, more than 2 billion mutations overflows without a good error message
+	bug fix: #365, problems loading a tree sequence; what I fixed is to catch the uncaught raise from std::stoll() in Species::DerivedStatesFromAscii()
+	bug fix in pyslim to announce: https://github.com/tskit-dev/pyslim/issues/307
+	feature request: #378, add font bigger (command +) and font smaller (command -) menu items and shortcuts, so the user doesn't have to open the prefs window; note that with command = the shift key is needed
+		this meant removal of the shortcuts for prettyprint script and reformat script, since they conflicted (well, prettyprint conflicted); probably nobody cares
+	revised recipe 17.3 to show how to persist tag values from a simulation in the tree-sequence metadata
+	add five logical tag properties to Individual, tagL0 - tagL4, to hold user-defined values of type logical
+	add parent1 and parent2 parameters to addRecombinant() so that parental pedigreeIDs can be tracked properly if desired
+	add sharedParentCount() method, a simplified version of relatedness() using only parent pedigree IDs to find full sibs (2) and haf-sibs (1)
 	
 
 version 4.0.1 (Eidos version 3.0.1):
