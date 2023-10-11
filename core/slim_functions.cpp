@@ -1796,11 +1796,6 @@ EidosValue_SP SLiM_ExecuteFunction_calcHeterozygosityAtPosition(const std::vecto
 				continue;
 			}
 
-			for (int l = 0; l < 5; ++l)
-			{
-
-			}
-
 			// Sort ids
 			std::sort(mutsGenome1.begin(), mutsGenome1.end());
 			std::sort(mutsGenome2.begin(), mutsGenome2.end());
@@ -1812,12 +1807,11 @@ EidosValue_SP SLiM_ExecuteFunction_calcHeterozygosityAtPosition(const std::vecto
 
 			it = std::set_difference(mutsGenome1.begin(), mutsGenome1.end(), mutsGenome2.begin(), mutsGenome2.end(),
 								setDiff.begin(), 
-								[](auto& a, auto& b) { return (int64_t)(a) < (int64_t)(b); });
+								[](slim_mutationid_t& a, slim_mutationid_t& b) { return (int64_t)(a) < (int64_t)(b); });
 			setDiff.resize(it-setDiff.begin());
 
 			// add them to the accumulating list
 			hetCounts[j] += setDiff.size();
-
 		}
 	}
 
