@@ -3,7 +3,7 @@
 //  EidosScribe
 //
 //  Created by Ben Haller on 4/7/15.
-//  Copyright (c) 2015-2022 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2015-2023 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -67,6 +67,14 @@
 	Eidos_Beep = &Eidos_Beep_MACOS;
 	
 	// Warm up our back end before anything else happens
+#ifdef _OPENMP
+	// Multithreading in EidosScribe is not for end user use; this is for testing/debugging only.
+	// We always use 4 threads; we don't want to hog the whole machine, just run with a couple threads.
+	// We pass false for active_threads to let the worker threads sleep, otherwise the CPU is pegged
+	// the whole time EidosScribe is running, even when sitting idle.
+	Eidos_WarmUpOpenMP(&std::cout, true, 4, false, /* default per-task thread counts */ "");
+#endif
+	
 	Eidos_WarmUp();
 }
 
@@ -77,6 +85,9 @@
 	
 	// Make the console window visible
 	[_consoleController showWindow];
+	
+	// Show a status message
+	[_consoleController displayStartupMessage];
 }
 
 
@@ -97,8 +108,7 @@
 	
 	// Set our version number string
 	NSString *bundleVersionString = [[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleShortVersionString"];
-	NSString *bundleVersion = [[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleVersion"];
-	NSString *versionString = [NSString stringWithFormat:@"%@ (build %@)", bundleVersionString, bundleVersion];
+	NSString *versionString = [NSString stringWithFormat:@"version %@", bundleVersionString];
 	
 	[aboutVersionTextField setStringValue:versionString];
 	
@@ -176,7 +186,7 @@
 {
 	// EidosScribe runs the standard Eidos test suite on launch if the option key is down.
 	// You would probably not want to do this in your own Context.
-	if ([NSEvent modifierFlags] & NSAlternateKeyMask)
+	if ([NSEvent modifierFlags] & NSEventModifierFlagOption)
 		RunEidosTests();
 }
 

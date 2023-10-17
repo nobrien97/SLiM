@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 3/1/15.
-//  Copyright (c) 2015-2022 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2015-2023 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -31,7 +31,7 @@
 @interface GraphView_FitnessOverTime : GraphView
 {
 	NSImage *drawingCache;
-	slim_generation_t drawingCacheGeneration;
+	slim_tick_t drawingCacheTick;
 }
 
 @property (nonatomic) BOOL showSubpopulations;

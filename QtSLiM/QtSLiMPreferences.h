@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 8/3/2019.
-//  Copyright (c) 2019-2022 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2019-2023 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -44,6 +44,10 @@ public:
     bool highlightCurrentLinePref(void) const;
     bool autosaveOnRecyclePref(void) const;
     bool showSaveIfUntitledPref(void) const;
+    
+    // Change preferences values in ways other than the Preferences panel itself
+    void displayFontBigger(void);
+    void displayFontSmaller(void);
     
 signals:
     // Get notified when a pref value changes
@@ -92,6 +96,7 @@ class QtSLiMPreferences : public QDialog
     Q_OBJECT
     
 public:
+    static QtSLiMPreferences *instanceForcingAllocation(bool force_allocation);
     static QtSLiMPreferences &instance(void);
     
 private:

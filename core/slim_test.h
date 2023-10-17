@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 8/14/15.
-//  Copyright (c) 2015-2022 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2015-2023 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -29,7 +29,7 @@ int RunSLiMTests(void);
 
 // Helper functions for testing
 extern void SLiMAssertScriptSuccess(const std::string &p_script_string, int p_lineNumber = -1);
-extern void SLiMAssertScriptRaise(const std::string &p_script_string, const int p_bad_line, const int p_bad_position, const std::string &p_reason_snip, int p_lineNumber = -1);
+extern void SLiMAssertScriptRaise(const std::string &p_script_string, const std::string &p_reason_snip, int p_lineNumber, bool p_expect_error_position = true);
 extern void SLiMAssertScriptStop(const std::string &p_script_string, int p_lineNumber = -1);
 
 
@@ -39,7 +39,7 @@ extern void SLiMAssertScriptStop(const std::string &p_script_string, int p_lineN
 
 // Defined in various slim_test_X.cpp files
 extern void _RunInitTests(void);
-extern void _RunSLiMSimTests(std::string temp_path);
+extern void _RunSpeciesTests(std::string temp_path);
 extern void _RunMutationTypeTests(void);
 extern void _RunGenomicElementTypeTests(void);
 extern void _RunGenomicElementTests(void);
@@ -53,10 +53,12 @@ extern void _RunInteractionTypeTests(void);
 extern void _RunSubstitutionTests(void);
 extern void _RunSLiMEidosBlockTests(void);
 extern void _RunContinuousSpaceTests(void);
+extern void _RunSpatialMapTests(void);
 extern void _RunNonWFTests(void);
 extern void _RunTreeSeqTests(std::string temp_path);
 extern void _RunNucleotideFunctionTests(void);
 extern void _RunNucleotideMethodTests(void);
+extern void _RunParallelSLiMTests();
 
 // Test function shared strings
 extern std::string gen1_setup;

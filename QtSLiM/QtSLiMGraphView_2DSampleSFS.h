@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 8/18/2020.
-//  Copyright (c) 2020-2022 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2020-2023 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -44,7 +44,7 @@ public:
     
 public slots:
     virtual void addedToWindow(void) override;
-    virtual void invalidateDrawingCache(void) override;
+    virtual void invalidateCachedData(void) override;
     virtual void controllerRecycled(void) override;
     virtual void updateAfterTick(void) override;
     void subpopulation1PopupChanged(int index);

@@ -13,6 +13,7 @@
 #include <string>
 #include <ctime>
 #include <chrono>
+#include <stdlib.h>
 #include <stdio.h>
 #include <unistd.h>
 #include <sys/stat.h>
@@ -21,13 +22,21 @@
 #include "eidos_interpreter.h"
 #include "eidos_test.h"
 
+#include "eidos_openmp.h"
+
 
 void PrintUsageAndDie();
 
 void PrintUsageAndDie()
 {
-	std::cout << "usage: eidos -version | -usage | -testEidos | [-time] [-mem] <script file>" << std::endl;
-	exit(0);
+	std::cout << "usage: eidos -version | -usage | -testEidos | [-time] [-mem]" << std::endl;
+	std::cout << "   ";
+#ifdef _OPENMP
+	// Some flags are visible only for a parallel build
+	std::cout << "[-maxThreads <n>] [-perTaskThreads \"x\"] ";
+#endif
+	std::cout << "<script file>" << std::endl;
+	exit(EXIT_SUCCESS);
 }
 
 int main(int argc, const char * argv[])
@@ -38,6 +47,12 @@ int main(int argc, const char * argv[])
 	// parse command-line arguments
 	const char *input_file = nullptr;
 	bool keep_time = false, keep_mem = false;
+	
+#ifdef _OPENMP
+	long max_thread_count = omp_get_max_threads();
+	bool changed_max_thread_count = false;
+	std::string per_task_thread_count_set_name = "";		// default per-task thread counts
+#endif
 	
 	// "slim" with no arguments prints usage, *unless* stdin is not a tty, in which case we're running the stdin script
 	if ((argc == 1) && isatty(fileno(stdin)))
@@ -67,14 +82,18 @@ int main(int argc, const char * argv[])
 		if (strcmp(arg, "-version") == 0 || strcmp(arg, "-v") == 0)
 		{
 			std::cout << "Eidos version " << EIDOS_VERSION_STRING << ", built " << __DATE__ << " " __TIME__ << std::endl;
-			exit(0);
+			exit(EXIT_SUCCESS);
 		}
 		
 		// -testEidos or -te: run Eidos tests and quit
 		if (strcmp(arg, "-testEidos") == 0 || strcmp(arg, "-te") == 0)
 		{
-			gEidosTerminateThrows = true;
+#ifdef _OPENMP
+			Eidos_WarmUpOpenMP(&std::cerr, changed_max_thread_count, (int)max_thread_count, true, /* max per-task thread counts */ "maxThreads");
+#endif
 			Eidos_WarmUp();
+			
+			gEidosTerminateThrows = true;
 			
 			int test_result = RunEidosTests();
 			
@@ -88,6 +107,47 @@ int main(int argc, const char * argv[])
 			PrintUsageAndDie();
 		}
 		
+		// -maxThreads <x>: set the maximum number of OpenMP threads that will be used
+		if (strcmp(arg, "-maxThreads") == 0)
+		{
+			if (++arg_index == argc)
+				PrintUsageAndDie();
+			
+			long count = strtol(argv[arg_index], NULL, 10);
+			
+#ifdef _OPENMP
+			max_thread_count = count;
+			changed_max_thread_count = true;
+			
+			if ((max_thread_count < 1) || (max_thread_count > EIDOS_OMP_MAX_THREADS))
+			{
+				std::cout << "The -maxThreads command-line option enforces a range of [1, " << EIDOS_OMP_MAX_THREADS << "]." << std::endl;
+				exit(EXIT_FAILURE);
+			}
+			
+			continue;
+#else
+			if (count != 1)
+			{
+				std::cout << "The -maxThreads command-line option only allows a value of 1 when not running a PARALLEL build." << std::endl;
+				exit(EXIT_FAILURE);
+			}
+#endif
+		}
+		
+		// -perTaskThreads "x": set the per-task thread counts to be used in OpenMP to a named set "x"
+		if (strcmp(arg, "-perTaskThreads") == 0)
+		{
+			if (++arg_index == argc)
+				PrintUsageAndDie();
+			
+#ifdef _OPENMP
+			// We just take the name as given; testing against known values will be done later
+			// This command-line argument is ignored completely when not parallel
+			per_task_thread_count_set_name = std::string(argv[arg_index]);
+#endif
+		}
+		
 		// this is the fall-through, which should be the input file, and should be the last argument given
 		if (arg_index + 1 != argc)
 			PrintUsageAndDie();
@@ -99,9 +159,13 @@ int main(int argc, const char * argv[])
 	if (!input_file && isatty(fileno(stdin)))
 		PrintUsageAndDie();
 	
-	// announce if we are running a debug build
+	// announce if we are running a debug build, etc.
 #ifdef DEBUG
-	std::cout << "// ********** DEBUG defined – you are not using a release build of Eidos" << std::endl << std::endl;
+	std::cerr << "// ********** DEBUG defined – you are not using a release build of Eidos" << std::endl << std::endl;
+#endif
+	
+#ifdef _OPENMP
+	Eidos_WarmUpOpenMP(&std::cerr, changed_max_thread_count, (int)max_thread_count, true, per_task_thread_count_set_name);
 #endif
 	
 	// keep time (we do this whether or not the -time flag was passed)

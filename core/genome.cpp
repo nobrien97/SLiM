@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 12/13/14.
-//  Copyright (c) 2014-2022 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2014-2023 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -22,9 +22,11 @@
 #include "slim_globals.h"
 #include "eidos_call_signature.h"
 #include "eidos_property_signature.h"
-#include "slim_sim.h"
+#include "community.h"
+#include "species.h"
 #include "polymorphism.h"
 #include "subpopulation.h"
+#include "eidos_sorting.h"
 
 #include <algorithm>
 #include <string>
@@ -45,34 +47,10 @@ slim_mutrun_index_t Genome::s_bulk_operation_mutrun_index_ = -1;
 SLiMBulkOperationHashTable Genome::s_bulk_operation_runs_;
 
 
-Genome::Genome(int p_mutrun_count, slim_position_t p_mutrun_length, enum GenomeType p_genome_type_, bool p_is_null) : genome_type_(p_genome_type_), individual_(nullptr), genome_id_(-1)
-{
-	// null genomes are now signalled with a mutrun_count_ of 0, rather than a separate flag
-	if (p_is_null)
-	{
-		mutrun_count_ = 0;
-		mutrun_length_ = 0;
-		mutruns_ = nullptr;
-	}
-	else
-	{
-		mutrun_count_ = p_mutrun_count;
-		mutrun_length_ = p_mutrun_length;
-		
-		if (mutrun_count_ <= SLIM_GENOME_MUTRUN_BUFSIZE)
-			mutruns_ = run_buffer_;
-		else
-			mutruns_ = new MutationRun_SP[mutrun_count_];
-	}
-}
-
 Genome::~Genome(void)
 {
-	for (int run_index = 0; run_index < mutrun_count_; ++run_index)
-		mutruns_[run_index].reset();
-	
 	if (mutruns_ != run_buffer_)
-		delete[] mutruns_;
+		free(mutruns_);
 	mutruns_ = nullptr;
 	
 	mutrun_count_ = 0;
@@ -84,30 +62,30 @@ void Genome::NullGenomeAccessError(void) const
 	EIDOS_TERMINATION << "ERROR (Genome::NullGenomeAccessError): (internal error) a null genome was accessed." << EidosTerminate();
 }
 
-void Genome::WillModifyRun(slim_mutrun_index_t p_run_index)
+MutationRun *Genome::WillModifyRun(slim_mutrun_index_t p_run_index, MutationRunContext &p_mutrun_context)
 {
 #if DEBUG
 	if (p_run_index >= mutrun_count_)
 		EIDOS_TERMINATION << "ERROR (Genome::WillModifyRun): (internal error) attempt to modify an out-of-index run." << EidosTerminate();
 #endif
 	
-	MutationRun *original_run = mutruns_[p_run_index].get();
+	// This method used to support in-place modification for mutruns with a use count of 1,
+	// saving the new mutation run allocation; but in practice that was not used, and it
+	// would be hard to support in the new multithreaded design, so we always make a new run
+	const MutationRun *original_run = mutruns_[p_run_index];
+	MutationRun *new_run = MutationRun::NewMutationRun(p_mutrun_context);	// take from shared pool of used objects
 	
-	if (original_run->UseCount() > 1)
-	{
-		MutationRun *new_run = MutationRun::NewMutationRun();	// take from shared pool of used objects
-		
-		new_run->copy_from_run(*original_run);
-		mutruns_[p_run_index] = MutationRun_SP(new_run);
-	}
-	else
-	{
-		original_run->will_modify_run();	// in-place modification of runs requires notification, for cache invalidation
-	}
+	new_run->copy_from_run(*original_run);
+	mutruns_[p_run_index] = new_run;
+	
+	// We return a non-const pointer to the caller, giving them permission to modify this new run
+	return new_run;
 }
 
 void Genome::BulkOperationStart(int64_t p_operation_id, slim_mutrun_index_t p_mutrun_index)
 {
+	THREAD_SAFETY_IN_ACTIVE_PARALLEL("Genome::BulkOperationStart(): s_bulk_operation_id_");
+	
 	if (s_bulk_operation_id_ != 0)
 	{
 		//EIDOS_TERMINATION << "ERROR (Genome::BulkOperationStart): (internal error) unmatched bulk operation start." << EidosTerminate();
@@ -126,8 +104,10 @@ void Genome::BulkOperationStart(int64_t p_operation_id, slim_mutrun_index_t p_mu
 	s_bulk_operation_mutrun_index_ = p_mutrun_index;
 }
 
-bool Genome::WillModifyRunForBulkOperation(int64_t p_operation_id, slim_mutrun_index_t p_mutrun_index)
+MutationRun *Genome::WillModifyRunForBulkOperation(int64_t p_operation_id, slim_mutrun_index_t p_mutrun_index, MutationRunContext &p_mutrun_context)
 {
+	THREAD_SAFETY_IN_ACTIVE_PARALLEL("Genome::WillModifyRunForBulkOperation(): s_bulk_operation_id_");
+	
 	if (p_mutrun_index != s_bulk_operation_mutrun_index_)
 		EIDOS_TERMINATION << "ERROR (Genome::WillModifyRunForBulkOperation): (internal error) incorrect run index during bulk operation." << EidosTerminate();
 	if (p_mutrun_index >= mutrun_count_)
@@ -135,14 +115,13 @@ bool Genome::WillModifyRunForBulkOperation(int64_t p_operation_id, slim_mutrun_i
 	
 #if 0
 #warning Genome::WillModifyRunForBulkOperation disabled...
-	// The trivial version of this function just calls WillModifyRun() and returns T,
+	// The trivial version of this function just calls WillModifyRun(),
 	// requesting that the caller perform the operation
-	WillModifyRun(p_run_index);
-	return true;
+	return WillModifyRun(p_run_index);
 #else
 	// The interesting version remembers the operation in progress, using the ID, and
-	// tracks original/final MutationRun pointers, returning F if an original is matched.
-	MutationRun *original_run = mutruns_[p_mutrun_index].get();
+	// tracks original/final MutationRun pointers, returning nullptr if an original is matched.
+	const MutationRun *original_run = mutruns_[p_mutrun_index];
 	
 	if (p_operation_id != s_bulk_operation_id_)
 			EIDOS_TERMINATION << "ERROR (Genome::WillModifyRunForBulkOperation): (internal error) missing bulk operation start." << EidosTerminate();
@@ -152,10 +131,10 @@ bool Genome::WillModifyRunForBulkOperation(int64_t p_operation_id, slim_mutrun_i
 	if (found_run_pair == s_bulk_operation_runs_.end())
 	{
 		// This MutationRun is not in the map, so we need to set up a new entry
-		MutationRun *product_run = MutationRun::NewMutationRun();
+		MutationRun *product_run = MutationRun::NewMutationRun(p_mutrun_context);
 		
 		product_run->copy_from_run(*original_run);
-		mutruns_[p_mutrun_index] = MutationRun_SP(product_run);
+		mutruns_[p_mutrun_index] = product_run;
 		
 		try {
 			s_bulk_operation_runs_.emplace(original_run, product_run);
@@ -165,22 +144,24 @@ bool Genome::WillModifyRunForBulkOperation(int64_t p_operation_id, slim_mutrun_i
 		
 		//std::cout << "WillModifyRunForBulkOperation() created product for " << original_run << std::endl;
 		
-		return true;
+		return product_run;
 	}
 	else
 	{
-		// This MutationRun is in the map, so we can just return it
-		mutruns_[p_mutrun_index] = MutationRun_SP(found_run_pair->second);
+		// This MutationRun is in the map, so we can just reuse it to redo the operation
+		mutruns_[p_mutrun_index] = found_run_pair->second;
 		
 		//std::cout << "   WillModifyRunForBulkOperation() substituted known product for " << original_run << std::endl;
 		
-		return false;
+		return nullptr;
 	}
 #endif
 }
 
 void Genome::BulkOperationEnd(int64_t p_operation_id, slim_mutrun_index_t p_mutrun_index)
 {
+	THREAD_SAFETY_IN_ACTIVE_PARALLEL("Genome::BulkOperationEnd(): s_bulk_operation_id_");
+	
 	if ((p_operation_id == s_bulk_operation_id_) && (p_mutrun_index == s_bulk_operation_mutrun_index_))
 	{
 		s_bulk_operation_runs_.clear();
@@ -193,19 +174,7 @@ void Genome::BulkOperationEnd(int64_t p_operation_id, slim_mutrun_index_t p_mutr
 	}
 }
 
-// Remove all mutations in p_genome that have a state_ of MutationState::kFixedAndSubstituted, indicating that they have fixed
-void Genome::RemoveFixedMutations(int64_t p_operation_id, slim_mutrun_index_t p_mutrun_index)
-{
-#if DEBUG
-	if (mutrun_count_ == 0)
-		NullGenomeAccessError();
-#endif
-	// This used to call RemoveFixedMutations() on each mutation run; now it removes only within a given
-	// mutation run index, allowing all the parts of the genome that don't contain fixed mutations to be skipped
-	mutruns_[p_mutrun_index]->RemoveFixedMutations(p_operation_id);
-}
-
-void Genome::TallyGenomeReferences(slim_refcount_t *p_mutrun_ref_tally, slim_refcount_t *p_mutrun_tally, int64_t p_operation_id)
+void Genome::TallyGenomeReferences_Checkback(slim_refcount_t *p_mutrun_ref_tally, slim_refcount_t *p_mutrun_tally, int64_t p_operation_id)
 {
 #if DEBUG
 	if (mutrun_count_ == 0)
@@ -215,83 +184,9 @@ void Genome::TallyGenomeReferences(slim_refcount_t *p_mutrun_ref_tally, slim_ref
 	{
 		if (mutruns_[run_index]->operation_id_ != p_operation_id)
 		{
-			(*p_mutrun_ref_tally) += mutruns_[run_index]->UseCount();
+			(*p_mutrun_ref_tally) += mutruns_[run_index]->use_count();
 			(*p_mutrun_tally)++;
 			mutruns_[run_index]->operation_id_ = p_operation_id;
-		}
-	}
-}
-
-void Genome::TallyBufferUsage(int64_t *p_using_external_buffer_tally, int64_t *p_external_buffer_capacity_tally, int64_t *p_external_buffer_count_tally, int64_t p_operation_id)
-{
-#if DEBUG
-	if (mutrun_count_ == 0)
-		NullGenomeAccessError();
-#endif
-	for (int run_index = 0; run_index < mutrun_count_; ++run_index)
-	{
-		if (mutruns_[run_index]->operation_id_ != p_operation_id)
-		{
-			mutruns_[run_index]->TallyBufferUsage(p_using_external_buffer_tally, p_external_buffer_capacity_tally, p_external_buffer_count_tally);
-			mutruns_[run_index]->operation_id_ = p_operation_id;
-		}
-	}
-}
-
-void Genome::TallyGenomeMutationReferences(int64_t p_operation_id)
-{
-#if DEBUG
-	if (mutrun_count_ == 0)
-		NullGenomeAccessError();
-#endif
-	slim_refcount_t *refcount_block_ptr = gSLiM_Mutation_Refcounts;
-	
-	for (int run_index = 0; run_index < mutrun_count_; ++run_index)
-	{
-		MutationRun *mutrun = mutruns_[run_index].get();
-		
-		if (mutrun->operation_id_ != p_operation_id)
-		{
-			slim_refcount_t use_count = (slim_refcount_t)mutrun->UseCount();
-			
-			const MutationIndex *genome_iter = mutrun->begin_pointer_const();
-			const MutationIndex *genome_end_iter = mutrun->end_pointer_const();
-			
-			// Do 16 reps
-			while (genome_iter + 16 <= genome_end_iter)
-			{
-				*(refcount_block_ptr + (*genome_iter++)) += use_count;
-				*(refcount_block_ptr + (*genome_iter++)) += use_count;
-				*(refcount_block_ptr + (*genome_iter++)) += use_count;
-				*(refcount_block_ptr + (*genome_iter++)) += use_count;
-				*(refcount_block_ptr + (*genome_iter++)) += use_count;
-				*(refcount_block_ptr + (*genome_iter++)) += use_count;
-				*(refcount_block_ptr + (*genome_iter++)) += use_count;
-				*(refcount_block_ptr + (*genome_iter++)) += use_count;
-				*(refcount_block_ptr + (*genome_iter++)) += use_count;
-				*(refcount_block_ptr + (*genome_iter++)) += use_count;
-				*(refcount_block_ptr + (*genome_iter++)) += use_count;
-				*(refcount_block_ptr + (*genome_iter++)) += use_count;
-				*(refcount_block_ptr + (*genome_iter++)) += use_count;
-				*(refcount_block_ptr + (*genome_iter++)) += use_count;
-				*(refcount_block_ptr + (*genome_iter++)) += use_count;
-				*(refcount_block_ptr + (*genome_iter++)) += use_count;
-			}
-			
-			// Do 4 reps
-			while (genome_iter + 4 <= genome_end_iter)
-			{
-				*(refcount_block_ptr + (*genome_iter++)) += use_count;
-				*(refcount_block_ptr + (*genome_iter++)) += use_count;
-				*(refcount_block_ptr + (*genome_iter++)) += use_count;
-				*(refcount_block_ptr + (*genome_iter++)) += use_count;
-			}
-			
-			// Finish off
-			while (genome_iter != genome_end_iter)
-				*(refcount_block_ptr + (*genome_iter++)) += use_count;
-			
-			mutrun->operation_id_ = p_operation_id;
 		}
 	}
 }
@@ -300,11 +195,8 @@ void Genome::MakeNull(void)
 {
 	if (mutrun_count_)
 	{
-		for (int run_index = 0; run_index < mutrun_count_; ++run_index)
-			mutruns_[run_index].reset();
-		
 		if (mutruns_ != run_buffer_)
-			delete[] mutruns_;
+			free(mutruns_);
 		mutruns_ = nullptr;
 		
 		mutrun_count_ = 0;
@@ -312,7 +204,7 @@ void Genome::MakeNull(void)
 	}
 }
 
-void Genome::ReinitializeGenomeToMutrun(GenomeType p_genome_type, int32_t p_mutrun_count, slim_position_t p_mutrun_length, MutationRun *p_run)
+void Genome::ReinitializeGenomeToMutruns(GenomeType p_genome_type, int32_t p_mutrun_count, slim_position_t p_mutrun_length, const std::vector<MutationRun *> &p_runs)
 {
 	genome_type_ = p_genome_type;
 	
@@ -327,16 +219,13 @@ void Genome::ReinitializeGenomeToMutrun(GenomeType p_genome_type, int32_t p_mutr
 			if (mutrun_count_ <= SLIM_GENOME_MUTRUN_BUFSIZE)
 				mutruns_ = run_buffer_;
 			else
-				mutruns_ = new MutationRun_SP[mutrun_count_];
+				mutruns_ = (const MutationRun **)malloc(mutrun_count_ * sizeof(const MutationRun *));	// overwritten below
 		}
 		else if (mutrun_count_ != p_mutrun_count)
 		{
 			// the number of mutruns has changed; need to reallocate
-			for (int run_index = 0; run_index < mutrun_count_; ++run_index)
-				mutruns_[run_index].reset();
-			
 			if (mutruns_ != run_buffer_)
-				delete[] mutruns_;
+				free(mutruns_);
 			
 			mutrun_count_ = p_mutrun_count;
 			mutrun_length_ = p_mutrun_length;
@@ -344,22 +233,23 @@ void Genome::ReinitializeGenomeToMutrun(GenomeType p_genome_type, int32_t p_mutr
 			if (mutrun_count_ <= SLIM_GENOME_MUTRUN_BUFSIZE)
 				mutruns_ = run_buffer_;
 			else
-				mutruns_ = new MutationRun_SP[mutrun_count_];
+				mutruns_ = (const MutationRun **)malloc(mutrun_count_ * sizeof(const MutationRun *));	// overwritten below
+		}
+		else
+		{
+			// the number of mutruns has not changed; no need to zero out, overwritten below
 		}
 		
 		for (int run_index = 0; run_index < mutrun_count_; ++run_index)
-			mutruns_[run_index].reset(p_run);
+			mutruns_[run_index] = p_runs[run_index];
 	}
 	else // if (!p_mutrun_count)
 	{
 		if (mutrun_count_)
 		{
 			// was a non-null genome, needs to become null
-			for (int run_index = 0; run_index < mutrun_count_; ++run_index)
-				mutruns_[run_index].reset();
-			
 			if (mutruns_ != run_buffer_)
-				delete[] mutruns_;
+				free(mutruns_);
 			mutruns_ = nullptr;
 			
 			mutrun_count_ = 0;
@@ -372,13 +262,6 @@ void Genome::ReinitializeGenomeNullptr(GenomeType p_genome_type, int32_t p_mutru
 {
 	genome_type_ = p_genome_type;
 	
-#if DEBUG
-	// we are guaranteed by the caller that all existing mutrun pointers are null; check that, in DEBUG mode
-	for (int run_index = 0; run_index < mutrun_count_; ++run_index)
-		if (mutruns_[run_index])
-			EIDOS_TERMINATION << "ERROR (Genome::ReinitializeGenomeNullptr): (internal error) nonnull mutrun pointer in ReinitializeGenomeNullptr." << EidosTerminate();
-#endif
-	
 	if (p_mutrun_count)
 	{
 		if (mutrun_count_ == 0)
@@ -388,23 +271,37 @@ void Genome::ReinitializeGenomeNullptr(GenomeType p_genome_type, int32_t p_mutru
 			mutrun_length_ = p_mutrun_length;
 			
 			if (mutrun_count_ <= SLIM_GENOME_MUTRUN_BUFSIZE)
+			{
 				mutruns_ = run_buffer_;
+				EIDOS_BZERO(run_buffer_, SLIM_GENOME_MUTRUN_BUFSIZE * sizeof(const MutationRun *));
+			}
 			else
-				mutruns_ = new MutationRun_SP[mutrun_count_];
+				mutruns_ = (const MutationRun **)calloc(mutrun_count_, sizeof(const MutationRun *));
 		}
 		else if (mutrun_count_ != p_mutrun_count)
 		{
 			// the number of mutruns has changed; need to reallocate
 			if (mutruns_ != run_buffer_)
-				delete[] mutruns_;
+				free(mutruns_);
 			
 			mutrun_count_ = p_mutrun_count;
 			mutrun_length_ = p_mutrun_length;
 			
 			if (mutrun_count_ <= SLIM_GENOME_MUTRUN_BUFSIZE)
+			{
 				mutruns_ = run_buffer_;
+				EIDOS_BZERO(run_buffer_, SLIM_GENOME_MUTRUN_BUFSIZE * sizeof(const MutationRun *));
+			}
 			else
-				mutruns_ = new MutationRun_SP[mutrun_count_];
+				mutruns_ = (const MutationRun **)calloc(mutrun_count_, sizeof(const MutationRun *));
+		}
+		else
+		{
+			// the number of mutruns has not changed; need to zero out
+			if (p_mutrun_count <= SLIM_GENOME_MUTRUN_BUFSIZE)
+				EIDOS_BZERO(run_buffer_, SLIM_GENOME_MUTRUN_BUFSIZE * sizeof(const MutationRun *));		// much faster because optimized at compile time
+			else
+				EIDOS_BZERO(mutruns_, p_mutrun_count * sizeof(const MutationRun *));
 		}
 		
 		// we leave the new mutruns_ buffer filled with nullptr
@@ -415,7 +312,7 @@ void Genome::ReinitializeGenomeNullptr(GenomeType p_genome_type, int32_t p_mutru
 		{
 			// was a non-null genome, needs to become null
 			if (mutruns_ != run_buffer_)
-				delete[] mutruns_;
+				free(mutruns_);
 			mutruns_ = nullptr;
 			
 			mutrun_count_ = 0;
@@ -424,17 +321,20 @@ void Genome::ReinitializeGenomeNullptr(GenomeType p_genome_type, int32_t p_mutru
 	}
 }
 
-void Genome::record_derived_states(SLiMSim *p_sim) const
+void Genome::record_derived_states(Species *p_species) const
 {
-	// This is called by SLiMSim::RecordAllDerivedStatesFromSLiM() to record all the derived states present
+	// This is called by Species::RecordAllDerivedStatesFromSLiM() to record all the derived states present
 	// in a given genome that was just created by readFromPopulationFile() or some similar situation.  It should
 	// make calls to record the derived state at each position in the genome that has any mutation.
 	Mutation *mut_block_ptr = gSLiM_Mutation_Block;
+	
+	THREAD_SAFETY_IN_ACTIVE_PARALLEL("Genome::record_derived_states(): usage of statics");
+
 	static std::vector<Mutation *> record_vec;
 	
 	for (int run_index = 0; run_index < mutrun_count_; ++run_index)
 	{
-		MutationRun *mutrun = mutruns_[run_index].get();
+		const MutationRun *mutrun = mutruns_[run_index];
 		int mutrun_size = mutrun->size();
 		slim_position_t last_pos = -1;
 		
@@ -451,7 +351,7 @@ void Genome::record_derived_states(SLiMSim *p_sim) const
 				// New position, so we finish the previous derived-state block...
 				if (last_pos != -1)
 				{
-					p_sim->RecordNewDerivedState(this, last_pos, record_vec);
+					p_species->RecordNewDerivedState(this, last_pos, record_vec);
 					record_vec.clear();
 				}
 				
@@ -465,61 +365,11 @@ void Genome::record_derived_states(SLiMSim *p_sim) const
 		// record the last derived block, if any
 		if (last_pos != -1)
 		{
-			p_sim->RecordNewDerivedState(this, last_pos, record_vec);
+			p_species->RecordNewDerivedState(this, last_pos, record_vec);
 			record_vec.clear();
 		}
 	}
 }
-
-/*
-void Genome::assert_identical_to_runs(MutationRun_SP *p_mutruns, int32_t p_mutrun_count)
-{
-	// This checks that the mutations carried by a genome are identical after a mutation run transformation.
-	// It is run only in DEBUG mode, and does not need to be fast.
-	std::vector <MutationIndex> genome_muts;
-	std::vector <MutationIndex> param_muts;
-	
-	for (int run_index = 0; run_index < mutrun_count_; ++run_index)
-	{
-		MutationRun *mutrun = mutruns_[run_index].get();
-		int mutrun_size = mutrun->size();
-		
-		for (int mut_index = 0; mut_index < mutrun_size; ++mut_index)
-			genome_muts.emplace_back((*mutrun)[mut_index]);
-	}
-	
-	for (int run_index = 0; run_index < p_mutrun_count; ++run_index)
-	{
-		MutationRun *mutrun = p_mutruns[run_index].get();
-		int mutrun_size = mutrun->size();
-		
-		for (int mut_index = 0; mut_index < mutrun_size; ++mut_index)
-			param_muts.emplace_back((*mutrun)[mut_index]);
-	}
-	
-	if (genome_muts.size() != param_muts.size())
-		EIDOS_TERMINATION << "ERROR (Genome::assert_identical_to_runs): (internal error) genome unequal in size after transformation." << EidosTerminate();
-	if (genome_muts != param_muts)
-		EIDOS_TERMINATION << "ERROR (Genome::assert_identical_to_runs): (internal error) genome unequal in contents after transformation." << EidosTerminate();
-	
-	// Check that mutations are also placed into the correct mutation run based on their position
-	for (int run_index = 0; run_index < mutrun_count_; ++run_index)
-	{
-		MutationRun *mutrun = mutruns_[run_index].get();
-		int mutrun_size = mutrun->size();
-		
-		for (int mut_index = 0; mut_index < mutrun_size; ++mut_index)
-		{
-			MutationIndex mutation_index = (*mutrun)[mut_index];
-			Mutation *mutation = gSLiM_Mutation_Block + mutation_index;
-			slim_position_t position = mutation->position_;
-			
-			if (position / mutrun_length_ != run_index)
-				EIDOS_TERMINATION << "ERROR (Genome::assert_identical_to_runs): (internal error) genome has mutation at bad position." << EidosTerminate();
-		}
-	}
-}
-*/
 
 
 //
@@ -565,7 +415,7 @@ EidosValue_SP Genome::GetProperty(EidosGlobalStringID p_property_id)
 			// constants
 		case gID_genomePedigreeID:		// ACCELERATED
 		{
-			if (!individual_->subpopulation_->population_.sim_.PedigreesEnabledByUser())
+			if (!individual_->subpopulation_->species_.PedigreesEnabledByUser())
 				EIDOS_TERMINATION << "ERROR (Genome::GetProperty): property genomePedigreeID is not available because pedigree recording has not been enabled." << EidosTerminate();
 			
 			return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Int_singleton(genome_id_));
@@ -588,6 +438,9 @@ EidosValue_SP Genome::GetProperty(EidosGlobalStringID p_property_id)
 			return ((mutrun_count_ == 0) ? gStaticEidosValue_LogicalT : gStaticEidosValue_LogicalF);
 		case gID_mutations:
 		{
+			if (IsDeferred())
+				EIDOS_TERMINATION << "ERROR (Genome::GetProperty): the mutations of deferred genomes cannot be accessed." << EidosTerminate();
+			
 			Mutation *mut_block_ptr = gSLiM_Mutation_Block;
 			int mut_count = mutation_count();
 			EidosValue_Object_vector *vec = (new (gEidosValuePool->AllocateChunk()) EidosValue_Object_vector(gSLiM_Mutation_Class))->resize_no_initialize_RR(mut_count);
@@ -596,7 +449,7 @@ EidosValue_SP Genome::GetProperty(EidosGlobalStringID p_property_id)
 			
 			for (int run_index = 0; run_index < mutrun_count_; ++run_index)
 			{
-				MutationRun *mutrun = mutruns_[run_index].get();
+				const MutationRun *mutrun = mutruns_[run_index];
 				const MutationIndex *mut_start_ptr = mutrun->begin_pointer_const();
 				const MutationIndex *mut_end_ptr = mutrun->end_pointer_const();
 				
@@ -634,7 +487,7 @@ EidosValue *Genome::GetProperty_Accelerated_genomePedigreeID(EidosObject **p_val
 	{
 		Genome *value = (Genome *)(p_values[value_index]);
 		
-		if (!value->individual_->subpopulation_->population_.sim_.PedigreesEnabledByUser())
+		if (!value->individual_->subpopulation_->species_.PedigreesEnabledByUser())
 			EIDOS_TERMINATION << "ERROR (Genome::GetProperty): property genomePedigreeID is not available because pedigree recording has not been enabled." << EidosTerminate();
 		
 		int_result->set_int_no_check(value->genome_id_, value_index);
@@ -692,7 +545,7 @@ void Genome::SetProperty(EidosGlobalStringID p_property_id, const EidosValue &p_
 			slim_usertag_t value = SLiMCastToUsertagTypeOrRaise(p_value.IntAtIndex(0, nullptr));
 			
 			tag_value_ = value;
-			Individual::s_any_individual_or_genome_tag_set_ = true;
+			Individual::s_any_genome_tag_set_ = true;
 			return;
 		}
 			
@@ -705,7 +558,7 @@ void Genome::SetProperty(EidosGlobalStringID p_property_id, const EidosValue &p_
 
 void Genome::SetProperty_Accelerated_tag(EidosObject **p_values, size_t p_values_size, const EidosValue &p_source, size_t p_source_size)
 {
-	Individual::s_any_individual_or_genome_tag_set_ = true;
+	Individual::s_any_genome_tag_set_ = true;
 	
 	// SLiMCastToUsertagTypeOrRaise() is a no-op at present
 	if (p_source_size == 1)
@@ -728,9 +581,9 @@ EidosValue_SP Genome::ExecuteInstanceMethod(EidosGlobalStringID p_method_id, con
 {
 	switch (p_method_id)
 	{
-		case gID_containsMarkerMutation:		return ExecuteMethod_containsMarkerMutation(p_method_id, p_arguments, p_interpreter);
+		//case gID_containsMarkerMutation:		return ExecuteMethod_Accelerated_containsMarkerMutation(p_method_id, p_arguments, p_interpreter);
 		//case gID_containsMutations:			return ExecuteMethod_Accelerated_containsMutations(p_method_id, p_arguments, p_interpreter);
-		case gID_countOfMutationsOfType:		return ExecuteMethod_countOfMutationsOfType(p_method_id, p_arguments, p_interpreter);
+		//case gID_countOfMutationsOfType:		return ExecuteMethod_Accelerated_countOfMutationsOfType(p_method_id, p_arguments, p_interpreter);
 		case gID_mutationsOfType:				return ExecuteMethod_mutationsOfType(p_method_id, p_arguments, p_interpreter);
 		case gID_nucleotides:					return ExecuteMethod_nucleotides(p_method_id, p_arguments, p_interpreter);
 		case gID_positionsOfMutationsOfType:	return ExecuteMethod_positionsOfMutationsOfType(p_method_id, p_arguments, p_interpreter);
@@ -739,34 +592,108 @@ EidosValue_SP Genome::ExecuteInstanceMethod(EidosGlobalStringID p_method_id, con
 	}
 }
 
-//	*********************	- (logical$)containsMarkerMutation(io<MutationType>$ mutType, integer$ position, [returnMutation$ = F])
+//	*********************	- (Nlo<Mutation>$)containsMarkerMutation(io<MutationType>$ mutType, integer$ position, [returnMutation$ = F])
 //
-EidosValue_SP Genome::ExecuteMethod_containsMarkerMutation(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter)
+EidosValue_SP Genome::ExecuteMethod_Accelerated_containsMarkerMutation(EidosObject **p_elements, size_t p_elements_size, EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter)
 {
 #pragma unused (p_method_id, p_arguments, p_interpreter)
 	EidosValue *mutType_value = p_arguments[0].get();
 	EidosValue *position_value = p_arguments[1].get();
 	EidosValue *returnMutation_value = p_arguments[2].get();
 	
-	if (IsNull())
-		EIDOS_TERMINATION << "ERROR (Genome::ExecuteMethod_containsMarkerMutation): containsMarkerMutation() cannot be called on a null genome." << EidosTerminate();
-	
-	SLiMSim &sim = individual_->subpopulation_->population_.sim_;
-	MutationType *mutation_type_ptr = SLiM_ExtractMutationTypeFromEidosValue_io(mutType_value, 0, sim, "containsMarkerMutation()");
-	slim_position_t marker_position = SLiMCastToPositionTypeOrRaise(position_value->IntAtIndex(0, nullptr));
-	slim_position_t last_position = sim.TheChromosome().last_position_;
-	
-	if (marker_position > last_position)
-		EIDOS_TERMINATION << "ERROR (Genome::ExecuteMethod_containsMarkerMutation): containsMarkerMutation() position " << marker_position << " is past the end of the chromosome." << EidosTerminate();
-	
-	Mutation *mut = mutation_with_type_and_position(mutation_type_ptr, marker_position, last_position);
-	
-	eidos_logical_t returnMutation = returnMutation_value->LogicalAtIndex(0, nullptr);
-	
-	if (returnMutation == false)
-		return (mut ? gStaticEidosValue_LogicalT : gStaticEidosValue_LogicalF);
+	if (p_elements_size)
+	{
+		// SPECIES CONSISTENCY CHECK
+		Species *genomes_species = Community::SpeciesForGenomesVector((Genome **)p_elements, (int)p_elements_size);
+		
+		if (!genomes_species)
+			EIDOS_TERMINATION << "ERROR (Genome::ExecuteMethod_Accelerated_containsMarkerMutation): containsMarkerMutation() requires that all target genomes belong to the same species." << EidosTerminate();
+		
+		genomes_species->population_.CheckForDeferralInGenomesVector((Genome **)p_elements, p_elements_size, "Genome::ExecuteMethod_Accelerated_containsMarkerMutation");
+		
+		Species &species = *genomes_species;
+		MutationType *mutation_type_ptr = SLiM_ExtractMutationTypeFromEidosValue_io(mutType_value, 0, &species.community_, &species, "containsMarkerMutation()");		// SPECIES CONSISTENCY CHECK
+		slim_position_t marker_position = SLiMCastToPositionTypeOrRaise(position_value->IntAtIndex(0, nullptr));
+		slim_position_t last_position = species.TheChromosome().last_position_;
+		
+		if (marker_position > last_position)
+			EIDOS_TERMINATION << "ERROR (Genome::ExecuteMethod_Accelerated_containsMarkerMutation): containsMarkerMutation() position " << marker_position << " is past the end of the chromosome." << EidosTerminate();
+		
+		eidos_logical_t returnMutation = returnMutation_value->LogicalAtIndex(0, nullptr);
+		
+		if (p_elements_size == 1)
+		{
+			Genome *element = (Genome *)(p_elements[0]);
+			
+			if (!element->IsNull())
+			{
+				Mutation *mut = element->mutation_with_type_and_position(mutation_type_ptr, marker_position, last_position);
+				
+				if (returnMutation == false)
+					return (mut ? gStaticEidosValue_LogicalT : gStaticEidosValue_LogicalF);
+				else
+					return (mut ? EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Object_singleton(mut, gSLiM_Mutation_Class)) : (EidosValue_SP)gStaticEidosValueNULL);
+			}
+		}
+		else if (returnMutation == false)
+		{
+			// We will return a logical vector, T/F for each target genome; parallelized
+			EidosValue_Logical *result_logical_vec = (new (gEidosValuePool->AllocateChunk()) EidosValue_Logical())->resize_no_initialize(p_elements_size);
+			bool null_genome_seen = false;
+			
+			EIDOS_THREAD_COUNT(gEidos_OMP_threads_CONTAINS_MARKER_MUT);
+#pragma omp parallel for schedule(dynamic, 16) default(none) shared(p_elements_size) firstprivate(p_elements, mutation_type_ptr, marker_position, last_position, result_logical_vec) reduction(||: null_genome_seen) if(p_elements_size >= EIDOS_OMPMIN_CONTAINS_MARKER_MUT) num_threads(thread_count)
+			for (size_t element_index = 0; element_index < p_elements_size; ++element_index)
+			{
+				Genome *element = (Genome *)(p_elements[element_index]);
+				
+				if (element->IsNull())
+				{
+					null_genome_seen = true;
+					continue;
+				}
+				
+				Mutation *mut = element->mutation_with_type_and_position(mutation_type_ptr, marker_position, last_position);
+				
+				result_logical_vec->set_logical_no_check(mut != nullptr, element_index);
+			}
+			
+			if (!null_genome_seen)
+				return EidosValue_SP(result_logical_vec);
+		}
+		else // (returnMutation == true)
+		{
+			// We will return an object<Mutation> vector, one Mutation (or NULL) for each target genome; not parallelized, for now
+			EidosValue_Object_vector *result_obj_vec = (new (gEidosValuePool->AllocateChunk()) EidosValue_Object_vector(gSLiM_Mutation_Class))->reserve(p_elements_size);
+			bool null_genome_seen = false;
+			
+			for (size_t element_index = 0; element_index < p_elements_size; ++element_index)
+			{
+				Genome *element = (Genome *)(p_elements[element_index]);
+				
+				if (element->IsNull())
+				{
+					null_genome_seen = true;
+					continue;
+				}
+				
+				Mutation *mut = element->mutation_with_type_and_position(mutation_type_ptr, marker_position, last_position);
+				
+				if (mut)
+					result_obj_vec->push_object_element_RR(mut);
+			}
+			
+			if (!null_genome_seen)
+				return EidosValue_SP(result_obj_vec);
+		}
+		
+		// we drop through to here when a null genome is encountered
+		EIDOS_TERMINATION << "ERROR (Genome::ExecuteMethod_Accelerated_containsMarkerMutation): containsMarkerMutation() cannot be called on a null genome." << EidosTerminate();
+	}
 	else
-		return (mut ? EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Object_singleton(mut, gSLiM_Mutation_Class)) : (EidosValue_SP)gStaticEidosValueNULL);
+	{
+		return gStaticEidosValue_Logical_ZeroVec;
+	}
 }
 
 //	*********************	- (logical)containsMutations(object<Mutation> mutations)
@@ -776,8 +703,24 @@ EidosValue_SP Genome::ExecuteMethod_Accelerated_containsMutations(EidosObject **
 #pragma unused (p_method_id, p_arguments, p_interpreter)
 	if (p_elements_size)
 	{
+		// SPECIES CONSISTENCY CHECK
+		Species *genomes_species = Community::SpeciesForGenomesVector((Genome **)p_elements, (int)p_elements_size);
+		
+		if (!genomes_species)
+			EIDOS_TERMINATION << "ERROR (Genome::ExecuteMethod_Accelerated_containsMutations): containsMutations() requires that all target genomes belong to the same species." << EidosTerminate();
+		
+		genomes_species->population_.CheckForDeferralInGenomesVector((Genome **)p_elements, p_elements_size, "Genome::ExecuteMethod_Accelerated_containsMutations");
+		
 		EidosValue *mutations_value = p_arguments[0].get();
 		int mutations_count = mutations_value->Count();
+		
+		if (mutations_count > 0)
+		{
+			Species *mutations_species = Community::SpeciesForMutations(mutations_value);
+			
+			if (mutations_species != genomes_species)
+				EIDOS_TERMINATION << "ERROR (Genome::ExecuteMethod_Accelerated_containsMutations): containsMutations() requires that all mutations belong to the same species as the target genomes." << EidosTerminate();
+		}
 		
 		if (mutations_count == 1)
 		{
@@ -854,33 +797,61 @@ EidosValue_SP Genome::ExecuteMethod_Accelerated_containsMutations(EidosObject **
 
 //	*********************	- (integer$)countOfMutationsOfType(io<MutationType>$ mutType)
 //
-EidosValue_SP Genome::ExecuteMethod_countOfMutationsOfType(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter)
+EidosValue_SP Genome::ExecuteMethod_Accelerated_countOfMutationsOfType(EidosObject **p_elements, size_t p_elements_size, EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter)
 {
 #pragma unused (p_method_id, p_arguments, p_interpreter)
+	if (p_elements_size == 0)
+		return gStaticEidosValue_Integer_ZeroVec;
+	
+	// SPECIES CONSISTENCY CHECK
+	Species *species = Community::SpeciesForGenomesVector((Genome **)p_elements, (int)p_elements_size);
+	
+	if (species == nullptr)
+		EIDOS_TERMINATION << "ERROR (Genome::ExecuteMethod_Accelerated_countOfMutationsOfType): countOfMutationsOfType() requires that mutType belongs to the same species as the target individual." << EidosTerminate();
+	
+	species->population_.CheckForDeferralInGenomesVector((Genome **)p_elements, p_elements_size, "Genome::ExecuteMethod_Accelerated_countOfMutationsOfType");
+	
 	EidosValue *mutType_value = p_arguments[0].get();
-	
-	if (IsNull())
-		EIDOS_TERMINATION << "ERROR (Genome::ExecuteMethod_countOfMutationsOfType): countOfMutationsOfType() cannot be called on a null genome." << EidosTerminate();
-	
-	SLiMSim &sim = individual_->subpopulation_->population_.sim_;
-	MutationType *mutation_type_ptr = SLiM_ExtractMutationTypeFromEidosValue_io(mutType_value, 0, sim, "countOfMutationsOfType()");
+	MutationType *mutation_type_ptr = SLiM_ExtractMutationTypeFromEidosValue_io(mutType_value, 0, &species->community_, species, "countOfMutationsOfType()");		// SPECIES CONSISTENCY CHECK
 	
 	// Count the number of mutations of the given type
-	int match_count = 0;
+	const int32_t mutrun_count = ((Genome *)(p_elements[0]))->mutrun_count_;
 	Mutation *mut_block_ptr = gSLiM_Mutation_Block;
+	EidosValue_Int_vector *integer_result = (new (gEidosValuePool->AllocateChunk()) EidosValue_Int_vector())->resize_no_initialize(p_elements_size);
+	bool saw_error = false;
 	
-	for (int run_index = 0; run_index < mutrun_count_; ++run_index)
+	EIDOS_THREAD_COUNT(gEidos_OMP_threads_G_COUNT_OF_MUTS_OF_TYPE);
+#pragma omp parallel for schedule(dynamic, 1) default(none) shared(p_elements_size) firstprivate(p_elements, mut_block_ptr, mutation_type_ptr, integer_result, mutrun_count) reduction(||: saw_error) if(p_elements_size >= EIDOS_OMPMIN_G_COUNT_OF_MUTS_OF_TYPE) num_threads(thread_count)
+	for (size_t element_index = 0; element_index < p_elements_size; ++element_index)
 	{
-		MutationRun *mutrun = mutruns_[run_index].get();
-		int mut_count = mutrun->size();
-		const MutationIndex *mut_ptr = mutrun->begin_pointer_const();
+		Genome *element = (Genome *)(p_elements[element_index]);
 		
-		for (int mut_index = 0; mut_index < mut_count; ++mut_index)
-			if ((mut_block_ptr + mut_ptr[mut_index])->mutation_type_ptr_ == mutation_type_ptr)
-				++match_count;
+		if (element->IsNull())
+		{
+			saw_error = true;
+			continue;
+		}
+		
+		int match_count = 0;
+		
+		for (int run_index = 0; run_index < mutrun_count; ++run_index)
+		{
+			const MutationRun *mutrun = element->mutruns_[run_index];
+			int mut_count = mutrun->size();
+			const MutationIndex *mut_ptr = mutrun->begin_pointer_const();
+			
+			for (int mut_index = 0; mut_index < mut_count; ++mut_index)
+				if ((mut_block_ptr + mut_ptr[mut_index])->mutation_type_ptr_ == mutation_type_ptr)
+					++match_count;
+		}
+		
+		integer_result->set_int_no_check(match_count, element_index);
 	}
 	
-	return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Int_singleton(match_count));
+	if (saw_error)
+		EIDOS_TERMINATION << "ERROR (Genome::ExecuteMethod_countOfMutationsOfType): countOfMutationsOfType() cannot be called on a null genome." << EidosTerminate();
+	
+	return EidosValue_SP(integer_result);
 }
 
 //	*********************	- (object<Mutation>)mutationsOfType(io<MutationType>$ mutType)
@@ -890,11 +861,13 @@ EidosValue_SP Genome::ExecuteMethod_mutationsOfType(EidosGlobalStringID p_method
 #pragma unused (p_method_id, p_arguments, p_interpreter)
 	EidosValue *mutType_value = p_arguments[0].get();
 	
+	if (IsDeferred())
+		EIDOS_TERMINATION << "ERROR (Genome::ExecuteMethod_mutationsOfType): the mutations of deferred genomes cannot be accessed." << EidosTerminate();
 	if (IsNull())
 		EIDOS_TERMINATION << "ERROR (Genome::ExecuteMethod_mutationsOfType): mutationsOfType() cannot be called on a null genome." << EidosTerminate();
 	
-	SLiMSim &sim = individual_->subpopulation_->population_.sim_;
-	MutationType *mutation_type_ptr = SLiM_ExtractMutationTypeFromEidosValue_io(mutType_value, 0, sim, "mutationsOfType()");
+	Species &species = individual_->subpopulation_->species_;
+	MutationType *mutation_type_ptr = SLiM_ExtractMutationTypeFromEidosValue_io(mutType_value, 0, &species.community_, &species, "mutationsOfType()");		// SPECIES CONSISTENCY CHECK
 	
 	// We want to return a singleton if we can, but we also want to avoid scanning through all our mutations twice.
 	// We do this by not creating a vector until we see the second match; with one match, we make a singleton.
@@ -906,7 +879,7 @@ EidosValue_SP Genome::ExecuteMethod_mutationsOfType(EidosGlobalStringID p_method
 	
 	for (run_index = 0; run_index < mutrun_count_; ++run_index)
 	{
-		MutationRun *mutrun = mutruns_[run_index].get();
+		const MutationRun *mutrun = mutruns_[run_index];
 		int mut_count = mutrun->size();
 		const MutationIndex *mut_ptr = mutrun->begin_pointer_const();
 		
@@ -961,14 +934,17 @@ EidosValue_SP Genome::ExecuteMethod_mutationsOfType(EidosGlobalStringID p_method
 EidosValue_SP Genome::ExecuteMethod_nucleotides(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter)
 {
 #pragma unused (p_method_id, p_arguments, p_interpreter)
-	SLiMSim *sim = (SLiMSim *)p_interpreter.Context();
-	Chromosome &chromosome = sim->TheChromosome();
+	if (IsDeferred())
+		EIDOS_TERMINATION << "ERROR (Genome::ExecuteMethod_nucleotides): the mutations of deferred genomes cannot be accessed." << EidosTerminate();
+	
+	Species *species = &individual_->subpopulation_->species_;
+	Chromosome &chromosome = species->TheChromosome();
 	slim_position_t last_position = chromosome.last_position_;
 	
-	if (!sim->IsNucleotideBased())
+	if (!species->IsNucleotideBased())
 		EIDOS_TERMINATION << "ERROR (Genome::ExecuteMethod_nucleotides): nucleotides() may only be called in nucleotide-based models." << EidosTerminate();
 	
-	NucleotideArray *sequence = sim->TheChromosome().AncestralSequence();
+	NucleotideArray *sequence = species->TheChromosome().AncestralSequence();
 	EidosValue *start_value = p_arguments[0].get();
 	EidosValue *end_value = p_arguments[1].get();
 	
@@ -985,7 +961,6 @@ EidosValue_SP Genome::ExecuteMethod_nucleotides(EidosGlobalStringID p_method_id,
 	if (length > INT_MAX)
 		EIDOS_TERMINATION << "ERROR (Genome::ExecuteMethod_nucleotides): the returned vector would exceed the maximum vector length in Eidos." << EidosTerminate();
 	
-	static const char nuc_chars[4] = {'A', 'C', 'G', 'T'};
 	EidosValue_String *format_value = (EidosValue_String *)p_arguments[2].get();
 	const std::string &format = format_value->StringRefAtIndex(0, nullptr);
 	
@@ -1099,7 +1074,7 @@ EidosValue_SP Genome::ExecuteMethod_nucleotides(EidosGlobalStringID p_method_id,
 				int8_t nuc = mut->nucleotide_;
 				
 				if (nuc != -1)
-					string_ptr[pos - start] = nuc_chars[nuc];
+					string_ptr[pos - start] = gSLiM_Nucleotides[nuc];
 				
 				walker.NextMutation();
 			}
@@ -1223,7 +1198,7 @@ EidosValue_SP Genome::ExecuteMethod_nucleotides(EidosGlobalStringID p_method_id,
 				int8_t nuc = mut->nucleotide_;
 				
 				if (nuc != -1)
-					(*char_vec)[pos - start] = nuc_chars[nuc];
+					(*char_vec)[pos - start] = gSLiM_Nucleotides[nuc];
 				
 				walker.NextMutation();
 			}
@@ -1242,11 +1217,13 @@ EidosValue_SP Genome::ExecuteMethod_positionsOfMutationsOfType(EidosGlobalString
 #pragma unused (p_method_id, p_arguments, p_interpreter)
 	EidosValue *mutType_value = p_arguments[0].get();
 	
+	if (IsDeferred())
+		EIDOS_TERMINATION << "ERROR (Genome::ExecuteMethod_positionsOfMutationsOfType): the mutations of deferred genomes cannot be accessed." << EidosTerminate();
 	if (IsNull())
 		EIDOS_TERMINATION << "ERROR (Genome::ExecuteMethod_positionsOfMutationsOfType): positionsOfMutationsOfType() cannot be called on a null genome." << EidosTerminate();
 	
-	SLiMSim &sim = individual_->subpopulation_->population_.sim_;
-	MutationType *mutation_type_ptr = SLiM_ExtractMutationTypeFromEidosValue_io(mutType_value, 0, sim, "positionsOfMutationsOfType()");
+	Species &species = individual_->subpopulation_->species_;
+	MutationType *mutation_type_ptr = SLiM_ExtractMutationTypeFromEidosValue_io(mutType_value, 0, &species.community_, &species, "positionsOfMutationsOfType()");		// SPECIES CONSISTENCY CHECK
 	
 	// Return the positions of mutations of the given type
 	EidosValue_Int_vector *int_result = new (gEidosValuePool->AllocateChunk()) EidosValue_Int_vector();
@@ -1254,7 +1231,7 @@ EidosValue_SP Genome::ExecuteMethod_positionsOfMutationsOfType(EidosGlobalString
 	
 	for (int run_index = 0; run_index < mutrun_count_; ++run_index)
 	{
-		MutationRun *mutrun = mutruns_[run_index].get();
+		const MutationRun *mutrun = mutruns_[run_index];
 		int mut_count = mutrun->size();
 		const MutationIndex *mut_ptr = mutrun->begin_pointer_const();
 		
@@ -1277,11 +1254,13 @@ EidosValue_SP Genome::ExecuteMethod_sumOfMutationsOfType(EidosGlobalStringID p_m
 #pragma unused (p_method_id, p_arguments, p_interpreter)
 	EidosValue *mutType_value = p_arguments[0].get();
 	
+	if (IsDeferred())
+		EIDOS_TERMINATION << "ERROR (Genome::ExecuteMethod_sumOfMutationsOfType): the mutations of deferred genomes cannot be accessed." << EidosTerminate();
 	if (IsNull())
 		EIDOS_TERMINATION << "ERROR (Genome::ExecuteMethod_sumOfMutationsOfType): sumOfMutationsOfType() cannot be called on a null genome." << EidosTerminate();
 	
-	SLiMSim &sim = individual_->subpopulation_->population_.sim_;
-	MutationType *mutation_type_ptr = SLiM_ExtractMutationTypeFromEidosValue_io(mutType_value, 0, sim, "sumOfMutationsOfType()");
+	Species &species = individual_->subpopulation_->species_;
+	MutationType *mutation_type_ptr = SLiM_ExtractMutationTypeFromEidosValue_io(mutType_value, 0, &species.community_, &species, "sumOfMutationsOfType()");		// SPECIES CONSISTENCY CHECK
 	
 	// Count the number of mutations of the given type
 	Mutation *mut_block_ptr = gSLiM_Mutation_Block;
@@ -1290,7 +1269,7 @@ EidosValue_SP Genome::ExecuteMethod_sumOfMutationsOfType(EidosGlobalStringID p_m
 	
 	for (int run_index = 0; run_index < mutrun_count; ++run_index)
 	{
-		MutationRun *mutrun = mutruns_[run_index].get();
+		const MutationRun *mutrun = mutruns_[run_index];
 		int genome1_count = mutrun->size();
 		const MutationIndex *genome_ptr = mutrun->begin_pointer_const();
 		
@@ -1324,7 +1303,7 @@ void Genome::PrintGenomes_SLiM(std::ostream &p_out, std::vector<Genome *> &p_gen
 		
 		for (int run_index = 0; run_index < genome.mutrun_count_; ++run_index)
 		{
-			MutationRun *mutrun = genome.mutruns_[run_index].get();
+			const MutationRun *mutrun = genome.mutruns_[run_index];
 			int mut_count = mutrun->size();
 			const MutationIndex *mut_ptr = mutrun->begin_pointer_const();
 			
@@ -1356,7 +1335,7 @@ void Genome::PrintGenomes_SLiM(std::ostream &p_out, std::vector<Genome *> &p_gen
 		
 		for (int run_index = 0; run_index < genome.mutrun_count_; ++run_index)
 		{
-			MutationRun *mutrun = genome.mutruns_[run_index].get();
+			const MutationRun *mutrun = genome.mutruns_[run_index];
 			int mut_count = mutrun->size();
 			const MutationIndex *mut_ptr = mutrun->begin_pointer_const();
 			
@@ -1399,7 +1378,7 @@ void Genome::PrintGenomes_MS(std::ostream &p_out, std::vector<Genome *> &p_genom
 			
 			for (int run_index = 0; run_index < genome.mutrun_count_; ++run_index)
 			{
-				MutationRun *mutrun = genome.mutruns_[run_index].get();
+				const MutationRun *mutrun = genome.mutruns_[run_index];
 				int mut_count = mutrun->size();
 				const MutationIndex *mut_ptr = mutrun->begin_pointer_const();
 				
@@ -1477,7 +1456,7 @@ void Genome::PrintGenomes_MS(std::ostream &p_out, std::vector<Genome *> &p_genom
 		
 		for (int run_index = 0; run_index < genome.mutrun_count_; ++run_index)
 		{
-			MutationRun *mutrun = genome.mutruns_[run_index].get();
+			const MutationRun *mutrun = genome.mutruns_[run_index];
 			int mut_count = mutrun->size();
 			const MutationIndex *mut_ptr = mutrun->begin_pointer_const();
 			
@@ -1519,7 +1498,7 @@ void Genome::PrintGenomes_VCF(std::ostream &p_out, std::vector<Genome *> &p_geno
 		{
 			for (int run_index = 0; run_index < genome1.mutrun_count_; ++run_index)
 			{
-				MutationRun *mutrun = genome1.mutruns_[run_index].get();
+				const MutationRun *mutrun = genome1.mutruns_[run_index];
 				int mut_count = mutrun->size();
 				const MutationIndex *mut_ptr = mutrun->begin_pointer_const();
 				
@@ -1532,7 +1511,7 @@ void Genome::PrintGenomes_VCF(std::ostream &p_out, std::vector<Genome *> &p_geno
 		{
 			for (int run_index = 0; run_index < genome2.mutrun_count_; ++run_index)
 			{
-				MutationRun *mutrun = genome2.mutruns_[run_index].get();
+				const MutationRun *mutrun = genome2.mutruns_[run_index];
 				int mut_count = mutrun->size();
 				const MutationIndex *mut_ptr = mutrun->begin_pointer_const();
 				
@@ -1566,7 +1545,7 @@ void Genome::PrintGenomes_VCF(std::ostream &p_out, std::vector<Genome *> &p_geno
 	{
 		Genome *genome0 = p_genomes[0];
 		
-		if (genome0->individual_->subpopulation_->population_.sim_.PedigreesEnabledByUser())
+		if (genome0->individual_->subpopulation_->species_.PedigreesEnabledByUser())
 		{
 			p_out << "##slimGenomePedigreeIDs=";
 			for (slim_popsize_t index = 0; index < (slim_popsize_t)p_genomes.size(); index++)
@@ -1587,7 +1566,7 @@ void Genome::PrintGenomes_VCF(std::ostream &p_out, std::vector<Genome *> &p_geno
 	p_out << "##INFO=<ID=DOM,Number=.,Type=Float,Description=\"Dominance\">" << std::endl;
 	// Note that at present we do not output the haploid dominance coefficient; too edge
 	p_out << "##INFO=<ID=PO,Number=.,Type=Integer,Description=\"Population of Origin\">" << std::endl;
-	p_out << "##INFO=<ID=GO,Number=.,Type=Integer,Description=\"Generation of Origin\">" << std::endl;
+	p_out << "##INFO=<ID=TO,Number=.,Type=Integer,Description=\"Tick of Origin\">" << std::endl;			// changed to ticks for 4.0, and changed "GO" to "TO"
 	p_out << "##INFO=<ID=MT,Number=.,Type=Integer,Description=\"Mutation Type\">" << std::endl;
 	p_out << "##INFO=<ID=AC,Number=.,Type=Integer,Description=\"Allele Count\">" << std::endl;
 	p_out << "##INFO=<ID=DP,Number=1,Type=Integer,Description=\"Total Depth\">" << std::endl;
@@ -1658,7 +1637,6 @@ void Genome::PrintGenomes_VCF(std::ostream &p_out, std::vector<Genome *> &p_geno
 			// Get the ancestral nucleotide at this position; this will be index 0
 			// Indices 1..n will be used for the corresponding mutations in nonnuc_based
 			// Note that this means it is 
-			static const char nuc_chars[4] = {'A', 'C', 'G', 'T'};
 			int ancestral_nuc_index = p_ancestral_seq->NucleotideAtIndex(mut_position);		// 0..3 for ACGT
 			
 			// Emit a single call line for all of the nucleotide-based mutations
@@ -1696,7 +1674,7 @@ void Genome::PrintGenomes_VCF(std::ostream &p_out, std::vector<Genome *> &p_geno
 					p_out << "1\t" << (mut_position + 1) << "\t.\t";			// +1 because VCF uses 1-based positions
 					
 					// emit REF ("A" etc.)
-					p_out << nuc_chars[ancestral_nuc_index];
+					p_out << gSLiM_Nucleotides[ancestral_nuc_index];
 					p_out << "\t";
 					
 					// emit ALT ("T" etc.)
@@ -1709,7 +1687,7 @@ void Genome::PrintGenomes_VCF(std::ostream &p_out, std::vector<Genome *> &p_geno
 								p_out << ',';
 							firstEmitted = false;
 							
-							p_out << nuc_chars[nuc_index];
+							p_out << gSLiM_Nucleotides[nuc_index];
 						}
 					}
 					
@@ -1731,7 +1709,7 @@ void Genome::PrintGenomes_VCF(std::ostream &p_out, std::vector<Genome *> &p_geno
 						}
 					}
 					p_out << ";DP=1000;";
-					p_out << "AA=" << nuc_chars[ancestral_nuc_index];
+					p_out << "AA=" << gSLiM_Nucleotides[ancestral_nuc_index];
 					
 					p_out << "\tGT";
 					
@@ -1793,7 +1771,7 @@ void Genome::PrintGenomes_VCF(std::ostream &p_out, std::vector<Genome *> &p_geno
 				p_out << "1\t" << (mut_position + 1) << "\t.\t";			// +1 because VCF uses 1-based positions
 				
 				// emit REF ("A" etc.)
-				p_out << nuc_chars[ancestral_nuc_index];
+				p_out << gSLiM_Nucleotides[ancestral_nuc_index];
 				p_out << "\t";
 				
 				// emit ALT ("T" etc.)
@@ -1801,7 +1779,7 @@ void Genome::PrintGenomes_VCF(std::ostream &p_out, std::vector<Genome *> &p_geno
 				{
 					if (polymorphism != nuc_based.front())
 						p_out << ',';
-					p_out << nuc_chars[polymorphism->mutation_ptr_->nucleotide_];
+					p_out << gSLiM_Nucleotides[polymorphism->mutation_ptr_->nucleotide_];
 				}
 				
 				// emit QUAL (1000), FILTER (PASS)
@@ -1844,12 +1822,12 @@ void Genome::PrintGenomes_VCF(std::ostream &p_out, std::vector<Genome *> &p_geno
 				}
 				p_out << ";";
 				
-				p_out << "GO=";
+				p_out << "TO=";
 				for (Polymorphism *polymorphism : nuc_based)
 				{
 					if (polymorphism != nuc_based.front())
 						p_out << ',';
-					p_out << polymorphism->mutation_ptr_->origin_generation_;
+					p_out << polymorphism->mutation_ptr_->origin_tick_;
 				}
 				p_out << ";";
 				
@@ -1873,7 +1851,7 @@ void Genome::PrintGenomes_VCF(std::ostream &p_out, std::vector<Genome *> &p_geno
 				
 				p_out << "DP=1000;";
 				
-				p_out << "AA=" << nuc_chars[ancestral_nuc_index];
+				p_out << "AA=" << gSLiM_Nucleotides[ancestral_nuc_index];
 				
 				p_out << "\tGT";
 				
@@ -1955,7 +1933,7 @@ void Genome::PrintGenomes_VCF(std::ostream &p_out, std::vector<Genome *> &p_geno
 					p_out << "S=" << mutation->selection_coeff_ << ";";
 					p_out << "DOM=" << mutation->mutation_type_ptr_->dominance_coeff_ << ";";
 					p_out << "PO=" << mutation->subpop_index_ << ";";
-					p_out << "GO=" << mutation->origin_generation_ << ";";
+					p_out << "TO=" << mutation->origin_tick_ << ";";
 					p_out << "MT=" << mutation->mutation_type_ptr_->mutation_type_id_ << ";";
 					p_out << "AC=" << polymorphism->prevalence_ << ";";
 					p_out << "DP=1000";
@@ -2016,7 +1994,7 @@ size_t Genome::MemoryUsageForMutrunBuffers(void)
 	if (mutruns_ == run_buffer_)
 		return 0;
 	else
-		return mutrun_count_ * sizeof(MutationRun_SP);
+		return mutrun_count_ * sizeof(MutationRun *);
 }
 
 
@@ -2036,6 +2014,8 @@ const std::vector<EidosPropertySignature_CSP> *Genome_Class::Properties(void) co
 	
 	if (!properties)
 	{
+		THREAD_SAFETY_IN_ANY_PARALLEL("Genome_Class::Properties(): not warmed up");
+		
 		properties = new std::vector<EidosPropertySignature_CSP>(*super::Properties());
 		
 		properties->emplace_back((EidosPropertySignature *)(new EidosPropertySignature(gStr_genomePedigreeID,true,	kEidosValueMaskInt | kEidosValueMaskSingleton))->DeclareAcceleratedGet(Genome::GetProperty_Accelerated_genomePedigreeID));
@@ -2057,14 +2037,16 @@ const std::vector<EidosMethodSignature_CSP> *Genome_Class::Methods(void) const
 	
 	if (!methods)
 	{
+		THREAD_SAFETY_IN_ANY_PARALLEL("Genome_Class::Methods(): not warmed up");
+		
 		methods = new std::vector<EidosMethodSignature_CSP>(*super::Methods());
 		
 		methods->emplace_back((EidosClassMethodSignature *)(new EidosClassMethodSignature(gStr_addMutations, kEidosValueMaskVOID))->AddObject("mutations", gSLiM_Mutation_Class));
-		methods->emplace_back((EidosClassMethodSignature *)(new EidosClassMethodSignature(gStr_addNewDrawnMutation, kEidosValueMaskObject, gSLiM_Mutation_Class))->AddIntObject("mutationType", gSLiM_MutationType_Class)->AddInt("position")->AddInt_ON("originGeneration", gStaticEidosValueNULL)->AddIntObject_ON("originSubpop", gSLiM_Subpopulation_Class, gStaticEidosValueNULL)->AddIntString_ON("nucleotide", gStaticEidosValueNULL));
-		methods->emplace_back((EidosClassMethodSignature *)(new EidosClassMethodSignature(gStr_addNewMutation, kEidosValueMaskObject, gSLiM_Mutation_Class))->AddIntObject("mutationType", gSLiM_MutationType_Class)->AddNumeric("selectionCoeff")->AddInt("position")->AddInt_ON("originGeneration", gStaticEidosValueNULL)->AddIntObject_ON("originSubpop", gSLiM_Subpopulation_Class, gStaticEidosValueNULL)->AddIntString_ON("nucleotide", gStaticEidosValueNULL));
-		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_containsMarkerMutation, kEidosValueMaskLogical | kEidosValueMaskSingleton | kEidosValueMaskNULL | kEidosValueMaskObject, gSLiM_Mutation_Class))->AddIntObject_S("mutType", gSLiM_MutationType_Class)->AddInt_S("position")->AddLogical_OS("returnMutation", gStaticEidosValue_LogicalF));
+		methods->emplace_back((EidosClassMethodSignature *)(new EidosClassMethodSignature(gStr_addNewDrawnMutation, kEidosValueMaskObject, gSLiM_Mutation_Class))->AddIntObject("mutationType", gSLiM_MutationType_Class)->AddInt("position")->AddIntObject_ON("originSubpop", gSLiM_Subpopulation_Class, gStaticEidosValueNULL)->AddIntString_ON("nucleotide", gStaticEidosValueNULL));
+		methods->emplace_back((EidosClassMethodSignature *)(new EidosClassMethodSignature(gStr_addNewMutation, kEidosValueMaskObject, gSLiM_Mutation_Class))->AddIntObject("mutationType", gSLiM_MutationType_Class)->AddNumeric("selectionCoeff")->AddInt("position")->AddIntObject_ON("originSubpop", gSLiM_Subpopulation_Class, gStaticEidosValueNULL)->AddIntString_ON("nucleotide", gStaticEidosValueNULL));
+		methods->emplace_back(((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_containsMarkerMutation, kEidosValueMaskLogical | kEidosValueMaskSingleton | kEidosValueMaskNULL | kEidosValueMaskObject, gSLiM_Mutation_Class))->AddIntObject_S("mutType", gSLiM_MutationType_Class)->AddInt_S("position")->AddLogical_OS("returnMutation", gStaticEidosValue_LogicalF))->DeclareAcceleratedImp(Genome::ExecuteMethod_Accelerated_containsMarkerMutation));
 		methods->emplace_back(((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_containsMutations, kEidosValueMaskLogical))->AddObject("mutations", gSLiM_Mutation_Class))->DeclareAcceleratedImp(Genome::ExecuteMethod_Accelerated_containsMutations));
-		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_countOfMutationsOfType, kEidosValueMaskInt | kEidosValueMaskSingleton))->AddIntObject_S("mutType", gSLiM_MutationType_Class));
+		methods->emplace_back(((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_countOfMutationsOfType, kEidosValueMaskInt | kEidosValueMaskSingleton))->AddIntObject_S("mutType", gSLiM_MutationType_Class))->DeclareAcceleratedImp(Genome::ExecuteMethod_Accelerated_countOfMutationsOfType));
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_positionsOfMutationsOfType, kEidosValueMaskInt))->AddIntObject_S("mutType", gSLiM_MutationType_Class));
 		methods->emplace_back((EidosClassMethodSignature *)(new EidosClassMethodSignature(gStr_mutationCountsInGenomes, kEidosValueMaskInt))->AddObject_ON("mutations", gSLiM_Mutation_Class, gStaticEidosValueNULL));
 		methods->emplace_back((EidosClassMethodSignature *)(new EidosClassMethodSignature(gStr_mutationFrequenciesInGenomes, kEidosValueMaskFloat))->AddObject_ON("mutations", gSLiM_Mutation_Class, gStaticEidosValueNULL));
@@ -2118,15 +2100,22 @@ EidosValue_SP Genome_Class::ExecuteMethod_addMutations(EidosGlobalStringID p_met
 	if (target_size == 0)
 		return gStaticEidosValueVOID;
 	
+	// SPECIES CONSISTENCY CHECK
+	Species *species = Community::SpeciesForGenomes(p_target);
+	
+	if (!species)
+		EIDOS_TERMINATION << "ERROR (Genome_Class::ExecuteMethod_addMutations): " << "addMutations() requires that all target genomes belong to the same species." << EidosTerminate();
+	
+	species->population_.CheckForDeferralInGenomes(p_target, "Genome_Class::ExecuteMethod_addMutations");
+	
+	Community &community = species->community_;
+	
 	// use the 0th genome in the target to find out what the mutation run length is, so we can calculate run indices
 	Genome *genome_0 = (Genome *)p_target->ObjectElementAtIndex(0, nullptr);
 	slim_position_t mutrun_length = genome_0->mutrun_length_;
 	
 	// check that the individuals that mutations are being added to have age == 0, in nonWF models, to prevent tree sequence inconsistencies (see issue #102)
-	SLiMSim &sim = genome_0->individual_->subpopulation_->population_.sim_;
-	
-#ifdef SLIM_NONWF_ONLY
-	if ((sim.ModelType() == SLiMModelType::kModelTypeNonWF) && sim.RecordingTreeSequence())
+	if ((community.ModelType() == SLiMModelType::kModelTypeNonWF) && species->RecordingTreeSequence())
 	{
 		for (int genome_index = 0; genome_index < target_size; ++genome_index)
 		{
@@ -2137,57 +2126,56 @@ EidosValue_SP Genome_Class::ExecuteMethod_addMutations(EidosGlobalStringID p_met
 				EIDOS_TERMINATION << "ERROR (Genome_Class::ExecuteMethod_addMutations): " << "addMutations() cannot add mutations to individuals of age > 0 when tree-sequence recording is enabled, to prevent internal inconsistencies." << EidosTerminate();
 		}
 	}
-#endif	// SLIM_NONWF_ONLY
 	
 	// check for other semantic issues
-	Population &pop = sim.ThePopulation();
+	Population &pop = species->population_;
 	
-	sim.CheckMutationStackPolicy();
+	species->CheckMutationStackPolicy();
 	
-	if (!sim.warned_early_mutation_add_)
+	// TIMING RESTRICTION
+	if (!community.warned_early_mutation_add_)
 	{
-		if (sim.GenerationStage() == SLiMGenerationStage::kWFStage1ExecuteEarlyScripts)
+		if ((community.CycleStage() == SLiMCycleStage::kWFStage0ExecuteFirstScripts) ||
+			(community.CycleStage() == SLiMCycleStage::kWFStage1ExecuteEarlyScripts))
 		{
 			if (!gEidosSuppressWarnings)
 			{
-				p_interpreter.ErrorOutputStream() << "#WARNING (Genome_Class::ExecuteMethod_addMutations): addMutations() should probably not be called from an early() event in a WF model; the added mutation(s) will not influence fitness values during offspring generation." << std::endl;
-				sim.warned_early_mutation_add_ = true;
+				p_interpreter.ErrorOutputStream() << "#WARNING (Genome_Class::ExecuteMethod_addMutations): addMutations() should probably not be called from a first() or early() event in a WF model; the added mutation(s) will not influence fitness values during offspring generation." << std::endl;
+				community.warned_early_mutation_add_ = true;
 			}
 		}
-		if (sim.GenerationStage() == SLiMGenerationStage::kNonWFStage6ExecuteLateScripts)
-		{
-			if (!gEidosSuppressWarnings)
-			{
-				p_interpreter.ErrorOutputStream() << "#WARNING (Genome_Class::ExecuteMethod_addMutations): addMutations() should probably not be called from a late() event in a nonWF model; the added mutation(s) will not influence fitness values until partway through the next generation." << std::endl;
-				sim.warned_early_mutation_add_ = true;
-			}
-		}
+		// Note that there is no equivalent problem in nonWF models, because fitness values are used for survival,
+		// not reproduction, and there is no event stage in the tick cycle that splits fitness from survival.
 	}
 	
-	if (pop.sim_.executing_block_type_ == SLiMEidosBlockType::SLiMEidosModifyChildCallback)
+	// TIMING RESTRICTION
+	if (community.executing_species_ == species)
 	{
-		// Check that we're not inside a modifyChild() callback, or if we are, that the only genomes being modified belong to the new child.
-		// This prevents problems with retracting the proposed child when tree-sequence recording is enabled; other extraneous changes must
-		// not be backed out, and it's hard to separate, e.g., what's a child-related new mutation from an extraneously added new mutation.
-		// Note that the other Genome methods that add/remove mutations perform the same check, and should be maintained in parallel.
-		Individual *focal_modification_child = pop.sim_.focal_modification_child_;
-		
-		if (focal_modification_child)
+		if (community.executing_block_type_ == SLiMEidosBlockType::SLiMEidosModifyChildCallback)
 		{
-			Genome *focal_genome_1 = focal_modification_child->genome1_, *focal_genome_2 = focal_modification_child->genome2_;
+			// Check that we're not inside a modifyChild() callback, or if we are, that the only genomes being modified belong to the new child.
+			// This prevents problems with retracting the proposed child when tree-sequence recording is enabled; other extraneous changes must
+			// not be backed out, and it's hard to separate, e.g., what's a child-related new mutation from an extraneously added new mutation.
+			// Note that the other Genome methods that add/remove mutations perform the same check, and should be maintained in parallel.
+			Individual *focal_modification_child = community.focal_modification_child_;
 			
-			for (int genome_index = 0; genome_index < target_size; ++genome_index)
+			if (focal_modification_child)
 			{
-				Genome *target_genome = (Genome *)p_target->ObjectElementAtIndex(genome_index, nullptr);
+				Genome *focal_genome_1 = focal_modification_child->genome1_, *focal_genome_2 = focal_modification_child->genome2_;
 				
-				if ((target_genome != focal_genome_1) && (target_genome != focal_genome_2))
-					EIDOS_TERMINATION << "ERROR (Genome_Class::ExecuteMethod_addMutations): addMutations() cannot be called from within a modifyChild() callback to modify any genomes except those of the focal child being generated." << EidosTerminate();
+				for (int genome_index = 0; genome_index < target_size; ++genome_index)
+				{
+					Genome *target_genome = (Genome *)p_target->ObjectElementAtIndex(genome_index, nullptr);
+					
+					if ((target_genome != focal_genome_1) && (target_genome != focal_genome_2))
+						EIDOS_TERMINATION << "ERROR (Genome_Class::ExecuteMethod_addMutations): addMutations() cannot be called on the currently executing species from within a modifyChild() callback to modify any genomes except those of the focal child being generated." << EidosTerminate();
+				}
 			}
 		}
+		else if ((community.executing_block_type_ == SLiMEidosBlockType::SLiMEidosRecombinationCallback) ||
+				 (community.executing_block_type_ == SLiMEidosBlockType::SLiMEidosMutationCallback))
+			EIDOS_TERMINATION << "ERROR (Genome_Class::ExecuteMethod_addMutations): addMutations() cannot be called on the currently executing species from within a recombination() or mutation() callback." << EidosTerminate();
 	}
-	else if ((pop.sim_.executing_block_type_ == SLiMEidosBlockType::SLiMEidosRecombinationCallback) ||
-			 (pop.sim_.executing_block_type_ == SLiMEidosBlockType::SLiMEidosMutationCallback))
-		EIDOS_TERMINATION << "ERROR (Genome_Class::ExecuteMethod_addMutations): addMutations() cannot be called from within a recombination() or mutation() callback." << EidosTerminate();
 	
 	// check that the same genome is not included more than once as a target, which we don't allow; we use patch_pointer as scratch
 	for (int target_index = 0; target_index < target_size; ++target_index)
@@ -2227,12 +2215,21 @@ EidosValue_SP Genome_Class::ExecuteMethod_addMutations(EidosGlobalStringID p_met
 	
 	std::sort(mutations_to_add.begin(), mutations_to_add.end(), [ ](Mutation *i1, Mutation *i2) {return i1->position_ < i2->position_;});
 	
+	// SPECIES CONSISTENCY CHECK
+	if (mutations_count > 0)
+	{
+		Species *mutations_species = Community::SpeciesForMutations(mutations_value);
+		
+		if (mutations_species != species)
+			EIDOS_TERMINATION << "ERROR (Genome_Class::ExecuteMethod_addMutations): addMutations() requires that all mutations belong to the same species as the target genomes." << EidosTerminate();
+	}
+	
 	// TREE SEQUENCE RECORDING
 	// First, pre-plan the positions of new tree-seq derived states in anticipation of doing the addition.  We have to check
 	// whether the mutation being added is already present, to avoid recording a new derived state identical to the old one state.
 	// The algorithm used here, with GenomeWalker, depends upon the fact that we just sorted the mutations to add by position.
 	// However, we do still have to think about multiple muts being added at the same position, and existing stacked mutations.
-	bool recording_tree_sequence_mutations = sim.RecordingTreeSequenceMutations();
+	bool recording_tree_sequence_mutations = species->RecordingTreeSequenceMutations();
 	std::vector<std::pair<Genome *, std::vector<slim_position_t>>> new_derived_state_positions;
 	
 	if (recording_tree_sequence_mutations)
@@ -2303,16 +2300,20 @@ EidosValue_SP Genome_Class::ExecuteMethod_addMutations(EidosGlobalStringID p_met
 			continue;
 		
 		// We have not yet processed this mutation run; do this mutation run index as a bulk operation
-		int64_t operation_id = ++gSLiM_MutationRun_OperationID;
+		int64_t operation_id = MutationRun::GetNextOperationID();
 		
 		Genome::BulkOperationStart(operation_id, mutrun_index);
+		
+		MutationRunContext &mutrun_context = species->SpeciesMutationRunContextForMutationRunIndex(mutrun_index);
 		
 		for (int genome_index = 0; genome_index < target_size; ++genome_index)
 		{
 			Genome *target_genome = (Genome *)p_target->ObjectElementAtIndex(genome_index, nullptr);
 			
 			// See if WillModifyRunForBulkOperation() can short-circuit the operation for us
-			if (target_genome->WillModifyRunForBulkOperation(operation_id, mutrun_index))
+			MutationRun *target_run = target_genome->WillModifyRunForBulkOperation(operation_id, mutrun_index, mutrun_context);
+			
+			if (target_run)
 			{
 				for (int mut_index = value_index; mut_index < mutations_count; ++mut_index)
 				{
@@ -2323,9 +2324,9 @@ EidosValue_SP Genome_Class::ExecuteMethod_addMutations(EidosGlobalStringID p_met
 					if (add_pos / mutrun_length != mutrun_index)
 						break;
 					
-					if (target_genome->enforce_stack_policy_for_addition(mut_to_add->position_, mut_to_add->mutation_type_ptr_))
+					if (target_run->enforce_stack_policy_for_addition(mut_to_add->position_, mut_to_add->mutation_type_ptr_))
 					{
-						target_genome->insert_sorted_mutation_if_unique(mut_to_add->BlockIndex());
+						target_run->insert_sorted_mutation_if_unique(mut_to_add->BlockIndex());
 						
 						// No need to add the mutation to the registry; how would the user ever get a Mutation that was not already in it?
 						// Similarly, no need to check and set pure_neutral_ and all_pure_neutral_DFE_; the mutation is already in the system
@@ -2340,7 +2341,7 @@ EidosValue_SP Genome_Class::ExecuteMethod_addMutations(EidosGlobalStringID p_met
 		last_handled_mutrun_index = mutrun_index;
 		
 		// invalidate cached mutation refcounts; refcounts have changed
-		pop.cached_tally_genome_count_ = 0;
+		pop.InvalidateMutationReferencesCache();
 	}
 	
 	// TREE SEQUENCE RECORDING
@@ -2355,15 +2356,15 @@ EidosValue_SP Genome_Class::ExecuteMethod_addMutations(EidosGlobalStringID p_met
 			std::vector<slim_position_t> &genome_positions = genome_pair.second;
 			
 			for (slim_position_t position : genome_positions)
-				sim.RecordNewDerivedState(target_genome, position, *target_genome->derived_mutation_ids_at_position(position));
+				species->RecordNewDerivedState(target_genome, position, *target_genome->derived_mutation_ids_at_position(position));
 		}
 	}
 	
 	return gStaticEidosValueVOID;
 }
 
-//	*********************	+ (object<Mutation>)addNewDrawnMutation(io<MutationType> mutationType, integer position, [Ni originGeneration = NULL], [Nio<Subpopulation> originSubpop = NULL], [Nis nucleotide = NULL])
-//	*********************	+ (object<Mutation>)addNewMutation(io<MutationType> mutationType, numeric selectionCoeff, integer position, [Ni originGeneration = NULL], [Nio<Subpopulation> originSubpop = NULL], [Nis nucleotide = NULL])
+//	*********************	+ (object<Mutation>)addNewDrawnMutation(io<MutationType> mutationType, integer position, [Nio<Subpopulation> originSubpop = NULL], [Nis nucleotide = NULL])
+//	*********************	+ (object<Mutation>)addNewMutation(io<MutationType> mutationType, numeric selectionCoeff, integer position, [Nio<Subpopulation> originSubpop = NULL], [Nis nucleotide = NULL])
 //
 EidosValue_SP Genome_Class::ExecuteMethod_addNewMutation(EidosGlobalStringID p_method_id, EidosValue_Object *p_target, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter) const
 {
@@ -2376,14 +2377,26 @@ EidosValue_SP Genome_Class::ExecuteMethod_addNewMutation(EidosGlobalStringID p_m
 	EidosValue *arg_muttype = p_arguments[0].get();
 	EidosValue *arg_selcoeff = (p_method_id == gID_addNewDrawnMutation ? nullptr : p_arguments[1].get());
 	EidosValue *arg_position = (p_method_id == gID_addNewDrawnMutation ? p_arguments[1].get() : p_arguments[2].get());
-	EidosValue *arg_origin_gen = (p_method_id == gID_addNewDrawnMutation ? p_arguments[2].get() : p_arguments[3].get());
-	EidosValue *arg_origin_subpop = (p_method_id == gID_addNewDrawnMutation ? p_arguments[3].get() : p_arguments[4].get());
-	EidosValue *arg_nucleotide = (p_method_id == gID_addNewDrawnMutation ? p_arguments[4].get() : p_arguments[5].get());
+	EidosValue *arg_origin_subpop = (p_method_id == gID_addNewDrawnMutation ? p_arguments[2].get() : p_arguments[3].get());
+	EidosValue *arg_nucleotide = (p_method_id == gID_addNewDrawnMutation ? p_arguments[3].get() : p_arguments[4].get());
 	
 	int target_size = p_target->Count();
 	
 	if (target_size == 0)
 		return gStaticEidosValueNULLInvisible;	// this is almost an error condition, since a mutation was expected to be added and none was
+	
+	std::string method_name = EidosStringRegistry::StringForGlobalStringID(p_method_id);
+	method_name.append("()");
+	
+	// SPECIES CONSISTENCY CHECK
+	Species *species = Community::SpeciesForGenomes(p_target);
+	
+	if (!species)
+		EIDOS_TERMINATION << "ERROR (Genome_Class::ExecuteMethod_addNewMutation): " << method_name << " requires that all target genomes belong to the same species." << EidosTerminate();
+	
+	species->population_.CheckForDeferralInGenomes(p_target, "Genome_Class::ExecuteMethod_addNewMutation");
+	
+	Community &community = species->community_;
 	
 	// get the 0th genome in the target to find out what the mutation run length is, so we can calculate run indices
 	Genome *genome_0 = (Genome *)p_target->ObjectElementAtIndex(0, nullptr);
@@ -2391,10 +2404,7 @@ EidosValue_SP Genome_Class::ExecuteMethod_addNewMutation(EidosGlobalStringID p_m
 	slim_position_t mutrun_length = genome_0->mutrun_length_;
 	
 	// check that the individuals that mutations are being added to have age == 0, in nonWF models, to prevent tree sequence inconsistencies (see issue #102)
-	SLiMSim &sim = genome_0->individual_->subpopulation_->population_.sim_;
-	
-#ifdef SLIM_NONWF_ONLY
-	if ((sim.ModelType() == SLiMModelType::kModelTypeNonWF) && sim.RecordingTreeSequence())
+	if ((community.ModelType() == SLiMModelType::kModelTypeNonWF) && species->RecordingTreeSequence())
 	{
 		for (int genome_index = 0; genome_index < target_size; ++genome_index)
 		{
@@ -2402,89 +2412,84 @@ EidosValue_SP Genome_Class::ExecuteMethod_addNewMutation(EidosGlobalStringID p_m
 			Individual *target_individual = target_genome->OwningIndividual();
 			
 			if (target_individual->age_ > 0)
-				EIDOS_TERMINATION << "ERROR (Genome_Class::ExecuteMethod_addNewMutation): " << EidosStringRegistry::StringForGlobalStringID(p_method_id) << " cannot add mutations to individuals of age > 0 when tree-sequence recording is enabled, to prevent internal inconsistencies." << EidosTerminate();
+				EIDOS_TERMINATION << "ERROR (Genome_Class::ExecuteMethod_addNewMutation): " << method_name << " cannot add mutations to individuals of age > 0 when tree-sequence recording is enabled, to prevent internal inconsistencies." << EidosTerminate();
 		}
 	}
-#endif	// SLIM_NONWF_ONLY
 	
 	// check for other semantic issues
-	Population &pop = sim.ThePopulation();
-	bool nucleotide_based = sim.IsNucleotideBased();
+	Population &pop = species->population_;
+	bool nucleotide_based = species->IsNucleotideBased();
 	
 	if (!nucleotide_based && (arg_nucleotide->Type() != EidosValueType::kValueNULL))
-		EIDOS_TERMINATION << "ERROR (Genome_Class::ExecuteMethod_addNewMutation): " << EidosStringRegistry::StringForGlobalStringID(p_method_id) << " requires nucleotide to be NULL in non-nucleotide-based models." << EidosTerminate();
+		EIDOS_TERMINATION << "ERROR (Genome_Class::ExecuteMethod_addNewMutation): " << method_name << " requires nucleotide to be NULL in non-nucleotide-based models." << EidosTerminate();
 	
-	sim.CheckMutationStackPolicy();
+	species->CheckMutationStackPolicy();
 	
-	if (!sim.warned_early_mutation_add_)
+	// TIMING RESTRICTION
+	if (!community.warned_early_mutation_add_)
 	{
-		if (sim.GenerationStage() == SLiMGenerationStage::kWFStage1ExecuteEarlyScripts)
+		if ((community.CycleStage() == SLiMCycleStage::kWFStage0ExecuteFirstScripts) ||
+			(community.CycleStage() == SLiMCycleStage::kWFStage1ExecuteEarlyScripts))
 		{
 			if (!gEidosSuppressWarnings)
 			{
-				p_interpreter.ErrorOutputStream() << "#WARNING (Genome_Class::ExecuteMethod_addNewMutation): " << EidosStringRegistry::StringForGlobalStringID(p_method_id) << " should probably not be called from an early() event in a WF model; the added mutation will not influence fitness values during offspring generation." << std::endl;
-				sim.warned_early_mutation_add_ = true;
+				p_interpreter.ErrorOutputStream() << "#WARNING (Genome_Class::ExecuteMethod_addNewMutation): " << method_name << " should probably not be called from a first() or early() event in a WF model; the added mutation will not influence fitness values during offspring generation." << std::endl;
+				community.warned_early_mutation_add_ = true;
 			}
 		}
-		if (sim.GenerationStage() == SLiMGenerationStage::kNonWFStage6ExecuteLateScripts)
-		{
-			if (!gEidosSuppressWarnings)
-			{
-				p_interpreter.ErrorOutputStream() << "#WARNING (Genome_Class::ExecuteMethod_addNewMutation): " << EidosStringRegistry::StringForGlobalStringID(p_method_id) << " should probably not be called from a late() event in a nonWF model; the added mutation will not influence fitness values until partway through the next generation." << std::endl;
-				sim.warned_early_mutation_add_ = true;
-			}
-		}
+		// Note that there is no equivalent problem in nonWF models, because fitness values are used for survival,
+		// not reproduction, and there is no event stage in the tick cycle that splits fitness from survival.
 	}
 	
-	if (pop.sim_.executing_block_type_ == SLiMEidosBlockType::SLiMEidosModifyChildCallback)
+	// TIMING RESTRICTION
+	if (community.executing_species_ == species)
 	{
-		// Check that we're not inside a modifyChild() callback, or if we are, that the only genomes being modified belong to the new child.
-		// This prevents problems with retracting the proposed child when tree-sequence recording is enabled; other extraneous changes must
-		// not be backed out, and it's hard to separate, e.g., what's a child-related new mutation from an extraneously added new mutation.
-		// Note that the other Genome methods that add/remove mutations perform the same check, and should be maintained in parallel.
-		Individual *focal_modification_child = pop.sim_.focal_modification_child_;
-		
-		if (focal_modification_child)
+		if (community.executing_block_type_ == SLiMEidosBlockType::SLiMEidosModifyChildCallback)
 		{
-			Genome *focal_genome_1 = focal_modification_child->genome1_, *focal_genome_2 = focal_modification_child->genome2_;
+			// Check that we're not inside a modifyChild() callback, or if we are, that the only genomes being modified belong to the new child.
+			// This prevents problems with retracting the proposed child when tree-sequence recording is enabled; other extraneous changes must
+			// not be backed out, and it's hard to separate, e.g., what's a child-related new mutation from an extraneously added new mutation.
+			// Note that the other Genome methods that add/remove mutations perform the same check, and should be maintained in parallel.
+			Individual *focal_modification_child = community.focal_modification_child_;
 			
-			for (int genome_index = 0; genome_index < target_size; ++genome_index)
+			if (focal_modification_child)
 			{
-				Genome *target_genome = (Genome *)p_target->ObjectElementAtIndex(genome_index, nullptr);
+				Genome *focal_genome_1 = focal_modification_child->genome1_, *focal_genome_2 = focal_modification_child->genome2_;
 				
-				if ((target_genome != focal_genome_1) && (target_genome != focal_genome_2))
-					EIDOS_TERMINATION << "ERROR (Genome_Class::ExecuteMethod_addNewMutation): " << EidosStringRegistry::StringForGlobalStringID(p_method_id) << " cannot be called from within a modifyChild() callback to modify any genomes except those of the focal child being generated." << EidosTerminate();
+				for (int genome_index = 0; genome_index < target_size; ++genome_index)
+				{
+					Genome *target_genome = (Genome *)p_target->ObjectElementAtIndex(genome_index, nullptr);
+					
+					if ((target_genome != focal_genome_1) && (target_genome != focal_genome_2))
+						EIDOS_TERMINATION << "ERROR (Genome_Class::ExecuteMethod_addNewMutation): " << method_name << " cannot be called on the currently executing species from within a modifyChild() callback to modify any genomes except those of the focal child being generated." << EidosTerminate();
+				}
 			}
 		}
+		else if ((community.executing_block_type_ == SLiMEidosBlockType::SLiMEidosRecombinationCallback) ||
+				 (community.executing_block_type_ == SLiMEidosBlockType::SLiMEidosMutationCallback))
+			EIDOS_TERMINATION << "ERROR (Genome_Class::ExecuteMethod_addNewMutation): " << method_name << " cannot be called on the currently executing species from within a recombination() or mutation() callback." << EidosTerminate();
 	}
-	else if ((pop.sim_.executing_block_type_ == SLiMEidosBlockType::SLiMEidosRecombinationCallback) ||
-			 (pop.sim_.executing_block_type_ == SLiMEidosBlockType::SLiMEidosMutationCallback))
-		EIDOS_TERMINATION << "ERROR (Genome_Class::ExecuteMethod_addNewMutation): " << EidosStringRegistry::StringForGlobalStringID(p_method_id) << " cannot be called from within a recombination() or mutation() callback." << EidosTerminate();
 	
-	// position, originGeneration, and originSubpop can now be either singletons or vectors of matching length or NULL; check them all
+	// position and originSubpop can now be either singletons or vectors of matching length or NULL; check them all
 	int muttype_count = arg_muttype->Count();
 	int selcoeff_count = (arg_selcoeff ? arg_selcoeff->Count() : 0);
 	int position_count = arg_position->Count();
-	int origin_gen_count = arg_origin_gen->Count();
 	int origin_subpop_count = arg_origin_subpop->Count();
 	int nucleotide_count = arg_nucleotide->Count();
 	
-	if (arg_origin_gen->Type() == EidosValueType::kValueNULL)
-		origin_gen_count = 1;
 	if (arg_origin_subpop->Type() == EidosValueType::kValueNULL)
 		origin_subpop_count = 1;
 	if (arg_nucleotide->Type() == EidosValueType::kValueNULL)
 		nucleotide_count = 1;
 	
-	int count_to_add = std::max({muttype_count, selcoeff_count, position_count, origin_gen_count, origin_subpop_count, nucleotide_count});
+	int count_to_add = std::max({muttype_count, selcoeff_count, position_count, origin_subpop_count, nucleotide_count});
 	
 	if (((muttype_count != 1) && (muttype_count != count_to_add)) ||
 		(arg_selcoeff && (selcoeff_count != 1) && (selcoeff_count != count_to_add)) ||
 		((position_count != 1) && (position_count != count_to_add)) ||
-		((origin_gen_count != 1) && (origin_gen_count != count_to_add)) ||
 		((origin_subpop_count != 1) && (origin_subpop_count != count_to_add)) ||
 		((nucleotide_count != 1) && (nucleotide_count != count_to_add)))
-		EIDOS_TERMINATION << "ERROR (Genome_Class::ExecuteMethod_addNewMutation): " << EidosStringRegistry::StringForGlobalStringID(p_method_id) << " requires that mutationType, " << ((p_method_id == gID_addNewMutation) ? "selectionCoeff, " : "") << "position, originGeneration, originSubpop, and nucleotide be either (1) singleton, or (2) equal in length to the other non-singleton argument(s), or (3) NULL, for originGeneration, originSubpop, and nucleotide." << EidosTerminate();
+		EIDOS_TERMINATION << "ERROR (Genome_Class::ExecuteMethod_addNewMutation): " << method_name << " requires that mutationType, " << ((p_method_id == gID_addNewMutation) ? "selectionCoeff, " : "") << "position, originSubpop, and nucleotide be either (1) singleton, or (2) equal in length to the other non-singleton argument(s), or (3) NULL, for originSubpop and nucleotide." << EidosTerminate();
 	
 	EidosValue_Object_vector_SP retval(new (gEidosValuePool->AllocateChunk()) EidosValue_Object_vector(gSLiM_Mutation_Class));
 	
@@ -2493,14 +2498,14 @@ EidosValue_SP Genome_Class::ExecuteMethod_addNewMutation(EidosGlobalStringID p_m
 	
 	// before proceeding, let's check that all positions supplied are valid, so we don't need to worry about it below
 	// would be better not to call IntAtIndex() multiple times for the same position, but that will not be the majority of our time anyway...
-	slim_position_t last_position = sim.TheChromosome().last_position_;
+	slim_position_t last_position = species->TheChromosome().last_position_;
 	
 	for (int position_index = 0; position_index < position_count; ++position_index)
 	{
 		slim_position_t position = SLiMCastToPositionTypeOrRaise(arg_position->IntAtIndex(position_index, nullptr));
 		
 		if (position > last_position)
-			EIDOS_TERMINATION << "ERROR (Genome_Class::ExecuteMethod_addNewMutation): " << EidosStringRegistry::StringForGlobalStringID(p_method_id) << " position " << position << " is past the end of the chromosome." << EidosTerminate();
+			EIDOS_TERMINATION << "ERROR (Genome_Class::ExecuteMethod_addNewMutation): " << method_name << " position " << position << " is past the end of the chromosome." << EidosTerminate();
 	}
 	
 	// similarly, check nucleotide values for validity
@@ -2511,10 +2516,10 @@ EidosValue_SP Genome_Class::ExecuteMethod_addNewMutation(EidosGlobalStringID p_m
 		// If nucleotide is NULL, all mutation types supplied must be non-nucleotide-based
 		for (int muttype_index = 0; muttype_index < muttype_count; ++muttype_index)
 		{
-			MutationType *mutation_type_ptr = SLiM_ExtractMutationTypeFromEidosValue_io(arg_muttype, muttype_index, sim, EidosStringRegistry::StringForGlobalStringID(p_method_id).c_str());
+			MutationType *mutation_type_ptr = SLiM_ExtractMutationTypeFromEidosValue_io(arg_muttype, muttype_index, &community, species, method_name.c_str());		// SPECIES CONSISTENCY CHECK
 			
 			if (mutation_type_ptr->nucleotide_based_)
-				EIDOS_TERMINATION << "ERROR (Genome_Class::ExecuteMethod_addNewMutation): " << EidosStringRegistry::StringForGlobalStringID(p_method_id) << " requires nucleotide to be non-NULL when nucleotide-based mutation types are used." << EidosTerminate();
+				EIDOS_TERMINATION << "ERROR (Genome_Class::ExecuteMethod_addNewMutation): " << method_name << " requires nucleotide to be non-NULL when nucleotide-based mutation types are used." << EidosTerminate();
 		}
 	}
 	else
@@ -2522,10 +2527,10 @@ EidosValue_SP Genome_Class::ExecuteMethod_addNewMutation(EidosGlobalStringID p_m
 		// If nucleotide is non-NULL, all mutation types supplied must be nucleotide-based
 		for (int muttype_index = 0; muttype_index < muttype_count; ++muttype_index)
 		{
-			MutationType *mutation_type_ptr = SLiM_ExtractMutationTypeFromEidosValue_io(arg_muttype, muttype_index, sim, EidosStringRegistry::StringForGlobalStringID(p_method_id).c_str());
+			MutationType *mutation_type_ptr = SLiM_ExtractMutationTypeFromEidosValue_io(arg_muttype, muttype_index, &community, species, method_name.c_str());		// SPECIES CONSISTENCY CHECK
 			
 			if (!mutation_type_ptr->nucleotide_based_)
-				EIDOS_TERMINATION << "ERROR (Genome_Class::ExecuteMethod_addNewMutation): " << EidosStringRegistry::StringForGlobalStringID(p_method_id) << " requires nucleotide to be NULL when non-nucleotide-based mutation types are used." << EidosTerminate();
+				EIDOS_TERMINATION << "ERROR (Genome_Class::ExecuteMethod_addNewMutation): " << method_name << " requires nucleotide to be NULL when non-nucleotide-based mutation types are used." << EidosTerminate();
 		}
 		
 		// And then nucleotide values must also be within bounds
@@ -2536,7 +2541,7 @@ EidosValue_SP Genome_Class::ExecuteMethod_addNewMutation(EidosGlobalStringID p_m
 				int64_t nuc_int = arg_nucleotide->IntAtIndex(nucleotide_index, nullptr);
 				
 				if ((nuc_int < 0) || (nuc_int > 3))
-					EIDOS_TERMINATION << "ERROR (Genome_Class::ExecuteMethod_addNewMutation): " << EidosStringRegistry::StringForGlobalStringID(p_method_id) << " requires integer nucleotide values to be in [0,3]." << EidosTerminate();
+					EIDOS_TERMINATION << "ERROR (Genome_Class::ExecuteMethod_addNewMutation): " << method_name << " requires integer nucleotide values to be in [0,3]." << EidosTerminate();
 			}
 		}
 		else if (arg_nucleotide->Type() == EidosValueType::kValueString)
@@ -2546,7 +2551,7 @@ EidosValue_SP Genome_Class::ExecuteMethod_addNewMutation(EidosGlobalStringID p_m
 				uint8_t nuc = nucleotide_lookup[(int)(arg_nucleotide->StringAtIndex(nucleotide_index, nullptr)[0])];
 				
 				if (nuc > 3)
-					EIDOS_TERMINATION << "ERROR (Genome_Class::ExecuteMethod_addNewMutation): " << EidosStringRegistry::StringForGlobalStringID(p_method_id) << " requires string nucleotide values to be 'A', 'C', 'G', or 'T'." << EidosTerminate();
+					EIDOS_TERMINATION << "ERROR (Genome_Class::ExecuteMethod_addNewMutation): " << method_name << " requires string nucleotide values to be 'A', 'C', 'G', or 'T'." << EidosTerminate();
 			}
 		}
 	}
@@ -2557,7 +2562,7 @@ EidosValue_SP Genome_Class::ExecuteMethod_addNewMutation(EidosGlobalStringID p_m
 		Genome *target_genome = (Genome *)p_target->ObjectElementAtIndex(target_index, nullptr);
 		
 		if (target_genome->IsNull())
-			EIDOS_TERMINATION << "ERROR (Genome_Class::ExecuteMethod_addNewMutation): " << EidosStringRegistry::StringForGlobalStringID(p_method_id) << " cannot be called on a null genome." << EidosTerminate();
+			EIDOS_TERMINATION << "ERROR (Genome_Class::ExecuteMethod_addNewMutation): " << method_name << " cannot be called on a null genome." << EidosTerminate();
 		
 		target_genome->scratch_ = 1;
 	}
@@ -2567,7 +2572,7 @@ EidosValue_SP Genome_Class::ExecuteMethod_addNewMutation(EidosGlobalStringID p_m
 		Genome *target_genome = (Genome *)p_target->ObjectElementAtIndex(target_index, nullptr);
 		
 		if (target_genome->scratch_ != 1)
-			EIDOS_TERMINATION << "ERROR (Genome_Class::ExecuteMethod_addNewMutation): " << EidosStringRegistry::StringForGlobalStringID(p_method_id) << " cannot be called on the same genome more than once (you must eliminate duplicates in the target vector)." << EidosTerminate();
+			EIDOS_TERMINATION << "ERROR (Genome_Class::ExecuteMethod_addNewMutation): " << method_name << " cannot be called on the same genome more than once (you must eliminate duplicates in the target vector)." << EidosTerminate();
 		
 		target_genome->scratch_ = 0;
 	}
@@ -2593,24 +2598,13 @@ EidosValue_SP Genome_Class::ExecuteMethod_addNewMutation(EidosGlobalStringID p_m
 	}
 	
 	// for the singleton case for each of the parameters, get all the info
-	MutationType *singleton_mutation_type_ptr = SLiM_ExtractMutationTypeFromEidosValue_io(arg_muttype, 0, sim, EidosStringRegistry::StringForGlobalStringID(p_method_id).c_str());
+	MutationType *singleton_mutation_type_ptr = SLiM_ExtractMutationTypeFromEidosValue_io(arg_muttype, 0, &community, species, method_name.c_str());		// SPECIES CONSISTENCY CHECK
 	
 	double singleton_selection_coeff = (arg_selcoeff ? arg_selcoeff->FloatAtIndex(0, nullptr) : 0.0);
 	
 	slim_position_t singleton_position = SLiMCastToPositionTypeOrRaise(arg_position->IntAtIndex(0, nullptr));
 	
-	slim_generation_t singleton_origin_generation;
-	
-	if (arg_origin_gen->Type() == EidosValueType::kValueNULL)
-		singleton_origin_generation = sim.Generation();
-	else
-	{
-		singleton_origin_generation = SLiMCastToGenerationTypeOrRaise(arg_origin_gen->IntAtIndex(0, nullptr));
-		
-		// BCH 3 Sept. 2020: We now require that originGeneration equal the current generation, for time consistency when tree-seq recording; it cannot be used as scratch space
-		if (singleton_origin_generation != sim.Generation())
-			EIDOS_TERMINATION << "ERROR (Genome_Class::ExecuteMethod_addNewMutation): " << EidosStringRegistry::StringForGlobalStringID(p_method_id) << " now requires that originGeneration be equal to the current generation (or NULL); it may no longer be used as scratch space." << EidosTerminate();
-	}
+	slim_tick_t origin_tick = community.Tick();
 	
 	slim_objectid_t singleton_origin_subpop_id;
 	
@@ -2628,13 +2622,21 @@ EidosValue_SP Genome_Class::ExecuteMethod_addNewMutation(EidosGlobalStringID p_m
 	else if (arg_origin_subpop->Type() == EidosValueType::kValueInt)
 		singleton_origin_subpop_id = SLiMCastToObjectidTypeOrRaise(arg_origin_subpop->IntAtIndex(0, nullptr));
 	else
+	{
 #if DEBUG
 		// Use dynamic_cast<> only in DEBUG since it is hella slow
 		// The class should be guaranteed by the method signature already
-		singleton_origin_subpop_id = dynamic_cast<Subpopulation *>(arg_origin_subpop->ObjectElementAtIndex(0, nullptr))->subpopulation_id_;
+		Subpopulation *origin_subpop = dynamic_cast<Subpopulation *>(arg_origin_subpop->ObjectElementAtIndex(0, nullptr));
 #else
-		singleton_origin_subpop_id = ((Subpopulation *)(arg_origin_subpop->ObjectElementAtIndex(0, nullptr)))->subpopulation_id_;
+		Subpopulation *origin_subpop = ((Subpopulation *)(arg_origin_subpop->ObjectElementAtIndex(0, nullptr)));
 #endif
+		
+		// SPECIES CONSISTENCY CHECK
+		if (&origin_subpop->species_ != species)
+			EIDOS_TERMINATION << "ERROR (Genome_Class::ExecuteMethod_addNewMutation): " << method_name << " requires that originSubpop belong to the same species as the target genomes." << EidosTerminate();
+		
+		singleton_origin_subpop_id = origin_subpop->subpopulation_id_;
+	}
 	
 	int64_t singleton_nucleotide;
 	
@@ -2646,20 +2648,19 @@ EidosValue_SP Genome_Class::ExecuteMethod_addNewMutation(EidosGlobalStringID p_m
 		singleton_nucleotide = nucleotide_lookup[(int)(arg_nucleotide->StringAtIndex(0, nullptr)[0])];
 	
 	// ok, now loop to add the mutations in a single bulk operation per mutation run
-	bool recording_tree_sequence_mutations = sim.RecordingTreeSequenceMutations();
+	bool recording_tree_sequence_mutations = species->RecordingTreeSequenceMutations();
 	
 	for (slim_mutrun_index_t mutrun_index : mutrun_indexes)
 	{
-		int64_t operation_id = ++gSLiM_MutationRun_OperationID;
-		MutationRun &mutations_to_add = *MutationRun::NewMutationRun();		// take from shared pool of used objects;
+		int64_t operation_id = MutationRun::GetNextOperationID();
+		std::vector<MutationIndex> mutations_to_add;
 		
 		// Before starting the bulk operation for this mutation run, construct all of the mutations and add them all to the registry, etc.
 		// It is possible that some mutations will not actually be added to any genome, due to stacking; they will be cleared from the
-		// registry as lost mutations in the next generation.  All mutations are returned to the user, whether actually added or not.
+		// registry as lost mutations in the next cycle.  All mutations are returned to the user, whether actually added or not.
 		MutationType *mutation_type_ptr = singleton_mutation_type_ptr;
 		double selection_coeff = singleton_selection_coeff;
 		slim_position_t position = singleton_position;
-		slim_generation_t origin_generation = singleton_origin_generation;
 		slim_objectid_t origin_subpop_id = singleton_origin_subpop_id;
 		int64_t nucleotide = singleton_nucleotide;
 		
@@ -2672,7 +2673,7 @@ EidosValue_SP Genome_Class::ExecuteMethod_addNewMutation(EidosGlobalStringID p_m
 			if (position / mutrun_length == mutrun_index)
 			{
 				if (muttype_count != 1)
-					mutation_type_ptr = SLiM_ExtractMutationTypeFromEidosValue_io(arg_muttype, mut_parameter_index, sim, EidosStringRegistry::StringForGlobalStringID(p_method_id).c_str());
+					mutation_type_ptr = SLiM_ExtractMutationTypeFromEidosValue_io(arg_muttype, mut_parameter_index, &community, species, method_name.c_str());		// SPECIES CONSISTENCY CHECK
 				
 				if (selcoeff_count != 1)
 				{
@@ -2680,15 +2681,6 @@ EidosValue_SP Genome_Class::ExecuteMethod_addNewMutation(EidosGlobalStringID p_m
 						selection_coeff = arg_selcoeff->FloatAtIndex(mut_parameter_index, nullptr);
 					else
 						selection_coeff = mutation_type_ptr->DrawSelectionCoefficient();
-				}
-				
-				if (origin_gen_count != 1)
-				{
-					origin_generation = SLiMCastToGenerationTypeOrRaise(arg_origin_gen->IntAtIndex(mut_parameter_index, nullptr));
-					
-					// BCH 3 Sept. 2020: We now require that originGeneration equal the current generation, for time consistency when tree-seq recording; it cannot be used as scratch space
-					if (origin_generation != sim.Generation())
-						EIDOS_TERMINATION << "ERROR (Genome_Class::ExecuteMethod_addNewMutation): " << EidosStringRegistry::StringForGlobalStringID(p_method_id) << " now requires that originGeneration be equal to the current generation (or NULL); it may no longer be used as scratch space." << EidosTerminate();
 				}
 				
 				if (origin_subpop_count != 1)
@@ -2716,12 +2708,12 @@ EidosValue_SP Genome_Class::ExecuteMethod_addNewMutation(EidosGlobalStringID p_m
 				
 				MutationIndex new_mut_index = SLiM_NewMutationFromBlock();
 				
-				Mutation *new_mut = new (gSLiM_Mutation_Block + new_mut_index) Mutation(mutation_type_ptr, position, selection_coeff, origin_subpop_id, origin_generation, (int8_t)nucleotide);
+				Mutation *new_mut = new (gSLiM_Mutation_Block + new_mut_index) Mutation(mutation_type_ptr, position, selection_coeff, origin_subpop_id, origin_tick, (int8_t)nucleotide);
 				
 				// This mutation type might not be used by any genomic element type (i.e. might not already be vetted), so we need to check and set pure_neutral_
 				if (selection_coeff != 0.0)
 				{
-					sim.pure_neutral_ = false;
+					species->pure_neutral_ = false;
 					
 					// Fix all_pure_neutral_DFE_ if the selcoeff was not drawn from the muttype's DFE
 					if (p_method_id == gID_addNewMutation)
@@ -2742,27 +2734,26 @@ EidosValue_SP Genome_Class::ExecuteMethod_addNewMutation(EidosGlobalStringID p_m
 		{
 			Mutation *mut_block_ptr = gSLiM_Mutation_Block;
 			
-			std::sort(mutations_to_add.begin_pointer(), mutations_to_add.end_pointer(), [mut_block_ptr](MutationIndex i1, MutationIndex i2) {return (mut_block_ptr + i1)->position_ < (mut_block_ptr + i2)->position_;});
+			std::sort(mutations_to_add.begin(), mutations_to_add.end(), [mut_block_ptr](MutationIndex i1, MutationIndex i2) {return (mut_block_ptr + i1)->position_ < (mut_block_ptr + i2)->position_;});
 		}
 		
 		// Now start the bulk operation and add mutations_to_add to every target genome
 		Genome::BulkOperationStart(operation_id, mutrun_index);
+		
+		MutationRunContext &mutrun_context = species->SpeciesMutationRunContextForMutationRunIndex(mutrun_index);
 		
 		for (int target_index = 0; target_index < target_size; ++target_index)
 		{
 			Genome *target_genome = (Genome *)p_target->ObjectElementAtIndex(target_index, nullptr);
 			
 			// See if WillModifyRunForBulkOperation() can short-circuit the operation for us
-			if (target_genome->WillModifyRunForBulkOperation(operation_id, mutrun_index))
+			const MutationRun *original_run = target_genome->mutruns_[mutrun_index];
+			MutationRun *modifiable_mutrun = target_genome->WillModifyRunForBulkOperation(operation_id, mutrun_index, mutrun_context);
+			
+			if (modifiable_mutrun)
 			{
-				MutationRun &original_mutrun = *(target_genome->mutruns_[mutrun_index]);
-				MutationRun &merge_run = *MutationRun::NewMutationRun();		// take from shared pool of used objects;
-				
-				// We merge the original run and mutations_to_add into a new temporary mutrun, and then copy it back to the target
-				merge_run.clear_set_and_merge(original_mutrun, mutations_to_add);
-				original_mutrun.copy_from_run(merge_run);
-				
-				MutationRun::FreeMutationRun(&merge_run);
+				// We merge the original run (which has not yet been freed!) and mutations_to_add into modifiable_mutrun
+				modifiable_mutrun->clear_set_and_merge(*original_run, mutations_to_add);
 			}
 			
 			// TREE SEQUENCE RECORDING
@@ -2771,8 +2762,8 @@ EidosValue_SP Genome_Class::ExecuteMethod_addNewMutation(EidosGlobalStringID p_m
 			// This prevents redundant derived states from being recorded; see discussion in https://github.com/MesserLab/SLiM/issues/195
 			if (recording_tree_sequence_mutations)
 			{
-				MutationIndex *muts = mutations_to_add.begin_pointer();
-				MutationIndex *muts_end = mutations_to_add.end_pointer();
+				MutationIndex *muts = mutations_to_add.data();
+				MutationIndex *muts_end = muts + mutations_to_add.size();
 				slim_position_t previous_position = -1;
 				
 				while (muts != muts_end)
@@ -2782,7 +2773,7 @@ EidosValue_SP Genome_Class::ExecuteMethod_addNewMutation(EidosGlobalStringID p_m
 					
 					if (pos != previous_position)
 					{
-						sim.RecordNewDerivedState(target_genome, pos, *target_genome->derived_mutation_ids_at_position(pos));
+						species->RecordNewDerivedState(target_genome, pos, *target_genome->derived_mutation_ids_at_position(pos));
 						previous_position = pos;
 					}
 				}
@@ -2791,10 +2782,8 @@ EidosValue_SP Genome_Class::ExecuteMethod_addNewMutation(EidosGlobalStringID p_m
 		
 		Genome::BulkOperationEnd(operation_id, mutrun_index);
 		
-		MutationRun::FreeMutationRun(&mutations_to_add);
-		
 		// invalidate cached mutation refcounts; refcounts have changed
-		pop.cached_tally_genome_count_ = 0;
+		pop.InvalidateMutationReferencesCache();
 	}
 	
 	return retval;
@@ -2814,8 +2803,10 @@ EidosValue_SP Genome_Class::ExecuteMethod_mutationFreqsCountsInGenomes(EidosGlob
 	if (target_size == 0)
 	{
 		// With a zero-length target, frequencies are undefined so it is an error; to keep life simple, we make it an error for counts too
-		EIDOS_TERMINATION << "ERROR (Genome_Class::ExecuteMethod_mutationFreqsCountsInGenomes): " << EidosStringRegistry::StringForGlobalStringID(p_method_id) << " cannot calculate counts/frequencies in a zero-length Genome vector (divide by zero)." << EidosTerminate();
+		EIDOS_TERMINATION << "ERROR (Genome_Class::ExecuteMethod_mutationFreqsCountsInGenomes): " << EidosStringRegistry::StringForGlobalStringID(p_method_id) << "() cannot calculate counts/frequencies in a zero-length Genome vector (divide by zero)." << EidosTerminate();
 	}
+	
+	THREAD_SAFETY_IN_ACTIVE_PARALLEL("Genome_Class::ExecuteMethod_mutationFreqsCountsInGenomes(): usage of statics");
 	
 	static std::vector<Genome *> target_genomes;	// prevent reallocation by using a static
 	
@@ -2827,16 +2818,31 @@ EidosValue_SP Genome_Class::ExecuteMethod_mutationFreqsCountsInGenomes(EidosGlob
 		Genome *target_genome = (Genome *)p_target->ObjectElementAtIndex(target_index, nullptr);
 		
 		if (target_genome->IsNull())
-			EIDOS_TERMINATION << "ERROR (Genome_Class::ExecuteMethod_mutationFreqsCountsInGenomes): " << EidosStringRegistry::StringForGlobalStringID(p_method_id) << " cannot be called on a null genome." << EidosTerminate();
+			EIDOS_TERMINATION << "ERROR (Genome_Class::ExecuteMethod_mutationFreqsCountsInGenomes): " << EidosStringRegistry::StringForGlobalStringID(p_method_id) << "() cannot be called on a null genome." << EidosTerminate();
 		
 		target_genomes.emplace_back(target_genome);
 	}
 	
-	Genome *genome_0 = target_genomes[0];
-	Population &population = genome_0->individual_->subpopulation_->population_;
+	// SPECIES CONSISTENCY CHECK
+	Species *species = Community::SpeciesForGenomesVector(target_genomes.data(), target_size);
+	
+	if (!species)
+		EIDOS_TERMINATION << "ERROR (Genome_Class::ExecuteMethod_mutationFreqsCountsInGenomes): " << EidosStringRegistry::StringForGlobalStringID(p_method_id) << "() requires that all target genomes belong to a single species." << EidosTerminate();
+	
+	if (mutations_value->Count() >= 1)
+	{
+		Species *mut_species = Community::SpeciesForMutations(mutations_value);
+		
+		if (mut_species != species)
+			EIDOS_TERMINATION << "ERROR (Genome_Class::ExecuteMethod_mutationFreqsCountsInGenomes): " << EidosStringRegistry::StringForGlobalStringID(p_method_id) << "() requires that all mutations belong to the same species as the target genomes." << EidosTerminate();
+	}
+	
+	species->population_.CheckForDeferralInGenomes(p_target, "Genome_Class::ExecuteMethod_mutationFreqsCountsInGenomes");
+	
+	Population &population = species->population_;
 	
 	// Have the Population tally for the target genomes
-	population.TallyMutationReferences(&target_genomes);
+	population.TallyMutationReferencesAcrossGenomes(&target_genomes);
 	
 	// Use the back-end code in Population to do the counting
 	if (p_method_id == gID_mutationFrequenciesInGenomes)
@@ -2858,9 +2864,6 @@ EidosValue_SP Genome_Class::ExecuteMethod_outputX(EidosGlobalStringID p_method_i
 	EidosValue *filterMonomorphic_value = ((p_method_id == gID_outputMS) ? p_arguments[2].get() : nullptr);
 	EidosValue *simplifyNucleotides_value = ((p_method_id == gID_outputVCF) ? p_arguments[3].get() : nullptr);
 	EidosValue *outputNonnucleotides_value = ((p_method_id == gID_outputVCF) ? p_arguments[4].get() : nullptr);
-	
-	SLiMSim &sim = SLiM_GetSimFromInterpreter(p_interpreter);
-	Chromosome &chromosome = sim.TheChromosome();
 	
 	// default to outputting multiallelic positions (used by VCF output only)
 	bool output_multiallelics = true;
@@ -2884,12 +2887,32 @@ EidosValue_SP Genome_Class::ExecuteMethod_outputX(EidosGlobalStringID p_method_i
 	if (p_method_id == gID_outputMS)
 		filter_monomorphic = filterMonomorphic_value->LogicalAtIndex(0, nullptr);
 	
-	// Get all the genomes we're sampling from p_target
+	// Get all the genomes we're sampling from p_target; they must all be in the same species, which we determine here
+	// We require at least one genome because otherwise we can't determine the species
 	int sample_size = p_target->Count();
 	std::vector<Genome *> genomes;
+	Species *species = nullptr;
+	
+	if (sample_size <= 0)
+		EIDOS_TERMINATION << "ERROR (Genome_Class::ExecuteMethod_outputX): output of a zero-length genome vector is illegal; at least one genome is required for output." << EidosTerminate();
 	
 	for (int index = 0; index < sample_size; ++index)
-		genomes.emplace_back((Genome *)p_target->ObjectElementAtIndex(index, nullptr));
+	{
+		Genome *genome = (Genome *)p_target->ObjectElementAtIndex(index, nullptr);
+		Species *genome_species = &genome->individual_->subpopulation_->species_;
+		
+		if (!species)
+			species = genome_species;
+		else if (species != genome_species)
+			EIDOS_TERMINATION << "ERROR (Genome_Class::ExecuteMethod_outputX): all genomes for output must belong to the same species." << EidosTerminate();
+		
+		genomes.emplace_back(genome);
+	}
+	
+	species->population_.CheckForDeferralInGenomes(p_target, "Genome_Class::ExecuteMethod_outputX");
+
+	Community &community = species->community_;
+	Chromosome &chromosome = species->TheChromosome();
 	
 	// Now handle stream/file output and dispatch to the actual print method
 	if (filePath_value->Type() == EidosValueType::kValueNULL)
@@ -2898,7 +2921,8 @@ EidosValue_SP Genome_Class::ExecuteMethod_outputX(EidosGlobalStringID p_method_i
 		std::ostream &output_stream = p_interpreter.ExecutionOutputStream();
 		
 		// For the output stream, we put out a descriptive SLiM-style header for all output types
-		output_stream << "#OUT: " << sim.Generation() << " G";
+		// BCH 3/6/2022: Note the species cycle is NOT output; might be a mixed-species sample
+		output_stream << "#OUT: " << community.Tick() << " G";
 		
 		if (p_method_id == gID_output)
 			output_stream << "S";
@@ -2915,7 +2939,7 @@ EidosValue_SP Genome_Class::ExecuteMethod_outputX(EidosGlobalStringID p_method_i
 		else if (p_method_id == gID_outputMS)
 			Genome::PrintGenomes_MS(output_stream, genomes, chromosome, filter_monomorphic);
 		else if (p_method_id == gID_outputVCF)
-			Genome::PrintGenomes_VCF(output_stream, genomes, output_multiallelics, simplify_nucs, output_nonnucs, sim.IsNucleotideBased(), sim.TheChromosome().AncestralSequence());
+			Genome::PrintGenomes_VCF(output_stream, genomes, output_multiallelics, simplify_nucs, output_nonnucs, species->IsNucleotideBased(), chromosome.AncestralSequence());
 	}
 	else
 	{
@@ -2932,14 +2956,15 @@ EidosValue_SP Genome_Class::ExecuteMethod_outputX(EidosGlobalStringID p_method_i
 			{
 				case gID_output:
 					// For file output, we put out the descriptive SLiM-style header only for SLiM-format output
-					outfile << "#OUT: " << sim.Generation() << " GS " << sample_size << " " << outfile_path << std::endl;
+					// BCH 3/6/2022: Note the species cycle is NOT output; might be a mixed-species sample
+					outfile << "#OUT: " << community.Tick() << " GS " << sample_size << " " << outfile_path << std::endl;
 					Genome::PrintGenomes_SLiM(outfile, genomes, -1);	// -1 represents unknown source subpopulation
 					break;
 				case gID_outputMS:
 					Genome::PrintGenomes_MS(outfile, genomes, chromosome, filter_monomorphic);
 					break;
 				case gID_outputVCF:
-					Genome::PrintGenomes_VCF(outfile, genomes, output_multiallelics, simplify_nucs, output_nonnucs, sim.IsNucleotideBased(), sim.TheChromosome().AncestralSequence());
+					Genome::PrintGenomes_VCF(outfile, genomes, output_multiallelics, simplify_nucs, output_nonnucs, species->IsNucleotideBased(), chromosome.AncestralSequence());
 					break;
 			}
 			
@@ -2958,26 +2983,49 @@ EidosValue_SP Genome_Class::ExecuteMethod_outputX(EidosGlobalStringID p_method_i
 //
 EidosValue_SP Genome_Class::ExecuteMethod_readFromMS(EidosGlobalStringID p_method_id, EidosValue_Object *p_target, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter) const
 {
-#pragma unused (p_method_id, p_target, p_arguments, p_interpreter)
+#pragma unused (p_method_id, p_interpreter)
+	THREAD_SAFETY_IN_ACTIVE_PARALLEL("Genome_Class::ExecuteMethod_readFromMS(): SLiM global state read");
+	
 	EidosValue *filePath_value = p_arguments[0].get();
 	EidosValue *mutationType_value = p_arguments[1].get();
 	
-	SLiMSim &sim = SLiM_GetSimFromInterpreter(p_interpreter);
-	Population &pop = sim.ThePopulation();
-	slim_position_t last_position = sim.TheChromosome().last_position_;
-	bool recording_mutations = sim.RecordingTreeSequenceMutations();
-	bool nucleotide_based = sim.IsNucleotideBased();
+	Community &community = SLiM_GetCommunityFromInterpreter(p_interpreter);
 	std::string file_path = Eidos_ResolvedPath(Eidos_StripTrailingSlash(filePath_value->StringAtIndex(0, nullptr)));
 	MutationType *mutation_type_ptr = nullptr;
 	
 	if (mutationType_value->Type() != EidosValueType::kValueNULL)
-		mutation_type_ptr = SLiM_ExtractMutationTypeFromEidosValue_io(mutationType_value, 0, sim, "ExecuteMethod_readFromMS()");
+		mutation_type_ptr = SLiM_ExtractMutationTypeFromEidosValue_io(mutationType_value, 0, &community, nullptr, "ExecuteMethod_readFromMS()");	// this dictates the focal species
 	
 	if (!mutation_type_ptr)
 		EIDOS_TERMINATION << "ERROR (Genome_Class::ExecuteMethod_readFromMS): mutation type not found." << EidosTerminate();
 	
+	// Get the species of interest from the mutation type; we will check that all target genomes belong to it below
+	Species &species = mutation_type_ptr->species_;
+	Population &pop = species.population_;
+	slim_position_t last_position = species.TheChromosome().last_position_;
+	bool recording_mutations = species.RecordingTreeSequenceMutations();
+	bool nucleotide_based = species.IsNucleotideBased();
+	
+	// Get the target genomes into a vector
+	int target_size = p_target->Count();
+	
+	// SPECIES CONSISTENCY CHECK
+	if (target_size > 0)
+	{
+		Species *target_species = Community::SpeciesForGenomes(p_target);
+		
+		if (target_species != &species)
+			EIDOS_TERMINATION << "ERROR (Genome_Class::ExecuteMethod_readFromMS): readFromMS() requires that all target genomes belong to the same species." << EidosTerminate();
+	}
+	
+	species.population_.CheckForDeferralInGenomes(p_target, "Genome_Class::ExecuteMethod_readFromMS");
+	
 	// Parse the whole input file and retain the information from it
 	std::ifstream infile(file_path);
+	
+	if (!infile)
+		EIDOS_TERMINATION << "ERROR (Genome_Class::ExecuteMethod_readFromMS): could not read file at path " << file_path << "." << EidosTerminate();
+	
 	std::string line, sub;
 	int parse_state = 0;
 	int segsites = -1;
@@ -3071,29 +3119,27 @@ EidosValue_SP Genome_Class::ExecuteMethod_readFromMS(EidosGlobalStringID p_metho
 	
 	infile.close();
 	
-	// Get the target genomes into a vector
-	int target_size = p_target->Count();
-	
 	if ((int)calls.size() != target_size)
 		EIDOS_TERMINATION << "ERROR (Genome_Class::ExecuteMethod_readFromMS): target genome vector has size " << target_size << " but " << calls.size() << " call lines found." << EidosTerminate();
 	
 	// Instantiate the mutations; NOTE THAT THE STACKING POLICY IS NOT CHECKED HERE, AS THIS IS NOT CONSIDERED THE ADDITION OF A MUTATION!
 	std::vector<MutationIndex> mutation_indices;
+	gsl_rng *rng = EIDOS_GSL_RNG(omp_get_thread_num());
 	
 	for (int mut_index = 0; mut_index < segsites; ++mut_index)
 	{
 		slim_position_t position = positions[mut_index];
 		double selection_coeff = mutation_type_ptr->DrawSelectionCoefficient();
 		slim_objectid_t subpop_index = -1;
-		slim_generation_t origin_generation = sim.Generation();
+		slim_tick_t origin_tick = community.Tick();
 		int8_t nucleotide = -1;
 		
 		if (nucleotide_based && mutation_type_ptr->nucleotide_based_)
 		{
 			// select a nucleotide that is different from the ancestral state at this position
-			int8_t ancestral = (int8_t)sim.TheChromosome().AncestralSequence()->NucleotideAtIndex(position);
+			int8_t ancestral = (int8_t)species.TheChromosome().AncestralSequence()->NucleotideAtIndex(position);
 			
-			nucleotide = (int8_t)Eidos_rng_uniform_int(EIDOS_GSL_RNG, 3);	// 0, 1, 2
+			nucleotide = (int8_t)Eidos_rng_uniform_int(rng, 3);	// 0, 1, 2
 			
 			if (nucleotide == ancestral)
 				nucleotide++;
@@ -3101,12 +3147,12 @@ EidosValue_SP Genome_Class::ExecuteMethod_readFromMS(EidosGlobalStringID p_metho
 		
 		MutationIndex new_mut_index = SLiM_NewMutationFromBlock();
 		
-		Mutation *new_mut = new (gSLiM_Mutation_Block + new_mut_index) Mutation(mutation_type_ptr, position, selection_coeff, subpop_index, origin_generation, nucleotide);
+		Mutation *new_mut = new (gSLiM_Mutation_Block + new_mut_index) Mutation(mutation_type_ptr, position, selection_coeff, subpop_index, origin_tick, nucleotide);
 		
 		// This mutation type might not be used by any genomic element type (i.e. might not already be vetted), so we need to check and set pure_neutral_
 		if (selection_coeff != 0.0)
 		{
-			sim.pure_neutral_ = false;
+			species.pure_neutral_ = false;
 			
 			// Fix all_pure_neutral_DFE_ if the selcoeff was not drawn from the muttype's DFE
 			if (p_method_id == gID_addNewMutation)
@@ -3125,12 +3171,17 @@ EidosValue_SP Genome_Class::ExecuteMethod_readFromMS(EidosGlobalStringID p_metho
 	std::sort(mutation_indices.begin(), mutation_indices.end(), [mut_block_ptr](MutationIndex i1, MutationIndex i2) {return (mut_block_ptr + i1)->position_ < (mut_block_ptr + i2)->position_;});
 	
 	// Add the mutations to the target genomes, recording a new derived state with each addition
+#ifndef _OPENMP
+	MutationRunContext &mutrun_context = species.SpeciesMutationRunContextForThread(omp_get_thread_num());	// when not parallel, we have only one MutationRunContext
+#endif
+	
 	for (int genome_index = 0; genome_index < target_size; ++genome_index)
 	{
 		Genome *genome = (Genome *)p_target->ObjectElementAtIndex(genome_index, nullptr);
 		bool genome_started_empty = (genome->mutation_count() == 0);
 		slim_position_t mutrun_length = genome->mutrun_length_;
 		slim_mutrun_index_t current_run_index = -1;
+		MutationRun *current_mutrun = nullptr;
 		std::string &genome_string = calls[genome_index];
 		
 		for (int segsite_index = 0; segsite_index < segsites; ++segsite_index)
@@ -3146,18 +3197,24 @@ EidosValue_SP Genome_Class::ExecuteMethod_readFromMS(EidosGlobalStringID p_metho
 				slim_mutrun_index_t mut_mutrun_index = (slim_mutrun_index_t)(mut_pos / mutrun_length);
 				
 				if (mut_mutrun_index != current_run_index)
-					genome->WillModifyRun(mut_mutrun_index);
-				
-				MutationRun *mut_mutrun = genome->mutruns_[mut_mutrun_index].get();
+				{
+#ifdef _OPENMP
+					// When parallel, the MutationRunContext depends upon the position in the genome
+					MutationRunContext &mutrun_context = species.SpeciesMutationRunContextForMutationRunIndex(mut_mutrun_index);
+#endif
+					
+					current_run_index = mut_mutrun_index;
+					current_mutrun = genome->WillModifyRun(mut_mutrun_index, mutrun_context);
+				}
 				
 				// If the genome started empty, we can add mutations to the end with emplace_back(); if it did not, then they need to be inserted
 				if (genome_started_empty)
-					mut_mutrun->emplace_back(mut_index);
+					current_mutrun->emplace_back(mut_index);
 				else
-					mut_mutrun->insert_sorted_mutation(mut_index);
+					current_mutrun->insert_sorted_mutation(mut_index);
 				
 				if (recording_mutations)
-					sim.RecordNewDerivedState(genome, mut_pos, *genome->derived_mutation_ids_at_position(mut_pos));
+					species.RecordNewDerivedState(genome, mut_pos, *genome->derived_mutation_ids_at_position(mut_pos));
 			}
 		}
 	}
@@ -3176,29 +3233,46 @@ EidosValue_SP Genome_Class::ExecuteMethod_readFromMS(EidosGlobalStringID p_metho
 //
 EidosValue_SP Genome_Class::ExecuteMethod_readFromVCF(EidosGlobalStringID p_method_id, EidosValue_Object *p_target, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter) const
 {
-#pragma unused (p_method_id, p_target, p_arguments, p_interpreter)
+#pragma unused (p_method_id, p_interpreter)
+	THREAD_SAFETY_IN_ACTIVE_PARALLEL("Genome_Class::ExecuteMethod_readFromVCF(): SLiM global state read");
+	
 	EidosValue *filePath_value = p_arguments[0].get();
 	EidosValue *mutationType_value = p_arguments[1].get();
 	
-	SLiMSim &sim = SLiM_GetSimFromInterpreter(p_interpreter);
-	Population &pop = sim.ThePopulation();
-	slim_position_t last_position = sim.TheChromosome().last_position_;
-	bool recording_mutations = sim.RecordingTreeSequenceMutations();
-	bool nucleotide_based = sim.IsNucleotideBased();
+	// SPECIES CONSISTENCY CHECK
+	if (p_target->Count() == 0)
+		EIDOS_TERMINATION << "ERROR (Genome_Class::ExecuteMethod_readFromVCF): " << "readFromVCF() requires a target Genome vector of length 1 or more, so that the species of the target can be determined." << EidosTerminate();
+	
+	Species *species = Community::SpeciesForGenomes(p_target);
+	
+	if (!species)
+		EIDOS_TERMINATION << "ERROR (Genome_Class::ExecuteMethod_readFromVCF): " << "readFromVCF() requires that all target genomes belong to the same species." << EidosTerminate();
+	
+	species->population_.CheckForDeferralInGenomes(p_target, "Genome_Class::ExecuteMethod_readFromVCF");
+	
+	Community &community = species->community_;
+	Population &pop = species->population_;
+	slim_position_t last_position = species->TheChromosome().last_position_;
+	bool recording_mutations = species->RecordingTreeSequenceMutations();
+	bool nucleotide_based = species->IsNucleotideBased();
 	std::string file_path = Eidos_ResolvedPath(Eidos_StripTrailingSlash(filePath_value->StringAtIndex(0, nullptr)));
 	MutationType *default_mutation_type_ptr = nullptr;
 	
 	if (mutationType_value->Type() != EidosValueType::kValueNULL)
-		default_mutation_type_ptr = SLiM_ExtractMutationTypeFromEidosValue_io(mutationType_value, 0, sim, "readFromVCF()");
+		default_mutation_type_ptr = SLiM_ExtractMutationTypeFromEidosValue_io(mutationType_value, 0, &community, species, "readFromVCF()");			// SPECIES CONSISTENCY CHECK
 	
 	// Parse the whole input file and retain the information from it
 	std::ifstream infile(file_path);
+	
+	if (!infile)
+		EIDOS_TERMINATION << "ERROR (Genome_Class::ExecuteMethod_readFromVCF): could not read file at path " << file_path << "." << EidosTerminate();
+	
 	std::string line, sub;
 	int parse_state = 0;
 	int sample_id_count = 0;
 	int target_size = p_target->Count();
 	bool info_MID_defined = false, info_S_defined = false, info_DOM_defined = false, info_PO_defined = false;
-	bool info_GO_defined = false, info_MT_defined = false, /*info_AA_defined = false,*/ info_NONNUC_defined = false;
+	bool info_GO_defined = false, info_TO_defined = false, info_MT_defined = false, /*info_AA_defined = false,*/ info_NONNUC_defined = false;
 	std::vector<std::pair<slim_position_t, std::string>> call_lines;
 	
 	while (!infile.eof())
@@ -3218,6 +3292,7 @@ EidosValue_SP Genome_Class::ExecuteMethod_readFromVCF(EidosGlobalStringID p_meth
 					if (line == "##INFO=<ID=DOM,Number=.,Type=Float,Description=\"Dominance\">")				info_DOM_defined = true;
 					if (line == "##INFO=<ID=PO,Number=.,Type=Integer,Description=\"Population of Origin\">")	info_PO_defined = true;
 					if (line == "##INFO=<ID=GO,Number=.,Type=Integer,Description=\"Generation of Origin\">")	info_GO_defined = true;
+					if (line == "##INFO=<ID=TO,Number=.,Type=Integer,Description=\"Tick of Origin\">")			info_TO_defined = true;		// SLiM 4 emits TO (tick) instead of GO (generation)
 					if (line == "##INFO=<ID=MT,Number=.,Type=Integer,Description=\"Mutation Type\">")			info_MT_defined = true;
 					/*if (line == "##INFO=<ID=AA,Number=1,Type=String,Description=\"Ancestral Allele\">")			info_AA_defined = true;*/		// this one is standard, so we don't require this definition
 					if (line == "##INFO=<ID=NONNUC,Number=0,Type=Flag,Description=\"Non-nucleotide-based\">")	info_NONNUC_defined = true;
@@ -3286,6 +3361,7 @@ EidosValue_SP Genome_Class::ExecuteMethod_readFromVCF(EidosGlobalStringID p_meth
 	// cache target genomes and determine whether they are initially empty, in which case we can do fast mutation addition with emplace_back()
 	std::vector<Genome *> targets;
 	std::vector<slim_mutrun_index_t> target_last_mutrun_modified;
+	std::vector<MutationRun *> target_last_mutrun;
 	bool all_target_genomes_started_empty = true;
 	
 	for (int genome_index = 0; genome_index < target_size; ++genome_index)
@@ -3300,12 +3376,16 @@ EidosValue_SP Genome_Class::ExecuteMethod_readFromVCF(EidosGlobalStringID p_meth
 			
 			targets.emplace_back(genome);
 			target_last_mutrun_modified.emplace_back(-1);
+			target_last_mutrun.emplace_back(nullptr);
 		}
 	}
 	
 	target_size = (int)targets.size();	// adjust for possible exclusion of null genomes
 	
 	// parse all the call lines, instantiate their mutations, and add the mutations to the target genomes
+#ifndef _OPENMP
+	MutationRunContext &mutrun_context = species->SpeciesMutationRunContextForThread(omp_get_thread_num());	// when not parallel, we have only one MutationRunContext
+#endif
 	std::vector<MutationIndex> mutation_indices;
 	bool has_initial_mutations = (gSLiM_next_mutation_id != 0);
 	
@@ -3355,7 +3435,7 @@ EidosValue_SP Genome_Class::ExecuteMethod_readFromVCF(EidosGlobalStringID p_meth
 		std::vector<double> info_selcoeffs;
 		std::vector<double> info_domcoeffs;
 		std::vector<slim_objectid_t> info_poporigin;
-		std::vector<slim_generation_t> info_genorigin;
+		std::vector<slim_tick_t> info_tickorigin;
 		std::vector<slim_objectid_t> info_muttype;
 		int8_t info_ancestral_nuc = -1;
 		bool info_is_nonnuc = false;
@@ -3373,10 +3453,10 @@ EidosValue_SP Genome_Class::ExecuteMethod_readFromVCF(EidosGlobalStringID p_meth
 				{
 					if (!gEidosSuppressWarnings)
 					{
-						if (!sim.warned_readFromVCF_mutIDs_unused_)
+						if (!community.warned_readFromVCF_mutIDs_unused_)
 						{
 							p_interpreter.ErrorOutputStream() << "#WARNING (Genome_Class::ExecuteMethod_readFromVCF): readFromVCF(): the VCF file specifies mutation IDs with the MID field, but some mutation IDs have already been used so uniqueness cannot be guaranteed.  Use of mutation IDs is therefore disabled; mutations will not receive the mutation ID requested in the file.  To fix this warning, remove the MID field from the VCF file before reading.  To get readFromVCF() to use the specified mutation IDs, load the VCF file into a model that has never simulated a mutation, and has therefore not used any mutation IDs." << std::endl;
-							sim.warned_readFromVCF_mutIDs_unused_ = true;
+							community.warned_readFromVCF_mutIDs_unused_ = true;
 						}
 					}
 					
@@ -3406,12 +3486,19 @@ EidosValue_SP Genome_Class::ExecuteMethod_readFromVCF(EidosGlobalStringID p_meth
 				for (std::string &value_substr : value_substrs)
 					info_poporigin.emplace_back((slim_objectid_t)EidosInterpreter::NonnegativeIntegerForString(value_substr, nullptr));
 			}
-			else if (info_GO_defined && (info_substr.compare(0, 3, "GO=") == 0))	// Generation of Origin
+			else if (info_TO_defined && (info_substr.compare(0, 3, "TO=") == 0))	// Tick of Origin
 			{
 				std::vector<std::string> value_substrs = Eidos_string_split(info_substr.substr(3), ",");
 				
 				for (std::string &value_substr : value_substrs)
-					info_genorigin.emplace_back((slim_generation_t)EidosInterpreter::NonnegativeIntegerForString(value_substr, nullptr));
+					info_tickorigin.emplace_back((slim_tick_t)EidosInterpreter::NonnegativeIntegerForString(value_substr, nullptr));
+			}
+			else if (info_GO_defined && (info_substr.compare(0, 3, "GO=") == 0))	// Generation of Origin - emitted by SLiM 3, treated as TO here
+			{
+				std::vector<std::string> value_substrs = Eidos_string_split(info_substr.substr(3), ",");
+				
+				for (std::string &value_substr : value_substrs)
+					info_tickorigin.emplace_back((slim_tick_t)EidosInterpreter::NonnegativeIntegerForString(value_substr, nullptr));
 			}
 			else if (info_MT_defined && (info_substr.compare(0, 3, "MT=") == 0))	// Mutation Type
 			{
@@ -3443,8 +3530,8 @@ EidosValue_SP Genome_Class::ExecuteMethod_readFromVCF(EidosGlobalStringID p_meth
 				EIDOS_TERMINATION << "ERROR (Genome_Class::ExecuteMethod_readFromVCF): VCF file unexpected value count for DOM field." << EidosTerminate();
 			if ((info_poporigin.size() != 0) && (info_poporigin.size() != alt_allele_count))
 				EIDOS_TERMINATION << "ERROR (Genome_Class::ExecuteMethod_readFromVCF): VCF file unexpected value count for PO field." << EidosTerminate();
-			if ((info_genorigin.size() != 0) && (info_genorigin.size() != alt_allele_count))
-				EIDOS_TERMINATION << "ERROR (Genome_Class::ExecuteMethod_readFromVCF): VCF file unexpected value count for GO field." << EidosTerminate();
+			if ((info_tickorigin.size() != 0) && (info_tickorigin.size() != alt_allele_count))
+				EIDOS_TERMINATION << "ERROR (Genome_Class::ExecuteMethod_readFromVCF): VCF file unexpected value count for GO or TO field." << EidosTerminate();
 			if ((info_muttype.size() != 0) && (info_muttype.size() != alt_allele_count))
 				EIDOS_TERMINATION << "ERROR (Genome_Class::ExecuteMethod_readFromVCF): VCF file unexpected value count for MT field." << EidosTerminate();
 		}
@@ -3548,7 +3635,7 @@ EidosValue_SP Genome_Class::ExecuteMethod_readFromVCF(EidosGlobalStringID p_meth
 			{
 				slim_objectid_t mutation_type_id = info_muttype[alt_allele_index];
                 
-                mutation_type_ptr = sim.MutationTypeWithID(mutation_type_id);
+                mutation_type_ptr = species->MutationTypeWithID(mutation_type_id);
 				
 				if (!mutation_type_ptr)
 					EIDOS_TERMINATION << "ERROR (Genome_Class::ExecuteMethod_readFromVCF): VCF file MT field references a mutation type m" << mutation_type_id << " that is not defined." << EidosTerminate();
@@ -3578,13 +3665,13 @@ EidosValue_SP Genome_Class::ExecuteMethod_readFromVCF(EidosGlobalStringID p_meth
 			if (info_poporigin.size() > 0)
 				subpop_index = info_poporigin[alt_allele_index];
 			
-			// get the origin generation from gO, or set to the current generation; no bounds checking on this
-			slim_generation_t origin_generation;
+			// get the origin tick from gO, or set to the current tick; no bounds checking on this
+			slim_tick_t origin_tick;
 			
-			if (info_genorigin.size() > 0)
-				origin_generation = info_genorigin[alt_allele_index];
+			if (info_tickorigin.size() > 0)
+				origin_tick = info_tickorigin[alt_allele_index];
 			else
-				origin_generation = sim.Generation();
+				origin_tick = community.Tick();
 			
 			// figure out the nucleotide and do nucleotide-related checks
 			int8_t alt_allele_nuc = alt_nucs[alt_allele_index];		// must be defined, in all cases, but might be ignored
@@ -3611,7 +3698,7 @@ EidosValue_SP Genome_Class::ExecuteMethod_readFromVCF(EidosGlobalStringID p_meth
 						if (ref_nuc != info_ancestral_nuc)
 							EIDOS_TERMINATION << "ERROR (Genome_Class::ExecuteMethod_readFromVCF): the REF nucleotide does not match the AA nucleotide." << EidosTerminate();
 						
-						int8_t ancestral = (int8_t)sim.TheChromosome().AncestralSequence()->NucleotideAtIndex(mut_position);
+						int8_t ancestral = (int8_t)species->TheChromosome().AncestralSequence()->NucleotideAtIndex(mut_position);
 						
 						if (ancestral != ref_nuc)
 							EIDOS_TERMINATION << "ERROR (Genome_Class::ExecuteMethod_readFromVCF): the REF/AA nucleotide does not match the ancestral nucleotide at the same position; a matching ancestral nucleotide sequence must be set prior to calling readFromVCF()." << EidosTerminate();
@@ -3652,18 +3739,18 @@ EidosValue_SP Genome_Class::ExecuteMethod_readFromVCF(EidosGlobalStringID p_meth
 				// a mutation ID was supplied; we use it blindly, having checked above that we are in the case where this is legal
 				slim_mutationid_t mut_mutid = info_mutids[alt_allele_index];
 				
-				new_mut = new (gSLiM_Mutation_Block + new_mut_index) Mutation(mut_mutid, mutation_type_ptr, mut_position, selection_coeff, subpop_index, origin_generation, nucleotide);
+				new_mut = new (gSLiM_Mutation_Block + new_mut_index) Mutation(mut_mutid, mutation_type_ptr, mut_position, selection_coeff, subpop_index, origin_tick, nucleotide);
 			}
 			else
 			{
 				// no mutation ID supplied, so use whatever is next
-				new_mut = new (gSLiM_Mutation_Block + new_mut_index) Mutation(mutation_type_ptr, mut_position, selection_coeff, subpop_index, origin_generation, nucleotide);
+				new_mut = new (gSLiM_Mutation_Block + new_mut_index) Mutation(mutation_type_ptr, mut_position, selection_coeff, subpop_index, origin_tick, nucleotide);
 			}
 			
 			// This mutation type might not be used by any genomic element type (i.e. might not already be vetted), so we need to check and set pure_neutral_
 			if (selection_coeff != 0.0)
 			{
-				sim.pure_neutral_ = false;
+				species->pure_neutral_ = false;
 				
 				// Fix all_pure_neutral_DFE_ if the selcoeff was not drawn from the muttype's DFE
 				if (p_method_id == gID_addNewMutation)
@@ -3685,26 +3772,30 @@ EidosValue_SP Genome_Class::ExecuteMethod_readFromVCF(EidosGlobalStringID p_meth
 			{
 				Genome *genome = targets[genome_index];
 				slim_mutrun_index_t &genome_last_mutrun_modified = target_last_mutrun_modified[genome_index];
+				MutationRun *&genome_last_mutrun = target_last_mutrun[genome_index];
 				slim_position_t mutrun_length = genome->mutrun_length_;
 				MutationIndex mut_index = alt_allele_mut_indices[call - 1];
 				slim_mutrun_index_t mut_mutrun_index = (slim_mutrun_index_t)(mut_position / mutrun_length);
 				
 				if (mut_mutrun_index != genome_last_mutrun_modified)
 				{
-					genome->WillModifyRun(mut_mutrun_index);
+#ifdef _OPENMP
+					// When parallel, the MutationRunContext depends upon the position in the genome
+					MutationRunContext &mutrun_context = species->SpeciesMutationRunContextForMutationRunIndex(mut_mutrun_index);
+#endif
+					
+					genome_last_mutrun = genome->WillModifyRun(mut_mutrun_index, mutrun_context);
 					genome_last_mutrun_modified = mut_mutrun_index;
 				}
 				
-				MutationRun *mut_mutrun = genome->mutruns_[mut_mutrun_index].get();
-				
 				// If the genome started empty, we can add mutations to the end with emplace_back(); if it did not, then they need to be inserted
 				if (all_target_genomes_started_empty)
-					mut_mutrun->emplace_back(mut_index);
+					genome_last_mutrun->emplace_back(mut_index);
 				else
-					mut_mutrun->insert_sorted_mutation(mut_index);
+					genome_last_mutrun->insert_sorted_mutation(mut_index);
 				
 				if (recording_mutations)
-					sim.RecordNewDerivedState(genome, mut_position, *genome->derived_mutation_ids_at_position(mut_position));
+					species->RecordNewDerivedState(genome, mut_position, *genome->derived_mutation_ids_at_position(mut_position));
 			}
 		}
 	}
@@ -3734,46 +3825,59 @@ EidosValue_SP Genome_Class::ExecuteMethod_removeMutations(EidosGlobalStringID p_
 	if (target_size == 0)
 		return gStaticEidosValueVOID;
 	
+	// SPECIES CONSISTENCY CHECK
+	Species *species = Community::SpeciesForGenomes(p_target);
+	
+	if (!species)
+		EIDOS_TERMINATION << "ERROR (Genome_Class::ExecuteMethod_removeMutations): removeMutations() requires that all target genomes belong to the same species." << EidosTerminate();
+	
+	species->population_.CheckForDeferralInGenomes(p_target, "Genome_Class::ExecuteMethod_readFromVCF");
+	
+	Community &community = species->community_;
+	Population &pop = species->population_;
+	slim_tick_t tick = community.Tick();
+	bool create_substitutions = substitute_value->LogicalAtIndex(0, nullptr);
+	bool recording_tree_sequence_mutations = species->RecordingTreeSequenceMutations();
+	bool any_nonneutral_removed = false;
+	
 	// Use the 0th genome in the target to find out what the mutation run length is, so we can calculate run indices
 	Genome *genome_0 = (Genome *)p_target->ObjectElementAtIndex(0, nullptr);
 	slim_position_t mutrun_length = genome_0->mutrun_length_;
-	SLiMSim &sim = genome_0->individual_->subpopulation_->population_.sim_;
-	Population &pop = sim.ThePopulation();
-	slim_generation_t generation = sim.Generation();
-	bool create_substitutions = substitute_value->LogicalAtIndex(0, nullptr);
-	bool recording_tree_sequence_mutations = sim.RecordingTreeSequenceMutations();
-	bool any_nonneutral_removed = false;
 	
-	if (pop.sim_.executing_block_type_ == SLiMEidosBlockType::SLiMEidosModifyChildCallback)
+	// TIMING RESTRICTION
+	if (community.executing_species_ == species)
 	{
-		// Check that we're not inside a modifyChild() callback, or if we are, that the only genomes being modified belong to the new child.
-		// This prevents problems with retracting the proposed child when tree-sequence recording is enabled; other extraneous changes must
-		// not be backed out, and it's hard to separate, e.g., what's a child-related new mutation from an extraneously added new mutation.
-		// Note that the other Genome methods that add/remove mutations perform the same check, and should be maintained in parallel.
-		Individual *focal_modification_child = pop.sim_.focal_modification_child_;
-		
-		if (focal_modification_child)
+		if (community.executing_block_type_ == SLiMEidosBlockType::SLiMEidosModifyChildCallback)
 		{
-			Genome *focal_genome_1 = focal_modification_child->genome1_, *focal_genome_2 = focal_modification_child->genome2_;
+			// Check that we're not inside a modifyChild() callback, or if we are, that the only genomes being modified belong to the new child.
+			// This prevents problems with retracting the proposed child when tree-sequence recording is enabled; other extraneous changes must
+			// not be backed out, and it's hard to separate, e.g., what's a child-related new mutation from an extraneously added new mutation.
+			// Note that the other Genome methods that add/remove mutations perform the same check, and should be maintained in parallel.
+			Individual *focal_modification_child = community.focal_modification_child_;
 			
-			for (int genome_index = 0; genome_index < target_size; ++genome_index)
+			if (focal_modification_child)
 			{
-				Genome *target_genome = (Genome *)p_target->ObjectElementAtIndex(genome_index, nullptr);
+				Genome *focal_genome_1 = focal_modification_child->genome1_, *focal_genome_2 = focal_modification_child->genome2_;
 				
-				if ((target_genome != focal_genome_1) && (target_genome != focal_genome_2))
-					EIDOS_TERMINATION << "ERROR (Genome_Class::ExecuteMethod_removeMutations): removeMutations() cannot be called from within a modifyChild() callback to modify any genomes except those of the focal child being generated." << EidosTerminate();
+				for (int genome_index = 0; genome_index < target_size; ++genome_index)
+				{
+					Genome *target_genome = (Genome *)p_target->ObjectElementAtIndex(genome_index, nullptr);
+					
+					if ((target_genome != focal_genome_1) && (target_genome != focal_genome_2))
+						EIDOS_TERMINATION << "ERROR (Genome_Class::ExecuteMethod_removeMutations): removeMutations() cannot be called on the currently executing species from within a modifyChild() callback to modify any genomes except those of the focal child being generated." << EidosTerminate();
+				}
 			}
+			
+			// This is actually only a problem when tree recording is on, but for consistency we outlaw it in all cases.  When a substitution
+			// is created, it is added to the derived state of every genome, which is a side effect that can't be retracted if the modifyChild()
+			// callback rejects the proposed child, so it has to be prohibited up front.  Anyway it would be a very strange thing to do.
+			if (create_substitutions)
+				EIDOS_TERMINATION << "ERROR (Genome_Class::ExecuteMethod_removeMutations): removeMutations() cannot be called on the currently executing species from within a modifyChild() callback to create a substitution, because that would have side effects on genomes other than those of the focal child being generated." << EidosTerminate();
 		}
-		
-		// This is actually only a problem when tree recording is on, but for consistency we outlaw it in all cases.  When a substitution
-		// is created, it is added to the derived state of every genome, which is a side effect that can't be retracted if the modifyChild()
-		// callback rejects the proposed child, so it has to be prohibited up front.  Anyway it would be a very strange thing to do.
-		if (create_substitutions)
-			EIDOS_TERMINATION << "ERROR (Genome_Class::ExecuteMethod_removeMutations): removeMutations() cannot be called from within a modifyChild() callback to create a substitution, because that would have side effects on genomes other than those of the focal child being generated." << EidosTerminate();
+		else if ((community.executing_block_type_ == SLiMEidosBlockType::SLiMEidosRecombinationCallback) ||
+				 (community.executing_block_type_ == SLiMEidosBlockType::SLiMEidosMutationCallback))
+			EIDOS_TERMINATION << "ERROR (Genome_Class::ExecuteMethod_removeMutations): removeMutations() cannot be called on the currently executing species from within a recombination() or mutation() callback." << EidosTerminate();
 	}
-	else if ((pop.sim_.executing_block_type_ == SLiMEidosBlockType::SLiMEidosRecombinationCallback) ||
-			 (pop.sim_.executing_block_type_ == SLiMEidosBlockType::SLiMEidosMutationCallback))
-		EIDOS_TERMINATION << "ERROR (Genome_Class::ExecuteMethod_removeMutations): removeMutations() cannot be called from within a recombination() or mutation() callback." << EidosTerminate();
 	
 	if (mutations_value->Type() == EidosValueType::kValueNULL)
 	{
@@ -3800,45 +3904,61 @@ EidosValue_SP Genome_Class::ExecuteMethod_removeMutations(EidosGlobalStringID p_
 					Mutation *mut = target_walker.CurrentMutation();
 					slim_position_t pos = mut->position_;
 					
-					sim.RecordNewDerivedState(target_genome, pos, empty_mut_vector);
+					species->RecordNewDerivedState(target_genome, pos, empty_mut_vector);
 				}
 			}
 		}
 		
-		// Now remove all mutations; we don't use bulk operations here because it is simpler to just set them all to the same empty run
-		// BCH 8/12/2021: fixing this code to only reset mutation runs if they presently contain a mutation; do nothing for empty mutruns
-		// This avoids a bunch of mutrun thrash in haploid models that remove all mutations from the second genome in modifyChild(), etc.
-		MutationRun *shared_empty_run = nullptr;
-		int mutrun_count = genome_0->mutrun_count_;
+		// Fetch genome pointers and check for null genomes up front
+		std::vector<Genome *>target_genomes;
 		
 		for (int genome_index = 0; genome_index < target_size; ++genome_index)
 		{
 			Genome *target_genome = (Genome *)p_target->ObjectElementAtIndex(genome_index, nullptr);
 			
-			for (int run_index = 0; run_index < mutrun_count; ++run_index)
+			if (target_genome->IsNull())
+				EIDOS_TERMINATION << "ERROR (Genome_Class::ExecuteMethod_removeMutations): removeMutations() cannot be called on a null genome.  This error may be due to a break in backward compatibility in SLiM 3.7 involving addRecombinant() with haploid models; if that seems likely, please see the release notes." << EidosTerminate();
+			
+			target_genomes.push_back(target_genome);
+		}
+		
+		// Now remove all mutations; we don't use bulk operations here because it is simpler to just set them all to the same empty run
+		// BCH 8/12/2021: fixing this code to only reset mutation runs if they presently contain a mutation; do nothing for empty mutruns
+		// This avoids a bunch of mutrun thrash in haploid models that remove all mutations from the second genome in modifyChild(), etc.
+		int mutrun_count = genome_0->mutrun_count_;
+		
+		for (int run_index = 0; run_index < mutrun_count; ++run_index)
+		{
+			MutationRun *shared_empty_run = nullptr;	// different shared empty run for each mutrun index
+			
+			for (int genome_index = 0; genome_index < target_size; ++genome_index)
 			{
-				MutationRun *mutrun = target_genome->mutruns_[run_index].get();
+				Genome *target_genome = target_genomes[genome_index];
+				const MutationRun *mutrun = target_genome->mutruns_[run_index];
 				
 				if (mutrun->size())
 				{
 					// Allocate the shared empty run lazily, since we might not need it (if we're removing mutations from genomes that are empty already)
 					if (!shared_empty_run)
-						shared_empty_run = MutationRun::NewMutationRun();
+					{
+						MutationRunContext &mutrun_context = species->SpeciesMutationRunContextForMutationRunIndex(run_index);
+						shared_empty_run = MutationRun::NewMutationRun(mutrun_context);
+					}
 					
-					target_genome->mutruns_[run_index].reset(shared_empty_run);
+					target_genome->mutruns_[run_index] = shared_empty_run;
 				}
 			}
 		}
 		
 		// invalidate cached mutation refcounts; refcounts have changed
-		pop.cached_tally_genome_count_ = 0;
+		pop.InvalidateMutationReferencesCache();
 		
 		// in this code path we just assume that nonneutral mutations might have been removed
 		any_nonneutral_removed = true;
 	}
 	else
 	{
-		// If the user is creating substitutions for mutations, we now check for consistency at the end of the generation, so that
+		// If the user is creating substitutions for mutations, we now check for consistency at the end of the cycle, so that
 		// we don't have a mutation still segregating while a substitution for it has also been created; see CheckMutationRegistry()
 		// BCH 9/24/2021: Note that we cannot do the opposite check: checking that we only substitute a mutation when it has, in fact,
 		// fixed.  We can't do that because there are models, such as the PAR (pseudo-autosomal region) recipe, that have different
@@ -3850,8 +3970,18 @@ EidosValue_SP Genome_Class::ExecuteMethod_removeMutations(EidosGlobalStringID p_
 		if (create_substitutions)
 			pop.SetMutationRegistryNeedsCheck();
 		
-		// Construct a vector of mutations to remove that is sorted by position
 		int mutations_count = mutations_value->Count();
+		
+		// SPECIES CONSISTENCY CHECK
+		if (mutations_count)
+		{
+			Species *mutations_species = Community::SpeciesForMutations(mutations_value);
+			
+			if (mutations_species != species)
+				EIDOS_TERMINATION << "ERROR (Genome_Class::ExecuteMethod_removeMutations): removeMutations() requires that all mutations belong to the same species as the target genomes." << EidosTerminate();
+		}
+		
+		// Construct a vector of mutations to remove that is sorted by position
 		std::vector<Mutation *> mutations_to_remove;
 		
 		for (int value_index = 0; value_index < mutations_count; ++value_index)
@@ -3941,12 +4071,12 @@ EidosValue_SP Genome_Class::ExecuteMethod_removeMutations(EidosGlobalStringID p_
 			for (int value_index = 0; value_index < mutations_count; ++value_index)
 			{
 				Mutation *mut = (Mutation *)mutations_value->ObjectElementAtIndex(value_index, nullptr);
-				Substitution *sub = new Substitution(*mut, generation);
+				Substitution *sub = new Substitution(*mut, tick);
 				
 				// TREE SEQUENCE RECORDING
 				// When doing tree recording, we additionally keep all fixed mutations (their ids) in a multimap indexed by their position
 				// This allows us to find all the fixed mutations at a given position quickly and easily, for calculating derived states
-				if (sim.RecordingTreeSequence())
+				if (species->RecordingTreeSequence())
 					pop.treeseq_substitutions_map_.emplace(mut->position_, sub);
 				
 				pop.substitutions_.emplace_back(sub);
@@ -3963,7 +4093,7 @@ EidosValue_SP Genome_Class::ExecuteMethod_removeMutations(EidosGlobalStringID p_
 			if (recording_tree_sequence_mutations)
 			{
 				// Mark all non-null genomes in the simulation that are not among the target genomes
-				for (auto subpop_pair : sim.ThePopulation().subpops_)
+				for (auto subpop_pair : species->population_.subpops_)
 					for (Genome *genome : subpop_pair.second->parent_genomes_)
 						genome->scratch_ = (genome->IsNull() ? 0 : 1);
 				
@@ -3986,12 +4116,12 @@ EidosValue_SP Genome_Class::ExecuteMethod_removeMutations(EidosGlobalStringID p_
 				}
 				
 				// Loop through those genomes and log the new derived state at each (unique) position
-				for (auto subpop_pair : sim.ThePopulation().subpops_)
+				for (auto subpop_pair : species->population_.subpops_)
 					for (Genome *genome : subpop_pair.second->parent_genomes_)
 						if (genome->scratch_ == 1)
 						{
 							for (slim_position_t position : unique_positions)
-								sim.RecordNewDerivedState(genome, position, *genome->derived_mutation_ids_at_position(position));
+								species->RecordNewDerivedState(genome, position, *genome->derived_mutation_ids_at_position(position));
 							genome->scratch_ = 0;
 						}
 			}
@@ -4010,22 +4140,28 @@ EidosValue_SP Genome_Class::ExecuteMethod_removeMutations(EidosGlobalStringID p_
 				continue;
 			
 			// We have not yet processed this mutation run; do this mutation run index as a bulk operation
-			int64_t operation_id = ++gSLiM_MutationRun_OperationID;
+			int64_t operation_id = MutationRun::GetNextOperationID();
 			
 			Genome::BulkOperationStart(operation_id, mutrun_index);
+			
+			MutationRunContext &mutrun_context = species->SpeciesMutationRunContextForMutationRunIndex(mutrun_index);
 			
 			for (int genome_index = 0; genome_index < target_size; ++genome_index)
 			{
 				Genome *target_genome = (Genome *)p_target->ObjectElementAtIndex(genome_index, nullptr);
 				
 				if (target_genome->IsNull())
+				{
+					Genome::BulkOperationEnd(operation_id, mutrun_index);	// clean up for SLiMgui
 					EIDOS_TERMINATION << "ERROR (Genome_Class::ExecuteMethod_removeMutations): removeMutations() cannot be called on a null genome.  This error may be due to a break in backward compatibility in SLiM 3.7 involving addRecombinant() with haploid models; if that seems likely, please see the release notes." << EidosTerminate();
+				}
 				
 				// See if WillModifyRunForBulkOperation() can short-circuit the operation for us
-				if (target_genome->WillModifyRunForBulkOperation(operation_id, mutrun_index))
+				MutationRun *mutrun = target_genome->WillModifyRunForBulkOperation(operation_id, mutrun_index, mutrun_context);
+				
+				if (mutrun)
 				{
 					// Remove the specified mutations; see RemoveFixedMutations for the origins of this code
-					MutationRun *mutrun = target_genome->mutruns_[mutrun_index].get();
 					MutationIndex *genome_iter = mutrun->begin_pointer();
 					MutationIndex *genome_backfill_iter = mutrun->begin_pointer();
 					MutationIndex *genome_max = mutrun->end_pointer();
@@ -4080,7 +4216,7 @@ EidosValue_SP Genome_Class::ExecuteMethod_removeMutations(EidosGlobalStringID p_
 			last_handled_mutrun_index = mutrun_index;
 			
 			// invalidate cached mutation refcounts; refcounts have changed
-			pop.cached_tally_genome_count_ = 0;
+			pop.InvalidateMutationReferencesCache();
 		}
 		
 		// TREE SEQUENCE RECORDING
@@ -4093,34 +4229,30 @@ EidosValue_SP Genome_Class::ExecuteMethod_removeMutations(EidosGlobalStringID p_
 				std::vector<slim_position_t> &genome_positions = genome_pair.second;
 				
 				for (slim_position_t position : genome_positions)
-					sim.RecordNewDerivedState(target_genome, position, *target_genome->derived_mutation_ids_at_position(position));
+					species->RecordNewDerivedState(target_genome, position, *target_genome->derived_mutation_ids_at_position(position));
 			}
 		}
 	}
 	
+	// TIMING RESTRICTION
 	// issue a warning if removeMutations() was called at a questionable time, but only if the mutations removed were non-neutral
 	// BCH: added the !create_substitutions check; if a substitution is being created, then it can be assumed that the mutation is fixed
 	// in the model and is thus deemed by the model to make no difference to fitness outcomes (mutations that matter to fitness outcomes
 	// should not be removed when they fix anyway).  This is maybe not absolutely 100% clear, but models that handle their own fixation,
 	// like haploid models and haplodiploid models, should not have to see/suppress this warning.
-	if (any_nonneutral_removed && !create_substitutions && !sim.warned_early_mutation_remove_)
+	if (any_nonneutral_removed && !create_substitutions && !community.warned_early_mutation_remove_)
 	{
-		if (sim.GenerationStage() == SLiMGenerationStage::kWFStage1ExecuteEarlyScripts)
+		if ((community.CycleStage() == SLiMCycleStage::kWFStage0ExecuteFirstScripts) ||
+			(community.CycleStage() == SLiMCycleStage::kWFStage1ExecuteEarlyScripts))
 		{
 			if (!gEidosSuppressWarnings)
 			{
-				p_interpreter.ErrorOutputStream() << "#WARNING (Genome_Class::ExecuteMethod_removeMutations): removeMutations() should probably not be called from an early() event in a WF model; the removed mutation(s) will still influence fitness values during offspring generation." << std::endl;
-				sim.warned_early_mutation_remove_ = true;
+				p_interpreter.ErrorOutputStream() << "#WARNING (Genome_Class::ExecuteMethod_removeMutations): removeMutations() should probably not be called from a first() or early() event in a WF model; the removed mutation(s) will still influence fitness values during offspring generation." << std::endl;
+				community.warned_early_mutation_remove_ = true;
 			}
 		}
-		if (sim.GenerationStage() == SLiMGenerationStage::kNonWFStage6ExecuteLateScripts)
-		{
-			if (!gEidosSuppressWarnings)
-			{
-				p_interpreter.ErrorOutputStream() << "#WARNING (Genome_Class::ExecuteMethod_removeMutations): removeMutations() should probably not be called from an late() event in a nonWF model; the removed mutation(s) will still influence fitness values until partway through the next generation." << std::endl;
-				sim.warned_early_mutation_remove_ = true;
-			}
-		}
+		// Note that there is no equivalent problem in nonWF models, because fitness values are used for survival,
+		// not reproduction, and there is no event stage in the tick cycle that splits fitness from survival.
 	}
 	
 	return gStaticEidosValueVOID;
@@ -4136,7 +4268,8 @@ EidosValue_SP Genome_Class::ExecuteMethod_removeMutations(EidosGlobalStringID p_
 
 void GenomeWalker::NextMutation(void)
 {
-	if (++mutrun_ptr_ >= mutrun_end_)
+	// the !mutrun_ptr_ is actually not necessary, but ASAN wants it to be here...
+	if (!mutrun_ptr_ || (++mutrun_ptr_ >= mutrun_end_))
 	{
 		// finished the current mutation, so move to the next until we find a mutation
 		do
@@ -4148,7 +4281,7 @@ void GenomeWalker::NextMutation(void)
 				return;
 			}
 			
-			MutationRun *mutrun = genome_->mutruns_[mutrun_index_].get();
+			const MutationRun *mutrun = genome_->mutruns_[mutrun_index_];
 			mutrun_ptr_ = mutrun->begin_pointer_const();
 			mutrun_end_ = mutrun->end_pointer_const();
 		}
@@ -4181,7 +4314,7 @@ void GenomeWalker::MoveToPosition(slim_position_t p_position)
 		}
 		
 		// get the information on the mutrun
-		MutationRun *mutrun = genome->mutruns_[mutrun_index_].get();
+		const MutationRun *mutrun = genome->mutruns_[mutrun_index_];
 		mutrun_ptr_ = mutrun->begin_pointer_const();
 		mutrun_end_ = mutrun->end_pointer_const();
 		

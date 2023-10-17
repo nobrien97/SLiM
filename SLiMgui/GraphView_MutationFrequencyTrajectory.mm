@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 3/11/15.
-//  Copyright (c) 2015-2022 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2015-2023 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -21,6 +21,8 @@
 #import "GraphView_MutationFrequencyTrajectory.h"
 #import "SLiMWindowController.h"
 
+#include "community.h"
+
 
 @implementation GraphView_MutationFrequencyTrajectory
 
@@ -28,9 +30,9 @@
 {
 	if (self = [super initWithFrame:frameRect withController:controller])
 	{
-		[self setXAxisRangeFromGeneration];
+		[self setXAxisRangeFromTick];
 		
-		[self setXAxisLabelString:@"Generation"];
+		[self setXAxisLabelString:@"Tick"];
 		[self setYAxisLabelString:@"Frequency"];
 		
 		[self setAllowXAxisUserRescale:YES];
@@ -71,18 +73,8 @@
 - (NSPopUpButton *)addPopUpWithAction:(SEL)action
 {
 	NSPopUpButton *popupButton = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(10, 10, 100, 47) pullsDown:NO];
-	[popupButton setFont:[NSFont systemFontOfSize:[NSFont systemFontSizeForControlSize:NSMiniControlSize]]];
-	
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunknown-pragmas"
-#pragma deploymate push "ignored-api-availability"				// setControlSize: is available on 10.10 and later
-	if ([popupButton respondsToSelector:@selector(setControlSize:)])
-		[popupButton setControlSize:NSMiniControlSize];
-	else
-		[[popupButton cell] setControlSize:NSMiniControlSize];	// BCH 4/7/2016: call on the cell; on the view, not supported in 10.9
-#pragma deploymate pop
-#pragma GCC diagnostic pop
-	
+	[popupButton setFont:[NSFont systemFontOfSize:[NSFont systemFontSizeForControlSize:NSControlSizeMini]]];
+	[popupButton setControlSize:NSControlSizeMini];
 	[popupButton setAutoenablesItems:NO];
 	[popupButton setTarget:self];
 	[popupButton setAction:action];
@@ -113,16 +105,16 @@
 
 - (BOOL)addSubpopulationsToMenu
 {
-	SLiMWindowController *controller = [self slimWindowController];
+	Species *displaySpecies = [self focalDisplaySpecies];
 	NSMenuItem *lastItem;
 	slim_objectid_t firstTag = -1;
 	
 	// Depopulate and populate the menu
 	[subpopulationButton removeAllItems];
 
-	if (![controller invalidSimulation])
+	if (displaySpecies)
 	{
-		Population &population = controller->sim->population_;
+		Population &population = displaySpecies->population_;
 		
 		for (auto popIter = population.subpops_.begin(); popIter != population.subpops_.end(); ++popIter)
 		{
@@ -166,16 +158,16 @@
 
 - (BOOL)addMutationTypesToMenu
 {
-	SLiMWindowController *controller = [self slimWindowController];
+	Species *displaySpecies = [self focalDisplaySpecies];
 	NSMenuItem *lastItem;
 	int firstTag = -1;
 	
 	// Depopulate and populate the menu
 	[mutationTypeButton removeAllItems];
 	
-	if (![controller invalidSimulation])
+	if (displaySpecies)
 	{
-		std::map<slim_objectid_t,MutationType*> &mutationTypes = controller->sim->mutation_types_;
+		std::map<slim_objectid_t,MutationType*> &mutationTypes = displaySpecies->mutation_types_;
 		
 		for (auto mutTypeIter = mutationTypes.begin(); mutTypeIter != mutationTypes.end(); ++mutTypeIter)
 		{
@@ -221,10 +213,10 @@
 - (void)invalidateCachedData
 {
 //	SLiMWindowController *controller = [self slimWindowController];
-//	SLiMSim *sim = controller->sim;
-//	slim_generation_t generation = sim->generation_;
+//	Species &species = controller->community->single_species_;
+//	slim_tick_t tick = community->Tick();
 //	
-//	NSLog(@"-invalidateCachedData called at generation %d", generation);
+//	NSLog(@"-invalidateCachedData called at tick %d", tick);
 	
 	if (frequencyHistoryDict)
 	{
@@ -245,22 +237,25 @@
 	}
 }
 
-- (void)fetchDataForFinishedGeneration
+- (void)fetchDataForFinishedTick
 {
 	SLiMWindowController *controller = [self slimWindowController];
-	SLiMSim *sim = controller->sim;
-	Population &population = sim->population_;
+	Community &community = *controller->community;
+	Species *displaySpecies = [self focalDisplaySpecies];
+	
+	if (!displaySpecies)
+		return;
+	
+	Population &population = displaySpecies->population_;
 	int registry_size;
 	const MutationIndex *registry = population.MutationRegistry(&registry_size);
 	static BOOL alreadyHere = NO;
 	
-#ifdef SLIM_WF_ONLY
 	if (population.child_generation_valid_)
 	{
-		NSLog(@"child_generation_valid_ set in fetchDataForFinishedGeneration");
+		NSLog(@"child_generation_valid_ set in fetchDataForFinishedTick");
 		return;
 	}
-#endif	// SLIM_WF_ONLY
 	
 	// Check that the subpop we're supposed to be surveying exists; if not, bail.
 	BOOL foundSelectedSubpop = NO;
@@ -270,7 +265,7 @@
 		if (subpop_pair.first == _selectedSubpopulationID)	// find our chosen subpop
 			foundSelectedSubpop = YES;
 	
-	for (const std::pair<const slim_objectid_t,MutationType*> &subpop_pair : sim->mutation_types_)
+	for (const std::pair<const slim_objectid_t,MutationType*> &subpop_pair : displaySpecies->mutation_types_)
 		if (subpop_pair.second->mutation_type_index_ == _selectedMutationTypeIndex)	// find our chosen muttype
 			foundSelectedMutType = YES;
 	
@@ -310,6 +305,7 @@
 	//
 	// this code is a slightly modified clone of the code in Population::TallyMutationReferences; here we scan only the
 	// subpopulation that is being displayed in this graph, and tally into gui_scratch_reference_count only
+	// BCH 4/21/2023: This could use mutrun use counts to run faster...
 	//
 	int subpop_total_genome_count = 0;
 	
@@ -339,7 +335,7 @@
 					
 					for (int run_index = 0; run_index < mutrun_count; ++run_index)
 					{
-						MutationRun *mutrun = genome.mutruns_[run_index].get();
+						const MutationRun *mutrun = genome.mutruns_[run_index];
 						const MutationIndex *genome_iter = mutrun->begin_pointer_const();
 						const MutationIndex *genome_end_iter = mutrun->end_pointer_const();
 						
@@ -379,9 +375,9 @@
 			}
 			else
 			{
-				// No history, so we make one starting at this generation; this also sets the updated flag
-				// Note we use sim->generation_ - 1, because the generation counter has already been advanced to the next generation
-				history = [[MutationFrequencyHistory alloc] initWithEntry:value forMutation:mutation atBaseGeneration:sim->generation_ - 1];
+				// No history, so we make one starting at this tick; this also sets the updated flag
+				// Note we use Tick() - 1, because the tick counter has already been advanced to the next tick
+				history = [[MutationFrequencyHistory alloc] initWithEntry:value forMutation:mutation atBaseTick:community.Tick() - 1];
 				
 				[frequencyHistoryDict setObject:history forKey:mutationIDNumber];
 				[history release];
@@ -472,7 +468,7 @@
 	
 	//NSLog(@"frequencyHistoryDict has %lld entries, frequencyHistoryColdStorageLost has %lld entries, frequencyHistoryColdStorageFixed has %lld entries", (int64_t)[frequencyHistoryDict count], (int64_t)[frequencyHistoryColdStorageLost count], (int64_t)[frequencyHistoryColdStorageFixed count]);
 	
-	lastGeneration = sim->generation_;
+	lastTick = community.Tick();
 }
 
 - (void)setSelectedSubpopulationID:(slim_objectid_t)newID
@@ -482,7 +478,7 @@
 		_selectedSubpopulationID = newID;
 		
 		[self invalidateCachedData];
-		[self fetchDataForFinishedGeneration];
+		[self fetchDataForFinishedTick];
 		[self setNeedsDisplay:YES];
 	}
 }
@@ -494,7 +490,7 @@
 		_selectedMutationTypeIndex = newIndex;
 		
 		[self invalidateCachedData];
-		[self fetchDataForFinishedGeneration];
+		[self fetchDataForFinishedTick];
 		[self setNeedsDisplay:YES];
 	}
 }
@@ -516,7 +512,7 @@
 	if (![controller invalidSimulation])
 	{
 		if (![self xAxisIsUserRescaled])
-			[self setXAxisRangeFromGeneration];
+			[self setXAxisRangeFromTick];
 		
 		[self setNeedsDisplay:YES];
 	}
@@ -529,22 +525,22 @@
 	[super controllerRecycled];
 }
 
-- (void)controllerGenerationFinished
+- (void)controllerTickFinished
 {
-	[super controllerGenerationFinished];
+	[super controllerTickFinished];
 	
-	// Check for an unexpected change in generation_, in which case we invalidate all our histories and start over
+	// Check for an unexpected change in tick, in which case we invalidate all our histories and start over
 	SLiMWindowController *controller = [self slimWindowController];
-	SLiMSim *sim = controller->sim;
+	Community *community = controller->community;
 	
-	if (lastGeneration != sim->generation_ - 1)
+	if (lastTick != community->Tick() - 1)
 	{
 		[self invalidateCachedData];
 		[self setNeedsDisplay:YES];
 	}
 	
 	// Fetch and store the frequencies for all mutations of the selected mutation type(s), within the subpopulation selected
-	[self fetchDataForFinishedGeneration];
+	[self fetchDataForFinishedTick];
 }
 
 - (void)updateAfterTick
@@ -567,8 +563,8 @@
 		NSBezierPath *linePath = [NSBezierPath bezierPath];
 		uint16_t firstValue = *entries;
 		double firstFrequency = ((double)firstValue) / UINT16_MAX;
-		slim_generation_t generation = history->baseGeneration;
-		NSPoint firstPoint = NSMakePoint([self plotToDeviceX:generation withInteriorRect:interiorRect], [self plotToDeviceY:firstFrequency withInteriorRect:interiorRect]);
+		slim_tick_t tick = history->baseTick;
+		NSPoint firstPoint = NSMakePoint([self plotToDeviceX:tick withInteriorRect:interiorRect], [self plotToDeviceY:firstFrequency withInteriorRect:interiorRect]);
 		
 		[linePath moveToPoint:firstPoint];
 		
@@ -576,7 +572,7 @@
 		{
 			uint16_t value = entries[entryIndex];
 			double frequency = ((double)value) / UINT16_MAX;
-			NSPoint nextPoint = NSMakePoint([self plotToDeviceX:++generation withInteriorRect:interiorRect], [self plotToDeviceY:frequency withInteriorRect:interiorRect]);
+			NSPoint nextPoint = NSMakePoint([self plotToDeviceX:++tick withInteriorRect:interiorRect], [self plotToDeviceY:frequency withInteriorRect:interiorRect]);
 			
 			[linePath lineToPoint:nextPoint];
 		}
@@ -726,18 +722,18 @@
 	return nil;
 }
 
-- (void)appendEntriesFromArray:(NSArray *)array toString:(NSMutableString *)string completedGenerations:(slim_generation_t)completedGenerations
+- (void)appendEntriesFromArray:(NSArray *)array toString:(NSMutableString *)string completedTicks:(slim_tick_t)completedTicks
 {
 	[array enumerateObjectsUsingBlock:^(MutationFrequencyHistory *history, NSUInteger idx, BOOL *stop) {
 		int entryCount = history->entryCount;
-		slim_generation_t baseGeneration = history->baseGeneration;
+		slim_tick_t baseTick = history->baseTick;
 		
-		for (slim_generation_t gen = 1; gen <= completedGenerations; ++gen)
+		for (slim_tick_t tick = 1; tick <= completedTicks; ++tick)
 		{
-			if (gen < baseGeneration)
+			if (tick < baseTick)
 				[string appendString:@"NA, "];
-			else if (gen - baseGeneration < entryCount)
-				[string appendFormat:@"%.4f, ", ((double)history->entries[gen - baseGeneration]) / UINT16_MAX];
+			else if (tick - baseTick < entryCount)
+				[string appendFormat:@"%.4f, ", ((double)history->entries[tick - baseTick]) / UINT16_MAX];
 			else
 				[string appendString:@"NA, "];
 		}
@@ -749,27 +745,26 @@
 - (NSString *)stringForDataWithController:(SLiMWindowController *)controller
 {
 	NSMutableString *string = [NSMutableString stringWithString:@"# Graph data: fitness trajectories\n"];
-	SLiMSim *sim = controller->sim;
-	slim_generation_t completedGenerations = sim->generation_ - 1;
+	slim_tick_t completedTicks = controller->community->Tick() - 1;
 	
 	[string appendString:[self dateline]];
 	
 	if ([self plotLostMutations])
 	{
 		[string appendString:@"\n\n# Lost mutations:\n"];
-		[self appendEntriesFromArray:frequencyHistoryColdStorageLost toString:string completedGenerations:completedGenerations];
+		[self appendEntriesFromArray:frequencyHistoryColdStorageLost toString:string completedTicks:completedTicks];
 	}
 	
 	if ([self plotFixedMutations])
 	{
 		[string appendString:@"\n\n# Fixed mutations:\n"];
-		[self appendEntriesFromArray:frequencyHistoryColdStorageFixed toString:string completedGenerations:completedGenerations];
+		[self appendEntriesFromArray:frequencyHistoryColdStorageFixed toString:string completedTicks:completedTicks];
 	}
 	
 	if ([self plotActiveMutations])
 	{
 		[string appendString:@"\n\n# Active mutations:\n"];
-		[self appendEntriesFromArray:[frequencyHistoryDict allValues] toString:string completedGenerations:completedGenerations];
+		[self appendEntriesFromArray:[frequencyHistoryDict allValues] toString:string completedTicks:completedTicks];
 	}
 	
 	// Get rid of extra commas
@@ -783,13 +778,13 @@
 
 @implementation MutationFrequencyHistory
 
-- (instancetype)initWithEntry:(uint16_t)value forMutation:(const Mutation *)mutation atBaseGeneration:(slim_generation_t)generation
+- (instancetype)initWithEntry:(uint16_t)value forMutation:(const Mutation *)mutation atBaseTick:(slim_tick_t)tick
 {
 	if (self = [super init])
 	{
 		mutationID = mutation->mutation_id_;
 		mutationType = mutation->mutation_type_ptr_;
-		baseGeneration = generation;
+		baseTick = tick;
 		
 		bufferSize = 0;
 		entryCount = 0;

@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 12/13/14.
-//  Copyright (c) 2014-2022 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2014-2023 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -24,7 +24,8 @@
 #include "eidos_call_signature.h"
 #include "eidos_property_signature.h"
 #include "slim_eidos_block.h"
-#include "slim_sim.h"	// we need to tell the simulation if a DFE is set to non-neutral...
+#include "species.h"
+#include "community.h"
 
 #include <iostream>
 #include <sstream>
@@ -53,12 +54,12 @@ std::ostream& operator<<(std::ostream& p_out, DFEType p_dfe_type)
 #pragma mark -
 
 #ifdef SLIMGUI
-MutationType::MutationType(SLiMSim &p_sim, slim_objectid_t p_mutation_type_id, double p_dominance_coeff, bool p_nuc_based, DFEType p_dfe_type, std::vector<double> p_dfe_parameters, std::vector<std::string> p_dfe_strings, int p_mutation_type_index) :
+MutationType::MutationType(Species &p_species, slim_objectid_t p_mutation_type_id, double p_dominance_coeff, bool p_nuc_based, DFEType p_dfe_type, std::vector<double> p_dfe_parameters, std::vector<std::string> p_dfe_strings, int p_mutation_type_index) :
 #else
-MutationType::MutationType(SLiMSim &p_sim, slim_objectid_t p_mutation_type_id, double p_dominance_coeff, bool p_nuc_based, DFEType p_dfe_type, std::vector<double> p_dfe_parameters, std::vector<std::string> p_dfe_strings) :
+MutationType::MutationType(Species &p_species, slim_objectid_t p_mutation_type_id, double p_dominance_coeff, bool p_nuc_based, DFEType p_dfe_type, std::vector<double> p_dfe_parameters, std::vector<std::string> p_dfe_strings) :
 #endif
 self_symbol_(EidosStringRegistry::GlobalStringIDForString(SLiMEidosScript::IDStringWithPrefix('m', p_mutation_type_id)), EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Object_singleton(this, gSLiM_MutationType_Class))),
-	sim_(p_sim), mutation_type_id_(p_mutation_type_id), dominance_coeff_(static_cast<slim_selcoeff_t>(p_dominance_coeff)), haploid_dominance_coeff_(1.0), dfe_type_(p_dfe_type), dfe_parameters_(p_dfe_parameters), dfe_strings_(p_dfe_strings), nucleotide_based_(p_nuc_based), convert_to_substitution_(false), stack_policy_(MutationStackPolicy::kStack), stack_group_(p_mutation_type_id), cached_dfe_script_(nullptr)
+	species_(p_species), mutation_type_id_(p_mutation_type_id), dominance_coeff_(static_cast<slim_selcoeff_t>(p_dominance_coeff)), haploid_dominance_coeff_(1.0), dfe_type_(p_dfe_type), dfe_parameters_(p_dfe_parameters), dfe_strings_(p_dfe_strings), nucleotide_based_(p_nuc_based), convert_to_substitution_(false), stack_policy_(MutationStackPolicy::kStack), stack_group_(p_mutation_type_id), cached_dfe_script_(nullptr)
 #ifdef SLIM_KEEP_MUTTYPE_REGISTRIES
 	, muttype_registry_call_count_(0), keeping_muttype_registry_(false)
 #endif
@@ -67,7 +68,7 @@ self_symbol_(EidosStringRegistry::GlobalStringIDForString(SLiMEidosScript::IDStr
 #endif
 {
 	// In WF models, convertToSubstitution defaults to T; in nonWF models it defaults to F as specified above
-	if (sim_.ModelType() == SLiMModelType::kModelTypeWF)
+	if (species_.community_.ModelType() == SLiMModelType::kModelTypeWF)
 		convert_to_substitution_ = true;
 	
 	if ((dfe_parameters_.size() == 0) && (dfe_strings_.size() == 0))
@@ -77,7 +78,7 @@ self_symbol_(EidosStringRegistry::GlobalStringIDForString(SLiMEidosScript::IDStr
 	
 	// determine whether this mutation type is initially pure neutral; note that this flag will be
 	// cleared if any mutation of this type has its selection coefficient changed
-	// note also that we do not set SLiMSim.pure_neutral_ here; we wait until this muttype is used
+	// note also that we do not set Species.pure_neutral_ here; we wait until this muttype is used
 	all_pure_neutral_DFE_ = ((dfe_type_ == DFEType::kFixed) && (dfe_parameters_[0] == 0.0));
 	
 	// Nucleotide-based mutations use a special stacking group, -1, and always use stacking policy "l"
@@ -88,7 +89,7 @@ self_symbol_(EidosStringRegistry::GlobalStringIDForString(SLiMEidosScript::IDStr
 	}
 	
 	// The fact that we have been created means that stacking policy has changed and needs to be checked
-	sim_.MutationStackPolicyChanged();
+	species_.MutationStackPolicyChanged();
 }
 
 MutationType::~MutationType(void)
@@ -207,18 +208,51 @@ void MutationType::ParseDFEParameters(std::string &p_dfe_type_string, const Eido
 
 double MutationType::DrawSelectionCoefficient(void) const
 {
+	// BCH 11/11/2022: Note that EIDOS_GSL_RNG(omp_get_thread_num()) can take a little bit of time when running
+	// parallel.  We don't want to pass the RNG in, though, because that would slow down the single-threaded
+	// case, where the EIDOS_GSL_RNG(omp_get_thread_num()) call basically compiles away to a global var access.
+	// So here and in similar places, we fetch the RNG rather than passing it in to keep single-threaded fast.
 	switch (dfe_type_)
 	{
 		case DFEType::kFixed:			return dfe_parameters_[0];
-		case DFEType::kGamma:			return gsl_ran_gamma(EIDOS_GSL_RNG, dfe_parameters_[1], dfe_parameters_[0] / dfe_parameters_[1]);
-		case DFEType::kExponential:		return gsl_ran_exponential(EIDOS_GSL_RNG, dfe_parameters_[0]);
-		case DFEType::kNormal:			return gsl_ran_gaussian(EIDOS_GSL_RNG, dfe_parameters_[1]) + dfe_parameters_[0];
-		case DFEType::kWeibull:			return gsl_ran_weibull(EIDOS_GSL_RNG, dfe_parameters_[0], dfe_parameters_[1]);
+			
+		case DFEType::kGamma:
+		{
+			gsl_rng *rng = EIDOS_GSL_RNG(omp_get_thread_num());
+			return gsl_ran_gamma(rng, dfe_parameters_[1], dfe_parameters_[0] / dfe_parameters_[1]);
+		}
+			
+		case DFEType::kExponential:
+		{
+			gsl_rng *rng = EIDOS_GSL_RNG(omp_get_thread_num());
+			return gsl_ran_exponential(rng, dfe_parameters_[0]);
+		}
+			
+		case DFEType::kNormal:
+		{
+			gsl_rng *rng = EIDOS_GSL_RNG(omp_get_thread_num());
+			return gsl_ran_gaussian(rng, dfe_parameters_[1]) + dfe_parameters_[0];
+		}
+			
+		case DFEType::kWeibull:
+		{
+			gsl_rng *rng = EIDOS_GSL_RNG(omp_get_thread_num());
+			return gsl_ran_weibull(rng, dfe_parameters_[0], dfe_parameters_[1]);
+		}
 			
 		case DFEType::kScript:
 		{
 			// We have a script string that we need to execute, and it will return a float or integer to us.  This
 			// is basically a lambda call, so the code here is parallel to the executeLambda() code in many ways.
+			
+#ifdef DEBUG_LOCKS_ENABLED
+			// When running multi-threaded, this code is not re-entrant because it runs an Eidos interpreter.  We use
+			// EidosDebugLock to enforce that.  In addition, it can raise, so the caller must be prepared for that.
+			static EidosDebugLock DrawSelectionCoefficient_InterpreterLock("DrawSelectionCoefficient_InterpreterLock");
+			
+			DrawSelectionCoefficient_InterpreterLock.start_critical(0);
+#endif
+			
 			double sel_coeff;
 			
 			// Errors in lambdas should be reported for the lambda script, not for the calling script,
@@ -249,6 +283,10 @@ double MutationType::DrawSelectionCoefficient(void) const
 					delete cached_dfe_script_;
 					cached_dfe_script_ = nullptr;
 					
+#ifdef DEBUG_LOCKS_ENABLED
+					DrawSelectionCoefficient_InterpreterLock.end_critical();
+#endif
+					
 					EIDOS_TERMINATION << "ERROR (MutationType::DrawSelectionCoefficient): tokenize/parse error in type 's' DFE callback script." << EidosTerminate(nullptr);
 				}
 			}
@@ -258,9 +296,10 @@ double MutationType::DrawSelectionCoefficient(void) const
 			
 			try
 			{
-				EidosSymbolTable client_symbols(EidosSymbolTableType::kLocalVariablesTable, &sim_.SymbolTable());
-				EidosFunctionMap &function_map = sim_.FunctionMap();
-				EidosInterpreter interpreter(*cached_dfe_script_, client_symbols, function_map, &sim_, SLIM_OUTSTREAM, SLIM_ERRSTREAM);
+				Community &community = species_.community_;
+				EidosSymbolTable client_symbols(EidosSymbolTableType::kLocalVariablesTable, &community.SymbolTable());
+				EidosFunctionMap &function_map = community.FunctionMap();
+				EidosInterpreter interpreter(*cached_dfe_script_, client_symbols, function_map, &community, SLIM_OUTSTREAM, SLIM_ERRSTREAM);
 				
 				EidosValue_SP result_SP = interpreter.EvaluateInterpreterBlock(false, true);	// do not print output, return the last statement value
 				EidosValue *result = result_SP.get();
@@ -283,11 +322,19 @@ double MutationType::DrawSelectionCoefficient(void) const
 				if (gEidosTerminateThrows)
 					gEidosErrorContext = error_context_save;
 				
+#ifdef DEBUG_LOCKS_ENABLED
+				DrawSelectionCoefficient_InterpreterLock.end_critical();
+#endif
+				
 				throw;
 			}
 			
 			// Restore the normal error context in the event that no exception occurring within the lambda
 			gEidosErrorContext = error_context_save;
+			
+#ifdef DEBUG_LOCKS_ENABLED
+			DrawSelectionCoefficient_InterpreterLock.end_critical();
+#endif
 			
 			return sel_coeff;
 		}
@@ -365,14 +412,17 @@ EidosValue_SP MutationType::GetProperty(EidosGlobalStringID p_property_id)
 			static EidosValue_SP static_dfe_string_w;
 			static EidosValue_SP static_dfe_string_s;
 			
-			if (!static_dfe_string_f)
+#pragma omp critical (GetProperty_distributionType_cache)
 			{
-				static_dfe_string_f = EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String_singleton(gStr_f));
-				static_dfe_string_g = EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String_singleton(gStr_g));
-				static_dfe_string_e = EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String_singleton(gStr_e));
-				static_dfe_string_n = EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String_singleton(gEidosStr_n));
-				static_dfe_string_w = EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String_singleton(gStr_w));
-				static_dfe_string_s = EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String_singleton(gEidosStr_s));
+				if (!static_dfe_string_f)
+				{
+					static_dfe_string_f = EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String_singleton(gStr_f));
+					static_dfe_string_g = EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String_singleton(gStr_g));
+					static_dfe_string_e = EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String_singleton(gStr_e));
+					static_dfe_string_n = EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String_singleton(gEidosStr_n));
+					static_dfe_string_w = EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String_singleton(gStr_w));
+					static_dfe_string_s = EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String_singleton(gEidosStr_s));
+				}
 			}
 			
 			switch (dfe_type_)
@@ -392,6 +442,10 @@ EidosValue_SP MutationType::GetProperty(EidosGlobalStringID p_property_id)
 				return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float_vector(dfe_parameters_));
 			else
 				return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String_vector(dfe_strings_));
+		}
+		case gID_species:
+		{
+			return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Object_singleton(&species_, gSLiM_Species_Class));
 		}
 			
 			// variables
@@ -415,11 +469,16 @@ EidosValue_SP MutationType::GetProperty(EidosGlobalStringID p_property_id)
 			static EidosValue_SP static_policy_string_f;
 			static EidosValue_SP static_policy_string_l;
 			
-			if (!static_policy_string_s)
+#pragma omp critical (GetProperty_mutationStackPolicy_cache)
 			{
-				static_policy_string_s = EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String_singleton(gEidosStr_s));
-				static_policy_string_f = EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String_singleton(gStr_f));
-				static_policy_string_l = EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String_singleton(gStr_l));
+				if (!static_policy_string_s)
+				{
+					THREAD_SAFETY_IN_ACTIVE_PARALLEL("MutationType::GetProperty(): usage of statics");
+					
+					static_policy_string_s = EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String_singleton(gEidosStr_s));
+					static_policy_string_f = EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String_singleton(gStr_f));
+					static_policy_string_l = EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String_singleton(gStr_l));
+				}
 			}
 			
 			switch (stack_policy_)
@@ -529,8 +588,8 @@ void MutationType::SetProperty(EidosGlobalStringID p_property_id, const EidosVal
 			
 			// Changing the dominance coefficient means that the cached fitness effects of all mutations using this type
 			// become invalid.  We set a flag here to indicate that values that depend on us need to be recached.
-			sim_.any_dominance_coeff_changed_ = true;
-			sim_.mutation_types_changed_ = true;
+			species_.any_dominance_coeff_changed_ = true;
+			species_.community_.mutation_types_changed_ = true;
 			
 			return;
 		}
@@ -543,8 +602,8 @@ void MutationType::SetProperty(EidosGlobalStringID p_property_id, const EidosVal
 			
 			// Changing the haploid dominance coefficient means that the cached fitness effects of all mutations using this type
 			// become invalid.  We set a flag here to indicate that values that depend on us need to be recached.
-			sim_.any_dominance_coeff_changed_ = true;
-			sim_.mutation_types_changed_ = true;
+			species_.any_dominance_coeff_changed_ = true;
+			species_.community_.mutation_types_changed_ = true;
 			
 			return;
 		}
@@ -558,7 +617,7 @@ void MutationType::SetProperty(EidosGlobalStringID p_property_id, const EidosVal
 			
 			stack_group_ = new_group;
 			
-			sim_.MutationStackPolicyChanged();
+			species_.MutationStackPolicyChanged();
 			return;
 		}
 			
@@ -578,7 +637,7 @@ void MutationType::SetProperty(EidosGlobalStringID p_property_id, const EidosVal
 			else
 				EIDOS_TERMINATION << "ERROR (MutationType::SetProperty): new value for property " << EidosStringRegistry::StringForGlobalStringID(p_property_id) << " must be \"s\", \"f\", or \"l\"." << EidosTerminate();
 			
-			sim_.MutationStackPolicyChanged();
+			species_.MutationStackPolicyChanged();
 			return;
 		}
 			
@@ -687,18 +746,22 @@ EidosValue_SP MutationType::ExecuteMethod_setDistribution(EidosGlobalStringID p_
 	
 	MutationType::ParseDFEParameters(dfe_type_string, p_arguments.data() + 1, (int)p_arguments.size() - 1, &dfe_type, &dfe_parameters, &dfe_strings);
 	
+	// keep track of whether we have ever seen a type 's' (scripted) DFE; if so, we switch to a slower case when evolving
+	if (dfe_type == DFEType::kScript)
+		species_.type_s_dfes_present_ = true;
+	
 	// Everything seems to be in order, so replace our distribution info with the new info
 	dfe_type_ = dfe_type;
 	dfe_parameters_ = dfe_parameters;
 	dfe_strings_ = dfe_strings;
 	
 	// mark that mutation types changed, so they get redisplayed in SLiMgui
-	sim_.mutation_types_changed_ = true;
+	species_.community_.mutation_types_changed_ = true;
 	
 	// check whether we are now using a DFE type that is non-neutral; check and set pure_neutral_ and all_pure_neutral_DFE_
 	if ((dfe_type_ != DFEType::kFixed) || (dfe_parameters_[0] != 0.0))
 	{
-		sim_.pure_neutral_ = false;
+		species_.pure_neutral_ = false;
 		all_pure_neutral_DFE_ = false;
 	}
 	
@@ -722,6 +785,8 @@ const std::vector<EidosPropertySignature_CSP> *MutationType_Class::Properties(vo
 	
 	if (!properties)
 	{
+		THREAD_SAFETY_IN_ANY_PARALLEL("MutationType_Class::Properties(): not warmed up");
+		
 		properties = new std::vector<EidosPropertySignature_CSP>(*super::Properties());
 		
 		properties->emplace_back((EidosPropertySignature *)(new EidosPropertySignature(gStr_id,						true,	kEidosValueMaskInt | kEidosValueMaskSingleton))->DeclareAcceleratedGet(MutationType::GetProperty_Accelerated_id));
@@ -733,6 +798,7 @@ const std::vector<EidosPropertySignature_CSP> *MutationType_Class::Properties(vo
 		properties->emplace_back((EidosPropertySignature *)(new EidosPropertySignature(gStr_mutationStackGroup,		false,	kEidosValueMaskInt | kEidosValueMaskSingleton)));
 		properties->emplace_back((EidosPropertySignature *)(new EidosPropertySignature(gStr_mutationStackPolicy,	false,	kEidosValueMaskString | kEidosValueMaskSingleton)));
 		properties->emplace_back((EidosPropertySignature *)(new EidosPropertySignature(gStr_nucleotideBased,		true,	kEidosValueMaskLogical | kEidosValueMaskSingleton)));
+		properties->emplace_back((EidosPropertySignature *)(new EidosPropertySignature(gStr_species,				true,	kEidosValueMaskObject | kEidosValueMaskSingleton, gSLiM_Species_Class)));
 		properties->emplace_back((EidosPropertySignature *)(new EidosPropertySignature(gStr_tag,					false,	kEidosValueMaskInt | kEidosValueMaskSingleton))->DeclareAcceleratedGet(MutationType::GetProperty_Accelerated_tag)->DeclareAcceleratedSet(MutationType::SetProperty_Accelerated_tag));
 		properties->emplace_back((EidosPropertySignature *)(new EidosPropertySignature(gEidosStr_color,				false,	kEidosValueMaskString | kEidosValueMaskSingleton)));
 		properties->emplace_back((EidosPropertySignature *)(new EidosPropertySignature(gStr_colorSubstitution,		false,	kEidosValueMaskString | kEidosValueMaskSingleton)));
@@ -749,6 +815,8 @@ const std::vector<EidosMethodSignature_CSP> *MutationType_Class::Methods(void) c
 	
 	if (!methods)
 	{
+		THREAD_SAFETY_IN_ANY_PARALLEL("MutationType_Class::Methods(): not warmed up");
+		
 		methods = new std::vector<EidosMethodSignature_CSP>(*super::Methods());
 		
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_drawSelectionCoefficient, kEidosValueMaskFloat))->AddInt_OS("n", gStaticEidosValue_Integer1));

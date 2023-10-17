@@ -3,7 +3,7 @@
 //  Eidos
 //
 //  Created by Ben Haller on 4/1/15.
-//  Copyright (c) 2015-2022 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2015-2023 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -91,6 +91,8 @@ EidosScript::~EidosScript(void)
 
 void EidosScript::Tokenize(bool p_make_bad_tokens, bool p_keep_nonsignificant)
 {
+	THREAD_SAFETY_IN_ACTIVE_PARALLEL("EidosScript::Tokenize():  token_stream_ change");
+	
 	// set up error tracking for this script
 	// Note: Here and elsewhere in this method, if p_make_bad_tokens is set we do not do error tracking.  This
 	// is so that we don't overwrite valid error tracking info when we're tokenizing for internal purposes.
@@ -686,6 +688,17 @@ void EidosScript::Tokenize(bool p_make_bad_tokens, bool p_keep_nonsignificant)
 				std::string identifierString = script_string_.substr(token_start, token_end - token_start + 1);
 				bool contains_illegal = false;
 				
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunknown-warning-option"
+#pragma GCC diagnostic ignored "-Wbidi-chars"
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wunknown-warning-option"
+#pragma clang diagnostic ignored "-Wbidi-chars"
+				// BCH 8/14/2023: Note that seven lines are commented out below.  They are correct, but they
+				// produce a warning "unpaired UTF-8 bidirectional control character detected [-Wbidi-chars=]",
+				// and disabling the bidi-chars warning does not suppress that warning, annoyingly.  This is
+				// very edge anyhow, so I'm commenting these lines out for now.  A better fix should be
+				// possible, but it doesn't seem worth worrying about for now.
 				contains_illegal = contains_illegal || (identifierString.find("\u2000") != std::string::npos);
 				contains_illegal = contains_illegal || (identifierString.find("\u2001") != std::string::npos);
 				contains_illegal = contains_illegal || (identifierString.find("\u2002") != std::string::npos);
@@ -704,11 +717,11 @@ void EidosScript::Tokenize(bool p_make_bad_tokens, bool p_keep_nonsignificant)
 				contains_illegal = contains_illegal || (identifierString.find("\u200f") != std::string::npos);
 				contains_illegal = contains_illegal || (identifierString.find("\u2028") != std::string::npos);
 				contains_illegal = contains_illegal || (identifierString.find("\u2029") != std::string::npos);
-				contains_illegal = contains_illegal || (identifierString.find("\u202a") != std::string::npos);
-				contains_illegal = contains_illegal || (identifierString.find("\u202b") != std::string::npos);
+				//contains_illegal = contains_illegal || (identifierString.find("\u202a") != std::string::npos);
+				//contains_illegal = contains_illegal || (identifierString.find("\u202b") != std::string::npos);
 				contains_illegal = contains_illegal || (identifierString.find("\u202c") != std::string::npos);
-				contains_illegal = contains_illegal || (identifierString.find("\u202d") != std::string::npos);
-				contains_illegal = contains_illegal || (identifierString.find("\u202e") != std::string::npos);
+				//contains_illegal = contains_illegal || (identifierString.find("\u202d") != std::string::npos);
+				//contains_illegal = contains_illegal || (identifierString.find("\u202e") != std::string::npos);
 				contains_illegal = contains_illegal || (identifierString.find("\u202f") != std::string::npos);
 				contains_illegal = contains_illegal || (identifierString.find("\u205f") != std::string::npos);
 				contains_illegal = contains_illegal || (identifierString.find("\u2060") != std::string::npos);
@@ -717,9 +730,9 @@ void EidosScript::Tokenize(bool p_make_bad_tokens, bool p_keep_nonsignificant)
 				contains_illegal = contains_illegal || (identifierString.find("\u2063") != std::string::npos);
 				contains_illegal = contains_illegal || (identifierString.find("\u2064") != std::string::npos);
 				contains_illegal = contains_illegal || (identifierString.find("\u2065") != std::string::npos);
-				contains_illegal = contains_illegal || (identifierString.find("\u2066") != std::string::npos);
-				contains_illegal = contains_illegal || (identifierString.find("\u2067") != std::string::npos);
-				contains_illegal = contains_illegal || (identifierString.find("\u2068") != std::string::npos);
+				//contains_illegal = contains_illegal || (identifierString.find("\u2066") != std::string::npos);
+				//contains_illegal = contains_illegal || (identifierString.find("\u2067") != std::string::npos);
+				//contains_illegal = contains_illegal || (identifierString.find("\u2068") != std::string::npos);
 				contains_illegal = contains_illegal || (identifierString.find("\u2069") != std::string::npos);
 				contains_illegal = contains_illegal || (identifierString.find("\u206a") != std::string::npos);
 				contains_illegal = contains_illegal || (identifierString.find("\u206b") != std::string::npos);
@@ -727,6 +740,8 @@ void EidosScript::Tokenize(bool p_make_bad_tokens, bool p_keep_nonsignificant)
 				contains_illegal = contains_illegal || (identifierString.find("\u206d") != std::string::npos);
 				contains_illegal = contains_illegal || (identifierString.find("\u206e") != std::string::npos);
 				contains_illegal = contains_illegal || (identifierString.find("\u206f") != std::string::npos);
+#pragma clang diagnostic pop
+#pragma GCC diagnostic pop
 				
 				if (contains_illegal)
 				{
@@ -852,6 +867,8 @@ void EidosScript::Match(EidosTokenType p_token_type, const char *p_context_cstr)
 
 EidosASTNode *EidosScript::Parse_InterpreterBlock(bool p_allow_functions)
 {
+	THREAD_SAFETY_IN_ACTIVE_PARALLEL("EidosScript::Parse_InterpreterBlock(): parse_root_ change");
+	
 	EidosToken temp_token(EidosTokenType::kTokenInterpreterBlock, gEidosStr_empty_string, 0, 0, 0, 0, 0);
 	
 	EidosASTNode *node = new (gEidosASTNodePool->AllocateChunk()) EidosASTNode(&temp_token);	// the stack-local token is replaced below
@@ -1043,7 +1060,7 @@ EidosASTNode *EidosScript::Parse_SelectionStatement(void)
 		test_expr = Parse_Expr();
 		node->AddChild(test_expr);
 		
-#if defined(SLIMGUI) && (SLIMPROFILING == 1)
+#if (SLIMPROFILING == 1)
 		// PROFILING
 		node->full_range_end_token_ = current_token_;
 #endif
@@ -1083,7 +1100,7 @@ EidosASTNode *EidosScript::Parse_DoWhileStatement(void)
 	{
 		node = new (gEidosASTNodePool->AllocateChunk()) EidosASTNode(current_token_);
 		
-#if defined(SLIMGUI) && (SLIMPROFILING == 1)
+#if (SLIMPROFILING == 1)
 		// PROFILING
 		node->full_range_end_token_ = current_token_;
 #endif
@@ -1133,7 +1150,7 @@ EidosASTNode *EidosScript::Parse_WhileStatement(void)
 		test_expr = Parse_Expr();
 		node->AddChild(test_expr);
 		
-#if defined(SLIMGUI) && (SLIMPROFILING == 1)
+#if (SLIMPROFILING == 1)
 		// PROFILING
 		node->full_range_end_token_ = current_token_;
 #endif
@@ -1177,7 +1194,7 @@ EidosASTNode *EidosScript::Parse_ForStatement(void)
 		range_expr = Parse_Expr();
 		node->AddChild(range_expr);
 		
-#if defined(SLIMGUI) && (SLIMPROFILING == 1)
+#if (SLIMPROFILING == 1)
 		// PROFILING
 		node->full_range_end_token_ = current_token_;
 #endif
@@ -1730,7 +1747,7 @@ EidosASTNode *EidosScript::Parse_PostfixExpr(void)
 				
 				// now we have reached our end bracket and can close up
 				
-#if defined(SLIMGUI) && (SLIMPROFILING == 1)
+#if (SLIMPROFILING == 1)
 				// PROFILING
 				node->full_range_end_token_ = current_token_;
 #endif
@@ -1749,7 +1766,7 @@ EidosASTNode *EidosScript::Parse_PostfixExpr(void)
 				
 				if (current_token_type_ == EidosTokenType::kTokenRParen)
 				{
-#if defined(SLIMGUI) && (SLIMPROFILING == 1)
+#if (SLIMPROFILING == 1)
 					// PROFILING
 					node->full_range_end_token_ = current_token_;
 #endif
@@ -1760,7 +1777,7 @@ EidosASTNode *EidosScript::Parse_PostfixExpr(void)
 				{
 					Parse_ArgumentExprList(node);	// Parse_ArgumentExprList() adds the arguments directly to the function call node
 					
-#if defined(SLIMGUI) && (SLIMPROFILING == 1)
+#if (SLIMPROFILING == 1)
 					// PROFILING
 					node->full_range_end_token_ = current_token_;
 #endif

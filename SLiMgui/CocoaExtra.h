@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 1/22/15.
-//  Copyright (c) 2015-2022 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2015-2023 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -30,13 +30,6 @@ bool SLiM_AmIBeingDebugged(void);
 
 // An NSTableView subclass that avoids becoming first responder; annoying that this is necessary, sigh...
 @interface SLiMTableView : NSTableView
-@end
-
-// A view to show a color stripe for the range of values of a metric such as fitness or selection coefficient
-@interface SLiMColorStripeView : NSView
-@property (nonatomic) int metricToPlot;		// 1 == fitness, 2 == selection coefficient; this changes which function below gets called
-@property (nonatomic) double scalingFactor;
-@property (nonatomic) BOOL enabled;
 @end
 
 // A button that runs a pop-up menu when clicked
@@ -107,7 +100,15 @@ void RGBForSelectionCoeff(double selectionCoeff, float *colorRed, float *colorGr
 - (void)slimSetTintColor:(NSColor *)tintColor;
 @end
 
-// A subclass to make an NSTextView that selects its content when clicked, for the generation textfield
+// This is a vestigial tail left over from the old ScriptMod class of SLiMguiLegacy; I ripped out that class completely,
+// but a few other places in the code used its validation logic for their own purposes, so I've moved that to CocoaExtra.
+@interface ScriptMod : NSObject
++ (BOOL)validIntValueInTextField:(NSTextField *)textfield withMin:(int64_t)minValue max:(int64_t)maxValue;
++ (BOOL)validFloatValueInTextField:(NSTextField *)textfield withMin:(double)minValue max:(double)maxValue;
++ (NSColor *)backgroundColorForValidationState:(BOOL)valid;
+@end
+
+// A subclass to make an NSTextView that selects its content when clicked, for the tick textfield
 @interface SLiMAutoselectTextField : NSTextField
 @end
 

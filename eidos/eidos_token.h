@@ -3,7 +3,7 @@
 //  Eidos
 //
 //  Created by Ben Haller on 7/27/15.
-//  Copyright (c) 2015-2022 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2015-2023 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -141,6 +141,8 @@ std::ostream &operator<<(std::ostream &p_outstream, const EidosToken &p_token);
 // Setting the error position; call just before you throw, or better, pass the token to EidosTerminate()
 inline __attribute__((always_inline)) EidosErrorPosition PushErrorPositionFromToken(const EidosToken *p_naughty_token_)
 {
+	THREAD_SAFETY_IN_ACTIVE_PARALLEL("PushErrorPositionFromToken(): gEidosErrorContext change");
+	
 	EidosErrorPosition old_position = gEidosErrorContext.errorPosition;
 	
 	gEidosErrorContext.errorPosition.characterStartOfError = p_naughty_token_->token_start_;
