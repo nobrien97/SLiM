@@ -268,7 +268,7 @@ double Individual::internalSumOfMutationsOfType(const slim_objectid_t &mutType)
 		
 		for (int run_index = 0; run_index < mutrun_count; ++run_index)
 		{
-			MutationRun *mutrun = genome1->mutruns_[run_index].get();
+			const MutationRun *mutrun = genome1->mutruns_[run_index];
 			int genome1_count = mutrun->size();
 			const MutationIndex *genome1_ptr = mutrun->begin_pointer_const();
 			
@@ -287,59 +287,7 @@ double Individual::internalSumOfMutationsOfType(const slim_objectid_t &mutType)
 		
 		for (int run_index = 0; run_index < mutrun_count; ++run_index)
 		{
-			MutationRun *mutrun = genome2->mutruns_[run_index].get();
-			int genome2_count = mutrun->size();
-			const MutationIndex *genome2_ptr = mutrun->begin_pointer_const();
-			
-			for (int mut_index = 0; mut_index < genome2_count; ++mut_index)
-			{
-				Mutation *mut_ptr = mut_block_ptr + genome2_ptr[mut_index];
-				
-				if (mut_ptr->mutation_type_ptr_->mutation_type_id_ == mutType)
-					selcoeff_sum += mut_ptr->selection_coeff_;
-			}
-		}
-	}
-	return selcoeff_sum;
-}
-
-
-// Get the sum of a vector of mutations of a given type - output in C++, not in Eidos
-double Individual::internalSumOfMutationsOfType(const slim_objectid_t &mutType)
-{	
-	// Count the number of mutations of the given type
-	Mutation *mut_block_ptr = gSLiM_Mutation_Block;
-	
-	Genome *genome1 = this->genome1_;
-	Genome *genome2 = this->genome2_;
-	double selcoeff_sum = 0.0;
-		
-	if (!genome1->IsNull())
-	{
-		int mutrun_count = genome1->mutrun_count_;
-		
-		for (int run_index = 0; run_index < mutrun_count; ++run_index)
-		{
-			MutationRun *mutrun = genome1->mutruns_[run_index].get();
-			int genome1_count = mutrun->size();
-			const MutationIndex *genome1_ptr = mutrun->begin_pointer_const();
-			
-			for (int mut_index = 0; mut_index < genome1_count; ++mut_index)
-			{
-				Mutation *mut_ptr = mut_block_ptr + genome1_ptr[mut_index];
-				
-				if (mut_ptr->mutation_type_ptr_->mutation_type_id_ == mutType)
-					selcoeff_sum += mut_ptr->selection_coeff_;
-			}
-		}
-	}
-	if (!genome2->IsNull())
-	{
-		int mutrun_count = genome2->mutrun_count_;
-		
-		for (int run_index = 0; run_index < mutrun_count; ++run_index)
-		{
-			MutationRun *mutrun = genome2->mutruns_[run_index].get();
+			const MutationRun *mutrun = genome2->mutruns_[run_index];
 			int genome2_count = mutrun->size();
 			const MutationIndex *genome2_ptr = mutrun->begin_pointer_const();
 			
@@ -1353,7 +1301,7 @@ void Individual::SetProperty(EidosGlobalStringID p_property_id, const EidosValue
 		case gID_phenotype:
 		{
 			phenotype_value_ = p_value.FloatAtIndex(0, nullptr);
-			s_any_individual_or_genome_tag_set_ = true;
+			s_any_individual_tag_set_ = true;
 			return;
 		}
 		case gID_phenotype4:
@@ -1447,7 +1395,7 @@ void Individual::SetProperty_Accelerated_tagF(EidosObject **p_values, size_t p_v
 
 void Individual::SetProperty_Accelerated_phenotype(EidosObject **p_values, size_t p_values_size, const EidosValue &p_source, size_t p_source_size)
 {
-	s_any_individual_or_genome_tag_set_ = true;
+	s_any_individual_tag_set_ = true;
 	
 	// SLiMCastToUsertagTypeOrRaise() is a no-op at present
 	if (p_source_size == 1)
