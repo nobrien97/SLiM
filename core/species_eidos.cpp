@@ -27,6 +27,10 @@
 #include "polymorphism.h"
 #include "interaction_type.h"
 #include "log_file.h"
+#include "boost/numeric/odeint.hpp"
+#include "matrixClass.h"
+#include "odePar.h"
+#include "ascent/Ascent.h"
 
 #include <iostream>
 #include <iomanip>
@@ -2296,6 +2300,13 @@ EidosValue_SP Species::ExecuteMethod_mutationsOfType(EidosGlobalStringID p_metho
 	}
 }
 
+	// Calculates area under the curve via the trapezoid method
+	#pragma omp declare simd
+	double Species::AUC(const double &h, const double &a, const double &b)
+	{
+		return ((a + b) * 0.5) * h;
+	}
+
 //	*********************	- (float)NARIntegrate(Object<Individual> individuals)
 // Extending this: Switch statement to choose certain ODEs? How do we combine multiple ODEs together?
 //
@@ -2307,12 +2318,6 @@ EidosValue_SP Species::ExecuteMethod_NARIntegrate(EidosGlobalStringID p_method_I
 	EidosValue_SP result_SP(nullptr);
 	EidosValue_Object *individuals_value = (EidosValue_Object *)p_arguments[0].get();
 	
-	// Lambda to calculate area under the curve via the trapezoid method
-	auto AUC = [](const double &h, const double &a, const double &b)
-	{
-		return ((a + b) * 0.5) * h;
-	};
-
 	// Iterate over all individuals, calculating their NAR AUC from their parameter set:
 	// First need to actually get the individuals and reserve some space for each individual's result
 	int inds_count = p_arguments[0].get()->Count();
@@ -2376,7 +2381,7 @@ EidosValue_SP Species::ExecuteMethod_NARIntegrate(EidosGlobalStringID p_method_I
 		}
 
 
-			// Lambda to compare combination to ODEPar
+		// Lambda to compare combination to ODEPar
 		auto compareODE = [&EV_data](const std::unique_ptr<ODEPar>& existing)
 		{
 			return EV_data == *existing.get();
@@ -2418,18 +2423,17 @@ EidosValue_SP Species::ExecuteMethod_NARIntegrate(EidosGlobalStringID p_method_I
 		}
 
 		// Calculate AUC
-		std::vector<double> z_auc = std::vector<double>(recorder.history.size());
+		double z = 0;
+
+		#pragma omp simd reduction(+:z)
 		for (uint i = 0; i < recorder.history.size()-1; ++i)
 		{
-			z_auc[i] = AUC(0.1, (double)recorder.history[i][2], (double)recorder.history[i + 1][2]);
+			z += Species::AUC(0.1, (double)recorder.history[i][2], (double)recorder.history[i + 1][2]);
 		}
 		
-		double z = std::accumulate(z_auc.begin(), z_auc.end(), 0.0);
-
 		// Check that z is > 0
-		z = (z >= 0) ? z : 0.0; 
+		z = (z >= 0) ? z : 0.0;
 		out.emplace_back(z);
-		
 		// Add this to the list of existing solutions
 		this->pastCombos.emplace_back(std::make_unique<ODEPar>(z, EV_data.aZ(), EV_data.bZ(), EV_data.KZ(), EV_data.KXZ()));
 		// Update the individual's phenoPars values
@@ -2449,12 +2453,13 @@ EidosValue_SP Species::ExecuteMethod_pairwiseR2(EidosGlobalStringID p_method_id,
 	// see how r2 changes depending on MAF of shared mutation types vs different mutation types
 
 	// TODO: This ignores all subpop information, just works over the first one
-	Subpopulation *subpop_value = SLiM_ExtractSubpopulationFromEidosValue_io(p_arguments[0].get(), 0, *this, "pairwiseR2()");
+	Subpopulation *subpop_value = SLiM_ExtractSubpopulationFromEidosValue_io(p_arguments[0].get(), 0, &(this->community_), this, "pairwiseR2()");
 
 	std::vector<Genome*>& genomes = subpop_value->CurrentGenomes();
-	int genomelength = population_.sim_.TheChromosome().last_position_ + 1;
+	
+	int genomelength = subpop_value->species_.TheChromosome().last_position_ + 1;
 	double singletonFreq = (double)(1.0/genomes.size());
-	double denominator = population_.TallyMutationReferences(nullptr, false); // Denominator for freq calc + tally mutations
+	double denominator = population_.TallyMutationReferencesAcrossPopulation(false); // Denominator for freq calc + tally mutations
 	
 	
 	// Store the MAFs, mutation positions, and mutation ID in a vector
@@ -3724,6 +3729,40 @@ EidosValue_SP Species::ExecuteMethod_treeSeqOutput(EidosGlobalStringID p_method_
 	WriteTreeSequence(path_string, binary, simplify, includeModel, metadata_dict);
 	
 	return gStaticEidosValueVOID;
+}
+
+// Helper Function for pairwiseR2 - gets the shared frequency between mutations
+double Species::sharedMutFreq(std::vector<Genome*>& genomes, MutationIndex mut1, MutationIndex mut2) {
+	// Find the frequency of AB: number of genomes with alleles i and j and loci n and m
+	auto containsBothMuts = [mut1, mut2] (Genome* genome) { 
+		return (bool)((genome->contains_mutation(mut1)) && (genome->contains_mutation(mut2))); 
+		};
+
+	// Go through each genome, determine if it has both mutations or not, add to counter
+	int validGenomes = 0;
+//	size_t validGenomes = 0;
+	for (Genome* g : genomes)
+	{
+		validGenomes += (int)containsBothMuts(g);
+//		validGenomes += (size_t)containsBothMuts(g);
+	}	
+	return (double)validGenomes/genomes.size();
+	//return ((double)validGenomes)/genomes.size();
+}
+
+// Helper function for getHaplos - detects if a site is multiallelic
+bool Species::isMultiAllelic(int pos, std::vector<Mutation*> muts)
+{
+	// Note: muts assumes it has been culled for m1 and m2 mutations already, only checks position
+
+	// Remove all non matching mutations and check if theres more than one segregating mutation there
+	muts.erase(std::remove_if(muts.begin(), muts.end(), 
+	[pos] (Mutation* mut) {
+		return !(mut->position_ == pos);
+	}), muts.end()); 
+
+	return muts.size() > 1 ? true : false;
+
 }
 
 
