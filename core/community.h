@@ -169,7 +169,6 @@ public:
 	// provenance-related stuff: remembering the seed and command-line args
 	unsigned long int original_seed_;												// the initial seed value, from the user via the -s CLI option, or auto-generated
 	std::vector<std::string> cli_params_;											// CLI parameters; an empty vector when run in SLiMgui, at least for now
-	std::vector<std::unique_ptr<ODEPar>> pastCombos;								// cache of past ODE solutions
 	
 #if (SLIMPROFILING == 1)
 	// PROFILING : Community now keeps track of overall profiling variables

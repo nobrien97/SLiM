@@ -2248,27 +2248,29 @@ bool Community::_RunOneTickWF(void)
 
 		// Keep only ODEPars with a high frequency: count size >= 1, 
 		// make sure this doesn't get too large also: store only 50 at a time
-
-		if (pastCombos.size())
+	for (Species *species : all_species_)
+	{
+		if (species->pastCombos.size())
 		{
-			if (pastCombos.size() > 50) 
+			if (species->pastCombos.size() > 50) 
 			{
 				auto isRare = [](const std::unique_ptr<ODEPar>& ODE1)
 				{
 					return (ODE1.get()->count < 2);
 				};
 
-				pastCombos.erase(std::remove_if(pastCombos.begin(), pastCombos.end(), isRare), pastCombos.end());
+				species->pastCombos.erase(std::remove_if(species->pastCombos.begin(), 
+											species->pastCombos.end(), isRare), species->pastCombos.end());
 			}
 			
 		// Reset ODEPar counts so the next generation can start clean: 
 		// this loop should only be over a few pastCombos
-			for (auto& ODE : this->pastCombos)
+			for (auto& ODE : species->pastCombos)
 			{
 				ODE.get()->count = 1;
 			}
 		}
-
+	}
 		
 		// Decide whether the simulation is over.  We need to call EstimatedLastTick() every time; we can't
 		// cache it, because it can change based upon changes in script registration / deregistration.
