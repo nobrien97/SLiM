@@ -15,7 +15,7 @@ R"V0G0N(
 // random data.  These tests are thus complementary to those in eidos_test.cpp.
 
 // Note that this test file gets subdivided and run in chunks; this improves error reporting.  See
-// _RunUserDefinedFunctionTests() in eidos_test.cpp.
+// _RunUserDefinedFunctionTests() in eidos_test_functions_other.cpp.
 
 // ***********************************************************************************************
 
@@ -134,7 +134,8 @@ for (iter in 1:100)
 	x = rnorm(10);		// float
 	xbuiltin = cumSum(x);
 	xuserdef = cumSum_func(x);
-	if (!identical(xbuiltin, xuserdef)) stop('Mismatch in test of cumSum(f)');
+	// tolerance because sum() can get a little roundoff error due to SIMD
+	if (!all(abs(xbuiltin - xuserdef) < 1e-10)) stop('Mismatch in test of cumSum(f)');
 }
 
 // ***********************************************************************************************
@@ -269,7 +270,8 @@ for (iter in 1:100)
 	x = rnorm(10);		// float
 	xbuiltin = mean(x);
 	xuserdef = mean_func(x);
-	if (!identical(xbuiltin, xuserdef)) stop('Mismatch in test of mean(f)');
+	// tolerance because sum() can get a little roundoff error due to SIMD
+	if (!all(abs(xbuiltin - xuserdef) < 1e-10)) stop('Mismatch in test of mean(f)');
 }
 
 // ***********************************************************************************************
@@ -790,7 +792,8 @@ for (iter in 1:100)
 	x = rnorm(10);		// float
 	xbuiltin = sum(x);
 	xuserdef = sum_func(x);
-	if (!identical(xbuiltin, xuserdef)) stop('Mismatch in test of sum(f)');
+	// tolerance because sum() can get a little roundoff error due to SIMD
+	if (!all(abs(xbuiltin - xuserdef) < 1e-10)) stop('Mismatch in test of sum(f)');
 }
 
 // ***********************************************************************************************

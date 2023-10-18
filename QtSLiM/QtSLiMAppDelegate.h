@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 7/13/2019.
-//  Copyright (c) 2019-2022 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2019-2023 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -71,8 +71,8 @@ public:
     
     // Document opening
     QtSLiMWindow *findMainWindow(const QString &fileName) const;
-    void newFile_WF(void);
-    void newFile_nonWF(void);
+    void newFile_WF(bool includeComments);
+    void newFile_nonWF(bool includeComments);
     QtSLiMWindow *open(QtSLiMWindow *requester);
     QtSLiMWindow *openFile(const QString &fileName, QtSLiMWindow *requester);
     void openRecipeWithName(const QString &recipeName, const QString &recipeScript, QtSLiMWindow *requester);
@@ -108,11 +108,18 @@ public slots:
     // and get dispatched to the right target according to focus.
     void dispatch_preferences(void);
     void dispatch_about(void);
+    void dispatch_showCycle_WF(void);
+    void dispatch_showCycle_nonWF(void);
     void dispatch_help(void);
     void dispatch_quit(void);
     
+    void dispatch_biggerFont(void);
+    void dispatch_smallerFont(void);
+    
     void dispatch_newWF(void);
+    void dispatch_newWF_commentless(void);
     void dispatch_newNonWF(void);
+    void dispatch_newNonWF_commentless(void);
     void dispatch_open(void);
     void dispatch_close(void);
     
@@ -137,6 +144,8 @@ public slots:
     void dispatch_jumpToSelection(void);
     void dispatch_jumpToLine(void);
     
+    void dispatch_focusOnScript(void);
+    void dispatch_focusOnConsole(void);
     void dispatch_checkScript(void);
     void dispatch_prettyprintScript(void);
     void dispatch_reformatScript(void);
@@ -172,6 +181,8 @@ private:
     QVector<QPointer<QWidget>> focusedWindowList;       // a list of all windows, from front to back
     void pruneWindowList(void);                         // remove all windows that are closed or hidden
     bool queuedActiveWindowUpdate = false;
+    
+    QWidget *globalImageWindowWithPath(const QString &path, const QString &title, double scaleFactor);
     
     void updateRecentFileActions(void);
     void openRecentFile(void);

@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 8/14/15.
-//  Copyright (c) 2015-2022 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2015-2023 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -19,10 +19,14 @@
 
 
 #include "slim_test.h"
-#include "slim_sim.h"
+#include "community.h"
+#include "species.h"
 #include "eidos_test.h"
 #include "individual.h"
+#include "mutation_run.h"
+#include "interaction_type.h"
 
+#include <stdlib.h>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -41,21 +45,22 @@ static int gSLiMTestFailureCount = 0;
 // Instantiates and runs the script, and prints an error if the result does not match expectations
 void SLiMAssertScriptSuccess(const std::string &p_script_string, int p_lineNumber)
 {
+	{
 	gSLiMTestFailureCount++;	// assume failure; we will fix this at the end if we succeed
 	
-	SLiMSim *sim = nullptr;
+	Community *community = nullptr;
 	std::istringstream infile(p_script_string);
 	
 	try {
-		sim = new SLiMSim(infile);
-		sim->InitializeRNGFromSeed(nullptr);
+		community = new Community(infile);
+		community->InitializeRNGFromSeed(nullptr);
 	}
 	catch (...)
 	{
 		if (p_lineNumber != -1)
 			std::cerr << "[" << p_lineNumber << "] ";
 		
-		std::cerr << p_script_string << " : " << EIDOS_OUTPUT_FAILURE_TAG << " : raise during new SLiMSim(): " << Eidos_GetTrimmedRaiseMessage() << std::endl;
+		std::cerr << p_script_string << " : " << EIDOS_OUTPUT_FAILURE_TAG << " : raise during new Community(): " << Eidos_GetTrimmedRaiseMessage() << std::endl;
 		
 		gEidosErrorContext.currentScript = nullptr;
 		gEidosErrorContext.executingRuntimeScript = false;
@@ -63,25 +68,33 @@ void SLiMAssertScriptSuccess(const std::string &p_script_string, int p_lineNumbe
 	}
 	
 	try {
-		while (sim->_RunOneGeneration());
+		while (community->_RunOneTick());
 	}
 	catch (...)
 	{
-		delete sim;
-		MutationRun::DeleteMutationRunFreeList();
+		if (community)
+			for (Species *species : community->AllSpecies())
+				species->DeleteAllMutationRuns();
+		
+		delete community;
+		InteractionType::DeleteSparseVectorFreeList();
 		
 		if (p_lineNumber != -1)
 			std::cerr << "[" << p_lineNumber << "] ";
 		
-		std::cerr << p_script_string << " : " << EIDOS_OUTPUT_FAILURE_TAG << " : raise during RunOneGeneration(): " << Eidos_GetTrimmedRaiseMessage() << std::endl;
+		std::cerr << p_script_string << " : " << EIDOS_OUTPUT_FAILURE_TAG << " : raise during RunOneTick(): " << Eidos_GetTrimmedRaiseMessage() << std::endl;
 		
 		gEidosErrorContext.currentScript = nullptr;
 		gEidosErrorContext.executingRuntimeScript = false;
 		return;
 	}
 	
-	delete sim;
-	MutationRun::DeleteMutationRunFreeList();
+	if (community)
+		for (Species *species : community->AllSpecies())
+			species->DeleteAllMutationRuns();
+	
+	delete community;
+	InteractionType::DeleteSparseVectorFreeList();
 	
 	gSLiMTestFailureCount--;	// correct for our assumption of failure above
 	gSLiMTestSuccessCount++;
@@ -90,19 +103,26 @@ void SLiMAssertScriptSuccess(const std::string &p_script_string, int p_lineNumbe
 	
 	gEidosErrorContext.currentScript = nullptr;
 	gEidosErrorContext.executingRuntimeScript = false;
+	
+	if (gEidos_DictionaryNonRetainReleaseReferenceCounter > 0)
+		std::cerr << "WARNING (SLiMAssertScriptSuccess): gEidos_DictionaryNonRetainReleaseReferenceCounter == " << gEidos_DictionaryNonRetainReleaseReferenceCounter << " at end of test!" << std::endl;
+	}
+	
+	gEidos_DictionaryNonRetainReleaseReferenceCounter = 0;
 }
 
-void SLiMAssertScriptRaise(const std::string &p_script_string, const int p_bad_line, const int p_bad_position, const std::string &p_reason_snip, int p_lineNumber)
+void SLiMAssertScriptRaise(const std::string &p_script_string, const std::string &p_reason_snip, int p_lineNumber, bool p_expect_error_position)
 {
-	SLiMSim *sim = nullptr;
+	{
+	Community *community = nullptr;
 	
 	try {
 		std::istringstream infile(p_script_string);
 		
-		sim = new SLiMSim(infile);
-		sim->InitializeRNGFromSeed(nullptr);
+		community = new Community(infile);
+		community->InitializeRNGFromSeed(nullptr);
 		
-		while (sim->_RunOneGeneration());
+		while (community->_RunOneTick());
 		
 		gSLiMTestFailureCount++;
 		
@@ -124,7 +144,7 @@ void SLiMAssertScriptRaise(const std::string &p_script_string, const int p_bad_l
 					(gEidosErrorContext.errorPosition.characterEndOfError == -1) ||
 					!gEidosErrorContext.currentScript)
 				{
-					if ((p_bad_line == -1) && (p_bad_position == -1))
+					if (!p_expect_error_position)
 					{
 						gSLiMTestSuccessCount++;
 						
@@ -144,26 +164,14 @@ void SLiMAssertScriptRaise(const std::string &p_script_string, const int p_bad_l
 				}
 				else
 				{
+					if (!p_expect_error_position)
+						std::cerr << p_script_string << " : " << EIDOS_OUTPUT_SUCCESS_TAG << " : raise expected, and error info is set; but error info was not expected!" << std::endl;
+					
 					Eidos_ScriptErrorPosition(gEidosErrorContext);
 					
-					if ((gEidosErrorLine != p_bad_line) || (gEidosErrorLineCharacter != p_bad_position))
-					{
-						gSLiMTestFailureCount++;
-						
-						if (p_lineNumber != -1)
-							std::cerr << "[" << p_lineNumber << "] ";
-						
-						std::cerr << p_script_string << " : " << EIDOS_OUTPUT_FAILURE_TAG << " : raise expected, but error position unexpected" << std::endl;
-						std::cerr << "   raise message: " << raise_message << std::endl;
-						Eidos_LogScriptError(std::cerr, gEidosErrorContext);
-						std::cerr << "--------------------" << std::endl << std::endl;
-					}
-					else
-					{
-						gSLiMTestSuccessCount++;
-						
-						//std::cerr << p_script_string << " == (expected raise) : " << EIDOS_OUTPUT_SUCCESS_TAG << "\n   " << raise_message << endl;
-					}
+					gSLiMTestSuccessCount++;
+					
+					//std::cerr << p_script_string << " == (expected raise) : " << EIDOS_OUTPUT_SUCCESS_TAG << "\n   " << raise_message << endl;
 				}
 			}
 			else
@@ -197,24 +205,35 @@ void SLiMAssertScriptRaise(const std::string &p_script_string, const int p_bad_l
 		}
 	}
 	
-	delete sim;
-	MutationRun::DeleteMutationRunFreeList();
+	if (community)
+		for (Species *species : community->AllSpecies())
+			species->DeleteAllMutationRuns();
+	
+	delete community;
+	InteractionType::DeleteSparseVectorFreeList();
 	
 	gEidosErrorContext.currentScript = nullptr;
 	gEidosErrorContext.executingRuntimeScript = false;
+	
+	if (gEidos_DictionaryNonRetainReleaseReferenceCounter > 0)
+		std::cerr << "WARNING (SLiMAssertScriptRaise): gEidos_DictionaryNonRetainReleaseReferenceCounter == " << gEidos_DictionaryNonRetainReleaseReferenceCounter << " at end of test!" << std::endl;
+	}
+	
+	gEidos_DictionaryNonRetainReleaseReferenceCounter = 0;
 }
 
 void SLiMAssertScriptStop(const std::string &p_script_string, int p_lineNumber)
 {
-	SLiMSim *sim = nullptr;
+	{
+	Community *community = nullptr;
 	
 	try {
 		std::istringstream infile(p_script_string);
 		
-		sim = new SLiMSim(infile);
-		sim->InitializeRNGFromSeed(nullptr);
+		community = new Community(infile);
+		community->InitializeRNGFromSeed(nullptr);
 		
-		while (sim->_RunOneGeneration());
+		while (community->_RunOneTick());
 		
 		gSLiMTestFailureCount++;
 		
@@ -256,11 +275,21 @@ void SLiMAssertScriptStop(const std::string &p_script_string, int p_lineNumber)
 		}
 	}
 	
-	delete sim;
-	MutationRun::DeleteMutationRunFreeList();
+	if (community)
+		for (Species *species : community->AllSpecies())
+			species->DeleteAllMutationRuns();
+	
+	delete community;
+	InteractionType::DeleteSparseVectorFreeList();
 	
 	gEidosErrorContext.currentScript = nullptr;
 	gEidosErrorContext.executingRuntimeScript = false;
+	
+	if (gEidos_DictionaryNonRetainReleaseReferenceCounter > 0)
+		std::cerr << "WARNING (SLiMAssertScriptStop): gEidos_DictionaryNonRetainReleaseReferenceCounter == " << gEidos_DictionaryNonRetainReleaseReferenceCounter << " at end of test!" << std::endl;
+	}
+	
+	gEidos_DictionaryNonRetainReleaseReferenceCounter = 0;
 }
 
 
@@ -272,17 +301,17 @@ static void _RunSLiMTimingTests(void);
 // Test function shared strings
 std::string gen1_setup("initialize() { initializeMutationRate(1e-7); initializeMutationType('m1', 0.5, 'f', 0.0); initializeGenomicElementType('g1', m1, 1.0); initializeGenomicElement(g1, 0, 99999); initializeRecombinationRate(1e-8); } ");
 std::string gen1_setup_sex("initialize() { initializeMutationRate(1e-7); initializeMutationType('m1', 0.5, 'f', 0.0); initializeGenomicElementType('g1', m1, 1.0); initializeGenomicElement(g1, 0, 99999); initializeRecombinationRate(1e-8); initializeSex('X'); } ");
-std::string gen2_stop(" 2 { stop(); } ");
-std::string gen1_setup_highmut_p1("initialize() { initializeMutationRate(1e-5); initializeMutationType('m1', 0.5, 'f', 0.0); initializeGenomicElementType('g1', m1, 1.0); initializeGenomicElement(g1, 0, 99999); initializeRecombinationRate(1e-8); } 1 { sim.addSubpop('p1', 10); } ");
-std::string gen1_setup_fixmut_p1("initialize() { initializeMutationRate(1e-4); initializeMutationType('m1', 0.5, 'f', 0.0); initializeGenomicElementType('g1', m1, 1.0); initializeGenomicElement(g1, 0, 99999); initializeRecombinationRate(1e-8); } 1 { sim.addSubpop('p1', 10); } 10 { sim.mutations[0].setSelectionCoeff(500.0); sim.recalculateFitness(); } ");
-std::string gen1_setup_i1("initialize() { initializeMutationRate(1e-5); initializeMutationType('m1', 0.5, 'f', 0.0); initializeGenomicElementType('g1', m1, 1.0); initializeGenomicElement(g1, 0, 99999); initializeRecombinationRate(1e-8); initializeInteractionType('i1', ''); } 1 { sim.addSubpop('p1', 10); } 1:10 late() { i1.evaluate(); i1.strength(p1.individuals[0]); } ");
-std::string gen1_setup_i1x("initialize() { initializeSLiMOptions(dimensionality='x'); initializeMutationRate(1e-5); initializeMutationType('m1', 0.5, 'f', 0.0); initializeGenomicElementType('g1', m1, 1.0); initializeGenomicElement(g1, 0, 99999); initializeRecombinationRate(1e-8); initializeInteractionType('i1', 'x'); } 1 { sim.addSubpop('p1', 10); } 1:10 late() { p1.individuals.x = runif(10); i1.evaluate(); i1.strength(p1.individuals[0]); } ");
-std::string gen1_setup_i1xPx("initialize() { initializeSLiMOptions(dimensionality='x', periodicity='x'); initializeMutationRate(1e-5); initializeMutationType('m1', 0.5, 'f', 0.0); initializeGenomicElementType('g1', m1, 1.0); initializeGenomicElement(g1, 0, 99999); initializeRecombinationRate(1e-8); initializeInteractionType('i1', 'x'); } 1 { sim.addSubpop('p1', 10); } 1:10 late() { p1.individuals.x = runif(10); i1.evaluate(); i1.strength(p1.individuals[0]); } ");
-std::string gen1_setup_i1xyz("initialize() { initializeSLiMOptions(dimensionality='xyz'); initializeMutationRate(1e-5); initializeMutationType('m1', 0.5, 'f', 0.0); initializeGenomicElementType('g1', m1, 1.0); initializeGenomicElement(g1, 0, 99999); initializeRecombinationRate(1e-8); initializeInteractionType('i1', 'xyz'); } 1 { sim.addSubpop('p1', 10); } 1:10 late() { p1.individuals.x = runif(10); p1.individuals.y = runif(10); p1.individuals.z = runif(10); i1.evaluate(); i1.strength(p1.individuals[0]); } ");
-std::string gen1_setup_i1xyzPxz("initialize() { initializeSLiMOptions(dimensionality='xyz', periodicity='xz'); initializeMutationRate(1e-5); initializeMutationType('m1', 0.5, 'f', 0.0); initializeGenomicElementType('g1', m1, 1.0); initializeGenomicElement(g1, 0, 99999); initializeRecombinationRate(1e-8); initializeInteractionType('i1', 'xyz'); } 1 { sim.addSubpop('p1', 10); } 1:10 late() { p1.individuals.x = runif(10); p1.individuals.y = runif(10); p1.individuals.z = runif(10); i1.evaluate(); i1.strength(p1.individuals[0]); } ");
-std::string gen1_setup_p1(gen1_setup + "1 { sim.addSubpop('p1', 10); } ");
-std::string gen1_setup_sex_p1(gen1_setup_sex + "1 { sim.addSubpop('p1', 10); } ");
-std::string gen1_setup_p1p2p3(gen1_setup + "1 { sim.addSubpop('p1', 10); sim.addSubpop('p2', 10); sim.addSubpop('p3', 10); } ");
+std::string gen2_stop(" 2 early() { stop(); } ");
+std::string gen1_setup_highmut_p1("initialize() { initializeMutationRate(1e-5); initializeMutationType('m1', 0.5, 'f', 0.0); initializeGenomicElementType('g1', m1, 1.0); initializeGenomicElement(g1, 0, 99999); initializeRecombinationRate(1e-8); } 1 early() { sim.addSubpop('p1', 10); } ");
+std::string gen1_setup_fixmut_p1("initialize() { initializeMutationRate(1e-4); initializeMutationType('m1', 0.5, 'f', 0.0); initializeGenomicElementType('g1', m1, 1.0); initializeGenomicElement(g1, 0, 99999); initializeRecombinationRate(1e-8); } 1 early() { sim.addSubpop('p1', 10); } 10 early() { sim.mutations[0].setSelectionCoeff(500.0); sim.recalculateFitness(); } ");
+std::string gen1_setup_i1("initialize() { initializeMutationRate(1e-5); initializeMutationType('m1', 0.5, 'f', 0.0); initializeGenomicElementType('g1', m1, 1.0); initializeGenomicElement(g1, 0, 99999); initializeRecombinationRate(1e-8); initializeInteractionType('i1', ''); } 1 early() { sim.addSubpop('p1', 10); } 1:10 late() { i1.evaluate(p1); i1.strength(p1.individuals[0]); } ");
+std::string gen1_setup_i1x("initialize() { initializeSLiMOptions(dimensionality='x'); initializeMutationRate(1e-5); initializeMutationType('m1', 0.5, 'f', 0.0); initializeGenomicElementType('g1', m1, 1.0); initializeGenomicElement(g1, 0, 99999); initializeRecombinationRate(1e-8); initializeInteractionType('i1', 'x'); } 1 early() { sim.addSubpop('p1', 10); } 1:10 late() { p1.individuals.x = runif(10); i1.evaluate(p1); i1.strength(p1.individuals[0]); } ");
+std::string gen1_setup_i1xPx("initialize() { initializeSLiMOptions(dimensionality='x', periodicity='x'); initializeMutationRate(1e-5); initializeMutationType('m1', 0.5, 'f', 0.0); initializeGenomicElementType('g1', m1, 1.0); initializeGenomicElement(g1, 0, 99999); initializeRecombinationRate(1e-8); initializeInteractionType('i1', 'x'); } 1 early() { sim.addSubpop('p1', 10); } 1:10 late() { p1.individuals.x = runif(10); i1.evaluate(p1); i1.strength(p1.individuals[0]); } ");
+std::string gen1_setup_i1xyz("initialize() { initializeSLiMOptions(dimensionality='xyz'); initializeMutationRate(1e-5); initializeMutationType('m1', 0.5, 'f', 0.0); initializeGenomicElementType('g1', m1, 1.0); initializeGenomicElement(g1, 0, 99999); initializeRecombinationRate(1e-8); initializeInteractionType('i1', 'xyz'); } 1 early() { sim.addSubpop('p1', 10); } 1:10 late() { p1.individuals.x = runif(10); p1.individuals.y = runif(10); p1.individuals.z = runif(10); i1.evaluate(p1); i1.strength(p1.individuals[0]); } ");
+std::string gen1_setup_i1xyzPxz("initialize() { initializeSLiMOptions(dimensionality='xyz', periodicity='xz'); initializeMutationRate(1e-5); initializeMutationType('m1', 0.5, 'f', 0.0); initializeGenomicElementType('g1', m1, 1.0); initializeGenomicElement(g1, 0, 99999); initializeRecombinationRate(1e-8); initializeInteractionType('i1', 'xyz'); } 1 early() { sim.addSubpop('p1', 10); } 1:10 late() { p1.individuals.x = runif(10); p1.individuals.y = runif(10); p1.individuals.z = runif(10); i1.evaluate(p1); i1.strength(p1.individuals[0]); } ");
+std::string gen1_setup_p1(gen1_setup + "1 early() { sim.addSubpop('p1', 10); } ");
+std::string gen1_setup_sex_p1(gen1_setup_sex + "1 early() { sim.addSubpop('p1', 10); } ");
+std::string gen1_setup_p1p2p3(gen1_setup + "1 early() { sim.addSubpop('p1', 10); sim.addSubpop('p2', 10); sim.addSubpop('p3', 10); } ");
 
 std::string WF_prefix("initialize() { initializeSLiMModelType('WF'); } ");
 std::string nonWF_prefix("initialize() { initializeSLiMModelType('nonWF'); } ");
@@ -290,6 +319,9 @@ std::string nonWF_prefix("initialize() { initializeSLiMModelType('nonWF'); } ");
 
 int RunSLiMTests(void)
 {
+	// This function should never be called when parallel, but individual tests are allowed to go parallel internally
+	THREAD_SAFETY_IN_ANY_PARALLEL("RunSLiMTests(): illegal when parallel");
+	
 	// Test SLiM.  The goal here is not really to test that the core code of SLiM is working properly – that simulations
 	// work as they are intended to.  Such testing is beyond the scope of what we can do here.  Instead, the goal here
 	// is to test all of the Eidos-related APIs in SLiM – to make sure that all properties, methods, and functions in
@@ -324,7 +356,7 @@ int RunSLiMTests(void)
 	_RunBasicTests();
 	_RunRelatednessTests();
 	_RunInitTests();
-	_RunSLiMSimTests(temp_path);
+	_RunSpeciesTests(temp_path);
 	_RunMutationTypeTests();
 	_RunGenomicElementTypeTests();
 	_RunGenomicElementTests();
@@ -336,11 +368,16 @@ int RunSLiMTests(void)
 	_RunSubstitutionTests();
 	_RunSLiMEidosBlockTests();
 	_RunContinuousSpaceTests();
+	_RunSpatialMapTests();
 	_RunNonWFTests();
 	_RunTreeSeqTests(temp_path);
 	_RunNucleotideFunctionTests();
 	_RunNucleotideMethodTests();
 	_RunSLiMTimingTests();
+	
+#ifdef _OPENMP
+	_RunParallelSLiMTests();
+#endif
 	
 	_RunInteractionTypeTests();		// many tests, time-consuming, so do this last
 	
@@ -361,8 +398,13 @@ int RunSLiMTests(void)
 	gSLiMError.clear();
 	gSLiMError.str("");
 	
+#ifdef SLIMGUI
+	gSLiMScheduling.clear();
+	gSLiMScheduling.str("");
+#endif
+	
 	// return a standard Unix result code indicating success (0) or failure (1);
-	return (gSLiMTestFailureCount > 0) ? 1 : 0;
+	return (gSLiMTestFailureCount > 0) ? EXIT_FAILURE : EXIT_SUCCESS;
 }
 
 #pragma mark basic tests
@@ -382,7 +424,7 @@ void _RunBasicTests(void)
 								 initializeGenomicElement(g1, 0, 99999);
 								 initializeRecombinationRate(1e-8);
 							 }
-							 1 { sim.addSubpop('p1', 500); }
+							 1 early() { sim.addSubpop('p1', 500); }
 							 5 late() { sim.outputFull(); }
 							 
 							 )V0G0N");
@@ -400,8 +442,8 @@ void _RunBasicTests(void)
 							  initializeGenomicElement(g1, 0, 99999);
 							  initializeRecombinationRate(1e-8);
 						  }
-						  1 { sim.addSubpop('p1', 500); }
-						  3 { stop(); }
+						  1 early() { sim.addSubpop('p1', 500); }
+						  3 early() { stop(); }
 						  5 late() { sim.outputFull(); }
 						  
 						  )V0G0N");
@@ -409,12 +451,126 @@ void _RunBasicTests(void)
 	SLiMAssertScriptStop(stop_test);
 	
 	// Test script registration
-	SLiMAssertScriptStop("initialize() { stop(); } s1 {}", __LINE__);
-	SLiMAssertScriptRaise("initialize() { stop(); } s1 {} s1 {}", 1, 31, "already defined", __LINE__);
-	SLiMAssertScriptStop("initialize() { stop(); } 1: {}", __LINE__);
-	SLiMAssertScriptStop("initialize() { stop(); } :1 {}", __LINE__);
-	SLiMAssertScriptStop("initialize() { stop(); } 1:10 {}", __LINE__);
-	SLiMAssertScriptRaise("initialize() { stop(); } : {}", 1, 27, "unexpected token", __LINE__);
+	SLiMAssertScriptStop("initialize() { stop(); } s1 early() {}", __LINE__);
+	SLiMAssertScriptRaise("initialize() { stop(); } s1 early() {} s1 early() {}", "already defined", __LINE__);
+	SLiMAssertScriptStop("initialize() { stop(); } 1: early() {}", __LINE__);
+	SLiMAssertScriptStop("initialize() { stop(); } :1 early() {}", __LINE__);
+	SLiMAssertScriptStop("initialize() { stop(); } 1:10 early() {}", __LINE__);
+	SLiMAssertScriptRaise("initialize() { stop(); } : early() {}", "unexpected token", __LINE__);
+	
+	// Test top-level structure parsing; this was adding for SLiM 4 due to the multispecies revisions
+	// If these tests do not stop for other reasons, they produce a raise due to incorrect initialization, "At least one mutation rate interval must be defined..."
+	SLiMAssertScriptStop("initialize() {} 1 early() { stop(); }", __LINE__);
+	SLiMAssertScriptRaise("initialize() { initializeRecombinationRate(0.0); } 1 early() {}", "mutation rate interval", __LINE__, false);
+	SLiMAssertScriptRaise("initialize() { initializeRecombinationRate(0.0); } initialize() {} 1 early() {}", "mutation rate interval", __LINE__, false);
+	SLiMAssertScriptRaise("initialize() {} initialize() {} ticks fox 1 early() {}", "undeclared species", __LINE__);
+	SLiMAssertScriptRaise("initialize() {} initialize() {} species fox 1 early() {}", "preceded by a species", __LINE__);
+	SLiMAssertScriptRaise("initialize() {} initialize() {} ticks fox mutationEffect(m1) {}", "preceded by a ticks", __LINE__);
+	SLiMAssertScriptRaise("initialize() {} initialize() {} species fox mutationEffect(m1) {}", "undeclared species", __LINE__);
+	SLiMAssertScriptRaise("species all initialize() {} species fox initialize() { initializeRecombinationRate(0.0); } ticks all 1 early() {}", "mutation rate interval", __LINE__, false);
+	SLiMAssertScriptRaise("species all initialize() {} species fox initialize() {} 1 early() {}", "preceded by a ticks", __LINE__);
+	SLiMAssertScriptRaise("species all initialize() {} ticks all 1 early() { stop(); }", "no species-specific initialize() callback found", __LINE__, false);
+	SLiMAssertScriptRaise("species fox initialize() {} initialize() {} 1 early() {}", "species specifiers are required", __LINE__);
+	SLiMAssertScriptRaise("initialize() {} species fox initialize() {} 1 early() {}", "species specifiers are illegal", __LINE__);
+	SLiMAssertScriptRaise("species fox initialize() {} 1 early() { stop(); }", "must be preceded by a ticks specifier", __LINE__);
+	SLiMAssertScriptRaise("initialize() {} ticks all 1 early() { stop(); }", "ticks specifiers should not be used", __LINE__);
+	SLiMAssertScriptRaise("initialize() {} species all 1 early() { stop(); }", "may not be preceded by a species specifier", __LINE__);
+	SLiMAssertScriptStop("species mouse initialize() {} species fox initialize() {} ticks all 1 early() { stop(); }", __LINE__);
+	SLiMAssertScriptRaise("species mouse initialize() {} species fox initialize() { initializeRecombinationRate(0.0); } ticks all 1 early() {}", "mutation rate interval", __LINE__, false);
+	SLiMAssertScriptRaise("species mouse initialize() {} species fox initialize() {} ticks bear 1 early() {}", "undeclared species", __LINE__);
+	SLiMAssertScriptRaise("species mouse initialize() {} species fox initialize() { initializeRecombinationRate(0.0); } ticks fox 1 early() {}", "mutation rate interval", __LINE__, false);
+	SLiMAssertScriptRaise("species mouse initialize() {} species fox initialize() {} species all mutationEffect(m1) {}", "mutationEffect() callbacks may not be declared with 'species all'", __LINE__);
+	SLiMAssertScriptRaise("species mouse initialize() {} species fox initialize() {} species bear mutationEffect(m1) {}", "undeclared species", __LINE__);
+	SLiMAssertScriptRaise("species mouse initialize() {} species fox initialize() { initializeRecombinationRate(0.0); } species fox mutationEffect(m1) {}", "mutation rate interval", __LINE__, false);
+	SLiMAssertScriptRaise("species mouse initialize() {} species fox initialize() {} mutationEffect(m1) {}", "must be preceded", __LINE__);
+	SLiMAssertScriptRaise("species mouse species mouse", "must be followed by a callback", __LINE__);
+	SLiMAssertScriptRaise("ticks mouse ticks mouse", "must be followed by an event", __LINE__);
+	SLiMAssertScriptRaise("foo", "unexpected identifier", __LINE__);
+	SLiMAssertScriptRaise("species mouse foo", "unexpected identifier", __LINE__);
+	SLiMAssertScriptRaise("ticks mouse foo", "unexpected identifier", __LINE__);
+	SLiMAssertScriptRaise("species fox function (void)foo(void) {}", "may not be preceded", __LINE__);
+	SLiMAssertScriptRaise("ticks fox function (void)foo(void) {}", "may not be preceded", __LINE__);
+	SLiMAssertScriptRaise("species fox 1 early() {}", "may not be preceded", __LINE__);
+	SLiMAssertScriptRaise("ticks fox 1 early() {}", "no initialize() callback", __LINE__, false);
+	SLiMAssertScriptRaise("species fox mutationEffect(m1) {}", "no initialize() callback", __LINE__, false);
+	SLiMAssertScriptRaise("ticks fox mutationEffect(m1) {}", "may not be preceded", __LINE__);
+	
+	// Test no-genetics scripts; we just want to confirm that they can run without any null genome errors, consistency check errors, etc., especially in DEBUG
+	SLiMAssertScriptRaise("initialize() {initializeTreeSeq();} 1 early() {sim.addSubpop('p1', 10);} 5 late() {stop();}", "cannot use tree-sequence recording", __LINE__, false);
+	SLiMAssertScriptRaise("initialize() {initializeSLiMOptions(nucleotideBased=T);} 1 early() {sim.addSubpop('p1', 10);} 5 late() {stop();}", "cannot be nucleotide-based", __LINE__, false);
+	SLiMAssertScriptRaise("initialize() {initializeSLiMOptions(mutationRuns=5);} 1 early() {sim.addSubpop('p1', 10);} 5 late() {stop();}", "cannot have a specified mutation run count", __LINE__, false);
+	SLiMAssertScriptStop("initialize() {} 1 early() {sim.addSubpop('p1', 10);} 5 late() {stop();}", __LINE__);
+	SLiMAssertScriptStop("initialize() {} 1 early() {sim.addSubpop('p1', 10); p1.setCloningRate(0.5);} 5 late() {stop();}", __LINE__);
+	SLiMAssertScriptStop("initialize() {} 1 early() {sim.addSubpop('p1', 10); p1.setSelfingRate(0.5);} 5 late() {stop();}", __LINE__);
+	SLiMAssertScriptStop("initialize() {initializeSex('A');} 1 early() {sim.addSubpop('p1', 10);} 5 late() {stop();}", __LINE__);
+	SLiMAssertScriptStop("initialize() {initializeSex('A');} 1 early() {sim.addSubpop('p1', 10); p1.setCloningRate(0.5);} 5 late() {stop();}", __LINE__);
+	SLiMAssertScriptStop("initialize() {initializeSex('X');} 1 early() {sim.addSubpop('p1', 10);} 5 late() {stop();}", __LINE__);
+	SLiMAssertScriptStop("initialize() {initializeSex('X');} 1 early() {sim.addSubpop('p1', 10); p1.setCloningRate(0.5);} 5 late() {stop();}", __LINE__);
+	SLiMAssertScriptStop("initialize() {initializeSex('Y');} 1 early() {sim.addSubpop('p1', 10);} 5 late() {stop();}", __LINE__);
+	SLiMAssertScriptStop("initialize() {initializeSex('Y');} 1 early() {sim.addSubpop('p1', 10); p1.setCloningRate(0.5);} 5 late() {stop();}", __LINE__);
+	SLiMAssertScriptStop("initialize() {initializeSLiMModelType('nonWF');} reproduction() {subpop.addCrossed(individual, subpop.sampleIndividuals(1));} 1 early() {sim.addSubpop('p1', 20);} early() {p1.fitnessScaling = 20 / p1.individualCount;} 5 late() {stop();}", __LINE__);
+	SLiMAssertScriptStop("initialize() {initializeSLiMModelType('nonWF');} reproduction() {subpop.addCloned(individual);} 1 early() {sim.addSubpop('p1', 20);} early() {p1.fitnessScaling = 20 / p1.individualCount;} 5 late() {stop();}", __LINE__);
+	SLiMAssertScriptStop("initialize() {initializeSLiMModelType('nonWF');} reproduction() {subpop.addSelfed(individual);} 1 early() {sim.addSubpop('p1', 20);} early() {p1.fitnessScaling = 20 / p1.individualCount;} 5 late() {stop();}", __LINE__);
+	SLiMAssertScriptStop("initialize() {initializeSLiMModelType('nonWF');} reproduction() {subpop.addEmpty();} 1 early() {sim.addSubpop('p1', 20);} early() {p1.fitnessScaling = 20 / p1.individualCount;} 5 late() {stop();}", __LINE__);
+	SLiMAssertScriptStop("initialize() {initializeSLiMModelType('nonWF');initializeSex('A');} reproduction(NULL,'F') {subpop.addCrossed(individual, subpop.sampleIndividuals(1,sex='M'));} 1 early() {sim.addSubpop('p1', 20);} early() {p1.fitnessScaling = 20 / p1.individualCount;} 5 late() {stop();}", __LINE__);
+	SLiMAssertScriptStop("initialize() {initializeSLiMModelType('nonWF');initializeSex('A');} reproduction() {subpop.addCloned(individual);} 1 early() {sim.addSubpop('p1', 20);} early() {p1.fitnessScaling = 20 / p1.individualCount;} 5 late() {stop();}", __LINE__);
+	SLiMAssertScriptStop("initialize() {initializeSLiMModelType('nonWF');initializeSex('A');} reproduction() {subpop.addEmpty();} 1 early() {sim.addSubpop('p1', 20);} early() {p1.fitnessScaling = 20 / p1.individualCount;} 5 late() {stop();}", __LINE__);
+	SLiMAssertScriptStop("initialize() {initializeSLiMModelType('nonWF');initializeSex('X');} reproduction(NULL,'F') {subpop.addCrossed(individual, subpop.sampleIndividuals(1,sex='M'));} 1 early() {sim.addSubpop('p1', 20);} early() {p1.fitnessScaling = 20 / p1.individualCount;} 5 late() {stop();}", __LINE__);
+	SLiMAssertScriptStop("initialize() {initializeSLiMModelType('nonWF');initializeSex('X');} reproduction() {subpop.addCloned(individual);} 1 early() {sim.addSubpop('p1', 20);} early() {p1.fitnessScaling = 20 / p1.individualCount;} 5 late() {stop();}", __LINE__);
+	SLiMAssertScriptStop("initialize() {initializeSLiMModelType('nonWF');initializeSex('X');} reproduction() {subpop.addEmpty();} 1 early() {sim.addSubpop('p1', 20);} early() {p1.fitnessScaling = 20 / p1.individualCount;} 5 late() {stop();}", __LINE__);
+	SLiMAssertScriptStop("initialize() {initializeSLiMModelType('nonWF');initializeSex('Y');} reproduction(NULL,'F') {subpop.addCrossed(individual, subpop.sampleIndividuals(1,sex='M'));} 1 early() {sim.addSubpop('p1', 20);} early() {p1.fitnessScaling = 20 / p1.individualCount;} 5 late() {stop();}", __LINE__);
+	SLiMAssertScriptStop("initialize() {initializeSLiMModelType('nonWF');initializeSex('Y');} reproduction() {subpop.addCloned(individual);} 1 early() {sim.addSubpop('p1', 20);} early() {p1.fitnessScaling = 20 / p1.individualCount;} 5 late() {stop();}", __LINE__);
+	SLiMAssertScriptStop("initialize() {initializeSLiMModelType('nonWF');initializeSex('Y');} reproduction() {subpop.addEmpty();} 1 early() {sim.addSubpop('p1', 20);} early() {p1.fitnessScaling = 20 / p1.individualCount;} 5 late() {stop();}", __LINE__);
+	
+	// Test "long-term boundary" checks; note that Eidos has more complete checks in eidos_test_functions_other.cpp,
+	// so here we are only testing specifically that SLiM catches long-term boundary violations correctly
+	std::string ltb1_script(R"V0G0N(
+							
+							initialize() {
+							initializeMutationRate(1e-7);
+							initializeMutationType('m1', 0.5, 'f', 0.0);
+							initializeGenomicElementType('g1', m1, 1.0);
+							initializeGenomicElement(g1, 0, 99999);
+							initializeRecombinationRate(1e-8);
+							}
+							1 early() { sim.addSubpop('p1', 500); x = Dictionary('a', p1); }
+							5 late() { sim.outputFull(); }
+							
+							)V0G0N");
+	
+	SLiMAssertScriptSuccess(ltb1_script);	// x is scoped, so there is no long-term reference
+	
+	std::string ltb2_script(R"V0G0N(
+							
+							initialize() {
+							initializeMutationRate(1e-7);
+							initializeMutationType('m1', 0.5, 'f', 0.0);
+							initializeGenomicElementType('g1', m1, 1.0);
+							initializeGenomicElement(g1, 0, 99999);
+							initializeRecombinationRate(1e-8);
+							}
+							1 early() { sim.addSubpop('p1', 500); defineGlobal('x', Dictionary('a', p1)); }
+							5 late() { sim.outputFull(); }
+							
+							)V0G0N");
+	
+	SLiMAssertScriptRaise(ltb2_script, "long-term reference has been kept", 0, false);	// x is not scoped, so there is a long-term reference
+	
+	std::string ltb3_script(R"V0G0N(
+							
+							initialize() {
+							initializeMutationRate(1e-7);
+							initializeMutationType('m1', 0.5, 'f', 0.0);
+							initializeGenomicElementType('g1', m1, 1.0);
+							initializeGenomicElement(g1, 0, 99999);
+							initializeRecombinationRate(1e-8);
+							}
+							1 early() { sim.addSubpop('p1', 500); sim.setValue('x', Dictionary('a', p1)); }
+							5 late() { sim.outputFull(); }
+							
+							)V0G0N");
+	
+	SLiMAssertScriptRaise(ltb3_script, "long-term reference has been kept", 0, false);	// sim.getValue('x') is not scoped, so there is a long-term reference
 }
 
 #pragma mark Individual relatedness tests
@@ -603,35 +759,88 @@ void _RunRelatednessTests(void)
 		/* end-of-array marker entry : DO NOT TOUCH */ {-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, IndividualSex::kHermaphrodite, IndividualSex::kHermaphrodite, GenomeType::kAutosome, -1.0}
 	};
 	
-	pedigree_test_info *p = test_pedigrees;
-	
-	for ( ; p->expectedRelatedness > -1.0; ++p)
 	{
-		try {
-			double rel = Individual::_Relatedness(p->A, p->A_P1, p->A_P2, p->A_G1, p->A_G2, p->A_G3, p->A_G4, p->B, p->B_P1, p->B_P2, p->B_G1, p->B_G2, p->B_G3, p->B_G4, p->A_sex, p->B_sex, p->type);
-			double expected = p->expectedRelatedness;
-			
-			if (rel == expected)
-			{
-				gSLiMTestSuccessCount++;
-				
-				//std::cerr << "relatedness test " << EIDOS_OUTPUT_SUCCESS_TAG << ": test index " << (p - test_pedigrees) << " produced a relatedness of " << rel << " as expected)" << std::endl;
-			}
-			else
-			{
-				gSLiMTestFailureCount++;
-				
-				std::cerr << "relatedness test " << EIDOS_OUTPUT_FAILURE_TAG << ": test index " << (p - test_pedigrees) << " produced a relatedness of " << rel << " (" << expected << " expected)" << std::endl;
-			}
-		}
-		catch (...)
+		pedigree_test_info *p = test_pedigrees;
+		
+		for ( ; p->expectedRelatedness > -1.0; ++p)
 		{
-			std::cerr << "relatedness test " << EIDOS_OUTPUT_FAILURE_TAG << ": test index " << (p - test_pedigrees) << " raised an exception: " << Eidos_GetTrimmedRaiseMessage() << std::endl;
+			try {
+				double rel = Individual::_Relatedness(p->A, p->A_P1, p->A_P2, p->A_G1, p->A_G2, p->A_G3, p->A_G4, p->B, p->B_P1, p->B_P2, p->B_G1, p->B_G2, p->B_G3, p->B_G4, p->A_sex, p->B_sex, p->type);
+				double expected = p->expectedRelatedness;
+				
+				if (rel == expected)
+				{
+					gSLiMTestSuccessCount++;
+					
+					//std::cerr << "relatedness test " << EIDOS_OUTPUT_SUCCESS_TAG << ": test index " << (p - test_pedigrees) << " produced a relatedness of " << rel << " (as expected)" << std::endl;
+				}
+				else
+				{
+					gSLiMTestFailureCount++;
+					
+					std::cerr << "relatedness test " << EIDOS_OUTPUT_FAILURE_TAG << ": test index " << (p - test_pedigrees) << " produced a relatedness of " << rel << " (" << expected << " expected)" << std::endl;
+				}
+			}
+			catch (...)
+			{
+				std::cerr << "relatedness test " << EIDOS_OUTPUT_FAILURE_TAG << ": test index " << (p - test_pedigrees) << " raised an exception: " << Eidos_GetTrimmedRaiseMessage() << std::endl;
+			}
 		}
 	}
 	
 	// this output is useful for figuring out which entry is causing a problem, when it is located near the end
 	//std::cerr << "end-of-array index == " << (p - test_pedigrees) << std::endl;
+	
+	// Run tests of SharedParentCount() as well, which is much simpler
+	typedef struct sharedparent_test_info_ {
+		slim_pedigreeid_t X_P1;
+		slim_pedigreeid_t X_P2;
+		slim_pedigreeid_t Y_P1;
+		slim_pedigreeid_t Y_P2;
+		int expectedCount;
+	} sharedparent_test_info;
+	
+	sharedparent_test_info test_sharedparent[] = {
+		{/* X */ -1, -1, /* Y */ -1, -1, /*expected */ 0},		// missing information
+		{/* X */ 0, 1, /* Y */ 2, 3, /*expected */ 0},
+		{/* X */ 0, 1, /* Y */ 2, 2, /*expected */ 0},
+		{/* X */ 0, 1, /* Y */ 0, 2, /*expected */ 1},
+		{/* X */ 0, 1, /* Y */ 0, 0, /*expected */ 1},
+		{/* X */ 0, 0, /* Y */ 0, 1, /*expected */ 1},
+		{/* X */ 0, 1, /* Y */ 0, 1, /*expected */ 2},
+		{/* X */ 0, 1, /* Y */ 1, 0, /*expected */ 2},
+		{/* X */ 0, 0, /* Y */ 0, 0, /*expected */ 2},
+		/* end-of-array marker entry : DO NOT TOUCH */ {-1, -1, -1, -1, -1}
+	};
+	
+	{
+		sharedparent_test_info *p = test_sharedparent;
+		
+		for ( ; p->expectedCount > -1; ++p)
+		{
+			try {
+				int count = Individual::_SharedParentCount(p->X_P1, p->X_P2, p->Y_P1, p->Y_P2);
+				int expected = p->expectedCount;
+				
+				if (count == expected)
+				{
+					gSLiMTestSuccessCount++;
+					
+					//std::cerr << "sharedParentCount test " << EIDOS_OUTPUT_SUCCESS_TAG << ": test index " << (p - test_sharedparent) << " produced a count of " << count << " (as expected)" << std::endl;
+				}
+				else
+				{
+					gSLiMTestFailureCount++;
+					
+					std::cerr << "sharedParentCount test " << EIDOS_OUTPUT_FAILURE_TAG << ": test index " << (p - test_sharedparent) << " produced a count of " << count << " (" << expected << " expected)" << std::endl;
+				}
+			}
+			catch (...)
+			{
+				std::cerr << "sharedParentCount test " << EIDOS_OUTPUT_FAILURE_TAG << ": test index " << (p - test_sharedparent) << " raised an exception: " << Eidos_GetTrimmedRaiseMessage() << std::endl;
+			}
+		}
+	}
 }
 
 #pragma mark SLiM timing tests
@@ -903,6 +1112,49 @@ void _RunSLiMTimingTests(void)
 	}
 #endif
 }
+
+#pragma mark SLiM timing tests
+extern void _RunParallelSLiMTests()
+{
+	// Tests of parallelization of SLiM functions/methods/core code; see also eidos_test_parallel.h
+#ifdef _OPENMP
+	const std::string &parallelization_test_string =
+#include "slim_test_parallel.h"
+	;
+	{
+		std::vector<std::string> test_strings = Eidos_string_split(parallelization_test_string, "// ***********************************************************************************************");
+		
+		//for (int testidx = 0; testidx < 100; testidx++)	// uncomment this for a more thorough stress test
+		{
+			for (std::string &test_string : test_strings)
+			{
+				// Skip empty tests
+				if (test_string.find("initialize()") == std::string::npos)
+					continue;
+				
+				//std::chrono::steady_clock::time_point begin_ts = std::chrono::steady_clock::now();
+				
+				// Note that we ensure that we are using the maximum number of threads at start & end
+				{
+					gEidosNumThreads = gEidosMaxThreads;
+					gEidosNumThreadsOverride = false;
+					omp_set_num_threads(gEidosMaxThreads);
+					
+					SLiMAssertScriptSuccess(test_string);
+					
+					gEidosNumThreads = gEidosMaxThreads;
+					gEidosNumThreadsOverride = false;
+					omp_set_num_threads(gEidosMaxThreads);
+				}
+				
+				//std::chrono::steady_clock::time_point end_ts = std::chrono::steady_clock::now();
+				//std::cout << "parallel test took " << std::chrono::duration<double>(end_ts - begin_ts).count() << " seconds:" << std::endl << test_string << std::endl << std::endl;
+			}
+		}
+	}
+#endif
+}
+
 
 
 

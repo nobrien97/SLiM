@@ -3,7 +3,7 @@
 //  Eidos
 //
 //  Created by Ben Haller on 4/7/15.
-//  Copyright (c) 2015-2022 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2015-2023 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -24,7 +24,9 @@
 #include "eidos_interpreter.h"
 #include "eidos_globals.h"
 #include "eidos_rng.h"
+#include "eidos_sorting.h"
 
+#include <stdlib.h>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -34,10 +36,10 @@
 #include <ctime>
 
 #if 0
-#if ((defined(SLIMGUI) && (SLIMPROFILING == 1)) || defined(EIDOS_GUI))
 // includes for the timing code in RunEidosTests(), which is normally #if 0
 #include "sys/time.h"	// for gettimeofday()
 #include <chrono>
+#if defined(__APPLE__) && defined(__MACH__)
 #include <mach/mach_time.h>
 #endif
 #endif
@@ -51,6 +53,7 @@ static int gEidosTestFailureCount = 0;
 // Instantiates and runs the script, and prints an error if the result does not match expectations
 void EidosAssertScriptSuccess(const std::string &p_script_string, EidosValue_SP p_correct_result)
 {
+	{
 	EidosScript script(p_script_string, -1);
 	EidosValue_SP result;
 	EidosSymbolTable symbol_table(EidosSymbolTableType::kGlobalVariablesTable, gEidosConstantsSymbolTable);
@@ -137,6 +140,12 @@ void EidosAssertScriptSuccess(const std::string &p_script_string, EidosValue_SP 
 	
 	gEidosErrorContext.currentScript = nullptr;
 	gEidosErrorContext.executingRuntimeScript = false;
+	
+	if (gEidos_DictionaryNonRetainReleaseReferenceCounter > 0)
+		std::cerr << "WARNING (EidosAssertScriptSuccess): gEidos_DictionaryNonRetainReleaseReferenceCounter == " << gEidos_DictionaryNonRetainReleaseReferenceCounter << " at end of test!" << std::endl;
+	}
+	
+	gEidos_DictionaryNonRetainReleaseReferenceCounter = 0;
 }
 
 void EidosAssertScriptSuccess_L(const std::string &p_script_string, eidos_logical_t p_logical)
@@ -192,6 +201,7 @@ void EidosAssertScriptSuccess_SV(const std::string &p_script_string, std::initia
 // Instantiates and runs the script, and prints an error if the script does not cause an exception to be raised
 void EidosAssertScriptRaise(const std::string &p_script_string, const int p_bad_position, const char *p_reason_snip)
 {
+	{
 	std::string reason_snip(p_reason_snip);
 	EidosScript script(p_script_string, -1);
 	EidosSymbolTable symbol_table(EidosSymbolTableType::kGlobalVariablesTable, gEidosConstantsSymbolTable);
@@ -264,10 +274,19 @@ void EidosAssertScriptRaise(const std::string &p_script_string, const int p_bad_
 	
 	gEidosErrorContext.currentScript = nullptr;
 	gEidosErrorContext.executingRuntimeScript = false;
+	
+	if (gEidos_DictionaryNonRetainReleaseReferenceCounter > 0)
+		std::cerr << "WARNING (EidosAssertScriptRaise): gEidos_DictionaryNonRetainReleaseReferenceCounter == " << gEidos_DictionaryNonRetainReleaseReferenceCounter << " at end of test!" << std::endl;
+	}
+	
+	gEidos_DictionaryNonRetainReleaseReferenceCounter = 0;
 }
 
 int RunEidosTests(void)
 {
+	// This function should never be called when parallel, but individual tests are allowed to go parallel internally
+	THREAD_SAFETY_IN_ANY_PARALLEL("RunEidosTests(): illegal when parallel");
+	
 	// Reset error counts
 	gEidosTestSuccessCount = 0;
 	gEidosTestFailureCount = 0;
@@ -374,8 +393,7 @@ int RunEidosTests(void)
 	
 	// Do some tests of our custom math functions
 #if 0
-	Eidos_InitializeRNG();
-	Eidos_SetRNGSeed(Eidos_GenerateSeedFromPIDAndTime());
+	Eidos_SetRNGSeed(Eidos_GenerateRNGSeed());
 	
 	int64_t totals[17];		// note 17 is prime
 	
@@ -391,8 +409,7 @@ int RunEidosTests(void)
 	
 #if 0
 	//#ifndef USE_GSL_POISSON
-	Eidos_InitializeRNG();
-	Eidos_SetRNGSeed(Eidos_GenerateSeedFromPIDAndTime());
+	Eidos_SetRNGSeed(Eidos_GenerateRNGSeed());
 	
 	double total;
 	int i;
@@ -745,19 +762,16 @@ int RunEidosTests(void)
 		eidos_taus = (unsigned long int *)malloc(100000 * sizeof(unsigned long int));
 		mixed_taus = (unsigned long int *)malloc(100000 * sizeof(unsigned long int));
 		
-		Eidos_InitializeRNG();
 		Eidos_SetRNGSeed(10);
 		
 		for (iter = 0; iter < 100000; ++iter)
 			gsl_taus[iter] = gsl_rng_get(EIDOS_GSL_RNG);
 		
-		Eidos_InitializeRNG();
 		Eidos_SetRNGSeed(10);
 		
 		for (iter = 0; iter < 100000; ++iter)
 			eidos_taus[iter] = taus_get_inline(EIDOS_GSL_RNG->state);
 		
-		Eidos_InitializeRNG();
 		Eidos_SetRNGSeed(10);
 		
 		for (iter = 0; iter < 50000; ++iter)
@@ -1003,10 +1017,7 @@ int RunEidosTests(void)
 		std::cout << "10000000 calls to clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID): time == " << (end_time - start_time) << ", total_time == " << (total_time / 1000000000.0) << std::endl;
 	}
 	
-#if (defined(SLIMGUI) && (SLIMPROFILING == 1))
-	// Note that at present this code is in eidos_test.cpp but runs only when running in SLiMgui,
-	// which never happens; this is for historical reasons, and the code can be moved if needed
-	
+#if defined(__APPLE__) && defined(__MACH__)
 	// mach_absolute_time()
 	{
 		double start_time = static_cast<double>(std::clock()) / CLOCKS_PER_SEC;
@@ -1037,6 +1048,8 @@ int RunEidosTests(void)
 		std::cout << "10000000 calls to mach_continuous_time(): time == " << (end_time - start_time) << ", total_time == " << (total_time / 1000000000.0) << std::endl;
 	}
 	
+#endif
+	
 	// Eidos_ProfileTime()
 	{
 		double start_time = static_cast<double>(std::clock()) / CLOCKS_PER_SEC;
@@ -1051,8 +1064,6 @@ int RunEidosTests(void)
 		
 		std::cout << "10000000 calls to Eidos_ProfileTime(): time == " << (end_time - start_time) << ", total_time == " << (total_time / 1000000000.0) << std::endl;
 	}
-	
-#endif
 	
 	/*
 	 
@@ -1266,12 +1277,114 @@ int RunEidosTests(void)
 	}
 #endif
 	
+#if 0
+	// Speed and correctness tests of various parallel sorting algorithms
+	{
+		std::cout << std::endl << "SORTING TESTS:" << std::endl;
+		
+		gsl_rng *rng = EIDOS_GSL_RNG(omp_get_thread_num());		// the single-threaded RNG
+		typedef std::string SORT_TYPE;
+		
+		{
+			// use the appropriate comparator for the sort type, in the code below
+			// note that Eidos_ParallelSort_Comparator() and Sriram_parallel_omp_sort() require a comparator,
+			// whereas std::sort() defaults to ascending (op <) by default, and Eidos_ParallelSort() doesn't take one.
+			//auto comparator_scalar = [](SORT_TYPE a, SORT_TYPE b) { return a < b; };
+			auto comparator_string = [](const std::string &a, const std::string &b) { return a < b; };
+			//auto comparator_double = [](const double& a, const double& b) { return std::isnan(b) || (a < b); };
+			const std::size_t test_size = 10000000;
+			const int reps = 5;
+			double time_sum;
+			std::vector<SORT_TYPE> data_original;
+			data_original.resize(test_size);
+			
+			for (std::size_t i = 0; i < test_size; ++i)
+			{
+				//data_original[i] = Eidos_rng_uniform_int(rng, test_size);
+				data_original[i] = std::to_string(Eidos_rng_uniform_int(rng, test_size));
+			}
+			
+			std::vector<SORT_TYPE> data_stdsort;
+			
+			std::cout << "time (std::sort): ";
+			time_sum = 0.0;
+			for (int rep = 0; rep < reps; ++rep)
+			{
+				data_stdsort = data_original;
+				eidos_profile_t begin = Eidos_BenchmarkTime();
+				
+				std::sort(data_stdsort.begin(), data_stdsort.end());
+				
+				eidos_profile_t end = Eidos_BenchmarkTime();
+				double time_spent = Eidos_ElapsedProfileTime(end - begin);
+				std::cout << time_spent << " ";
+				time_sum += time_spent;
+			}
+			std::cout << " : mean " << time_sum / reps << std::endl;
+			
+#ifdef _OPENMP
+			std::cout << "time (PQUICK): ";
+			time_sum = 0.0;
+			for (int rep = 0; rep < reps; ++rep)
+			{
+				std::vector<SORT_TYPE> data_PQUICK = data_original;
+				eidos_profile_t begin = Eidos_BenchmarkTime();
+				
+				Eidos_ParallelSort(data_PQUICK.data(), data_PQUICK.size(), true);
+				
+				eidos_profile_t end = Eidos_BenchmarkTime();
+				double time_spent = Eidos_ElapsedProfileTime(end - begin);
+				bool correct = (data_PQUICK == data_stdsort);
+				std::cout << time_spent << " " << (!correct ? "(INCORRECT) " : "");
+				time_sum += time_spent;
+			}
+			std::cout << " : mean " << time_sum / reps << std::endl;
+			
+			std::cout << "time (PQUICKCOMP): ";
+			time_sum = 0.0;
+			for (int rep = 0; rep < reps; ++rep)
+			{
+				std::vector<SORT_TYPE> data_PQUICKCOMP = data_original;
+				eidos_profile_t begin = Eidos_BenchmarkTime();
+				
+				Eidos_ParallelSort_Comparator(data_PQUICKCOMP.data(), data_PQUICKCOMP.size(), comparator_string);
+				
+				eidos_profile_t end = Eidos_BenchmarkTime();
+				double time_spent = Eidos_ElapsedProfileTime(end - begin);
+				bool correct = (data_PQUICKCOMP == data_stdsort);
+				std::cout << time_spent << " " << (!correct ? "(INCORRECT) " : "");
+				time_sum += time_spent;
+			}
+			std::cout << " : mean " << time_sum / reps << std::endl;
+			
+			std::cout << "time (PSRIRAM): ";
+			time_sum = 0.0;
+			for (int rep = 0; rep < reps; ++rep)
+			{
+				std::vector<SORT_TYPE> data_PSRIRAM = data_original;
+				eidos_profile_t begin = Eidos_BenchmarkTime();
+				
+				Sriram_parallel_omp_sort(data_PSRIRAM, comparator_string);
+				
+				eidos_profile_t end = Eidos_BenchmarkTime();
+				double time_spent = Eidos_ElapsedProfileTime(end - begin);
+				bool correct = (data_PSRIRAM == data_stdsort);
+				std::cout << time_spent << " " << (!correct ? "(INCORRECT) " : "");
+				time_sum += time_spent;
+			}
+			std::cout << " : mean " << time_sum / reps << std::endl;
+#endif
+		}
+		
+		std::cout << std::endl << std::endl;
+	}
+#endif
+	
 	// If we ran tests, the random number seed has been set; let's set it back to a good seed value
-	Eidos_InitializeRNG();
-	Eidos_SetRNGSeed(Eidos_GenerateSeedFromPIDAndTime());
+	Eidos_SetRNGSeed(Eidos_GenerateRNGSeed());
 	
 	// return a standard Unix result code indicating success (0) or failure (1);
-	return (gEidosTestFailureCount > 0) ? 1 : 0;
+	return (gEidosTestFailureCount > 0) ? EXIT_FAILURE : EXIT_SUCCESS;
 }
 
 #pragma mark literals & identifiers

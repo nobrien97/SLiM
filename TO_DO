@@ -35,7 +35,7 @@ cpplint.py for checking includes (https://github.com/google/styleguide/tree/gh-p
 	python2.7 /Users/bhaller/bin/cpplint.py --filter=-,+build/include_what_you_use ./core/*.cpp ./eidos/*.cpp ./eidostool/*.cpp
 
 CR/LF issues:
-	file <file> tells you what a file is
+	file -e soft <file> tells you what a file is (-e soft turns off "magic", which misdiagnoses SLiM files)
 	tab2space -lf <file> converts a file to Unix-style LF only
 	convert all text files in the current directory to use LF: find . -name \*.txt -exec tab2space -lf {} {} \; -print
 
@@ -46,9 +46,9 @@ tab issues:
 finding out the generation number of a running simulation in lldb:
 	lldb /usr/local/bin/slim
 	process attach --pid X (from ps -ax | grep slim)
-	breakpoint set --method _RunOneGeneration
+	breakpoint set --method _RunOneTick
 	c
-	(lldb breaks at _RunOneGeneration...)
+	(lldb breaks at _RunOneTick...)
 	
 	if you have symbols, just p generation_; if not:
 	
@@ -67,13 +67,22 @@ reassuring the Clang analyzer that a precondition is met:
 
 count total lines of code in the project (excluding the gsl code):
 	( find ./core/ ./eidos/ ./eidostool/ ./EidosScribe ./SLiMgui '(' -name '*.mm' -or -name '*.h' -or -name '*.cpp' ')' -print0 | xargs -0 cat ) | wc -l
+	or better, use cloc (available in MacPorts); see https://stackoverflow.com/a/5121125/2752221
 
 a useful LaTeX equation editor:
 	https://www.codecogs.com/latex/eqneditor.php
 
 find all instances of a string (or regex) in the commit history:
 	git --no-pager log -G"pedigree"
+	
+to get a text diff of changes to the Xcode project file:
+	git --no-pager diff --text SLiM.xcodeproj/project.pbxproj
 
+to dump class memory layouts in Xcode:
+	add -Xclang and -fdump-record-layouts to "Other C++ Flags" in the project
+	rebuild one file of interest with command-control-B
+	go to the Report navigator, click on the build of the file
+	click on the compile execution line in the build log, then click on the report viewer icon at the right edge of that line
 
 
 

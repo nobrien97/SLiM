@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 2/15/19.
-//  Copyright (c) 2014-2022 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2014-2023 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -20,7 +20,9 @@
 
 #include "slim_functions.h"
 #include "slim_globals.h"
-#include "slim_sim.h"
+#include "community.h"
+#include "species.h"
+#include "subpopulation.h"
 #include "genome.h"
 #include "mutation.h"
 #include "mutation_type.h"
@@ -39,15 +41,18 @@ extern const char *gSLiMSourceCode_calcVA;
 extern const char *gSLiMSourceCode_calcPairHeterozygosity;
 extern const char *gSLiMSourceCode_calcHeterozygosity;
 extern const char *gSLiMSourceCode_calcWattersonsTheta;
+extern const char *gSLiMSourceCode_calcInbreedingLoad;
 
 
-const std::vector<EidosFunctionSignature_CSP> *SLiMSim::SLiMFunctionSignatures(void)
+const std::vector<EidosFunctionSignature_CSP> *Community::SLiMFunctionSignatures(void)
 {
 	// Allocate our own EidosFunctionSignature objects
 	static std::vector<EidosFunctionSignature_CSP> sim_func_signatures_;
 	
 	if (!sim_func_signatures_.size())
 	{
+		THREAD_SAFETY_IN_ANY_PARALLEL("Community::SLiMFunctionSignatures(): not warmed up");
+		
 		// Nucleotide utilities
 		sim_func_signatures_.emplace_back((EidosFunctionSignature *)(new EidosFunctionSignature("codonsToAminoAcids", SLiM_ExecuteFunction_codonsToAminoAcids, kEidosValueMaskString | kEidosValueMaskInt, "SLiM"))->AddInt("codons")->AddArgWithDefault(kEidosValueMaskLogical | kEidosValueMaskInt | kEidosValueMaskOptional | kEidosValueMaskSingleton, "long", nullptr, gStaticEidosValue_LogicalF)->AddLogical_OS("paste", gStaticEidosValue_LogicalT));
 		sim_func_signatures_.emplace_back((EidosFunctionSignature *)(new EidosFunctionSignature("codonsToNucleotides", SLiM_ExecuteFunction_codonsToNucleotides, kEidosValueMaskInt | kEidosValueMaskString, "SLiM"))->AddInt("codons")->AddString_OS("format", EidosValue_String_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String_singleton("string"))));
@@ -59,17 +64,31 @@ const std::vector<EidosFunctionSignature_CSP> *SLiMSim::SLiMFunctionSignatures(v
 		sim_func_signatures_.emplace_back((EidosFunctionSignature *)(new EidosFunctionSignature("nucleotidesToCodons", SLiM_ExecuteFunction_nucleotidesToCodons, kEidosValueMaskInt, "SLiM"))->AddIntString("sequence"));
 		sim_func_signatures_.emplace_back((EidosFunctionSignature *)(new EidosFunctionSignature("randomNucleotides", SLiM_ExecuteFunction_randomNucleotides, kEidosValueMaskInt | kEidosValueMaskString, "SLiM"))->AddInt_S("length")->AddNumeric_ON("basis", gStaticEidosValueNULL)->AddString_OS("format", EidosValue_String_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String_singleton("string"))));
 		
-		// Population genetics utilities (implemented with Eidos code
+		// Population genetics utilities (implemented with Eidos code)
 		sim_func_signatures_.emplace_back((EidosFunctionSignature *)(new EidosFunctionSignature("calcFST", gSLiMSourceCode_calcFST, kEidosValueMaskFloat | kEidosValueMaskSingleton, "SLiM"))->AddObject("genomes1", gSLiM_Genome_Class)->AddObject("genomes2", gSLiM_Genome_Class)->AddObject_ON("muts", gSLiM_Mutation_Class, gStaticEidosValueNULL)->AddInt_OSN("start", gStaticEidosValueNULL)->AddInt_OSN("end", gStaticEidosValueNULL));
 		sim_func_signatures_.emplace_back((EidosFunctionSignature *)(new EidosFunctionSignature("calcVA", gSLiMSourceCode_calcVA, kEidosValueMaskFloat | kEidosValueMaskSingleton, "SLiM"))->AddObject("individuals", gSLiM_Individual_Class)->AddIntObject_S("mutType", gSLiM_MutationType_Class));
 		sim_func_signatures_.emplace_back((EidosFunctionSignature *)(new EidosFunctionSignature("calcPairHeterozygosity", gSLiMSourceCode_calcPairHeterozygosity, kEidosValueMaskFloat | kEidosValueMaskSingleton, "SLiM"))->AddObject_S("genome1", gSLiM_Genome_Class)->AddObject_S("genome2", gSLiM_Genome_Class)->AddInt_OSN("start", gStaticEidosValueNULL)->AddInt_OSN("end", gStaticEidosValueNULL)->AddLogical_OS("infiniteSites", gStaticEidosValue_LogicalT));
 		sim_func_signatures_.emplace_back((EidosFunctionSignature *)(new EidosFunctionSignature("calcHeterozygosity", gSLiMSourceCode_calcHeterozygosity, kEidosValueMaskFloat | kEidosValueMaskSingleton, "SLiM"))->AddObject("genomes", gSLiM_Genome_Class)->AddObject_ON("muts", gSLiM_Mutation_Class, gStaticEidosValueNULL)->AddInt_OSN("start", gStaticEidosValueNULL)->AddInt_OSN("end", gStaticEidosValueNULL));
 		sim_func_signatures_.emplace_back((EidosFunctionSignature *)(new EidosFunctionSignature("calcWattersonsTheta", gSLiMSourceCode_calcWattersonsTheta, kEidosValueMaskFloat | kEidosValueMaskSingleton, "SLiM"))->AddObject("genomes", gSLiM_Genome_Class)->AddObject_ON("muts", gSLiM_Mutation_Class, gStaticEidosValueNULL)->AddInt_OSN("start", gStaticEidosValueNULL)->AddInt_OSN("end", gStaticEidosValueNULL));
+		sim_func_signatures_.emplace_back((EidosFunctionSignature *)(new EidosFunctionSignature("calcInbreedingLoad", gSLiMSourceCode_calcInbreedingLoad, kEidosValueMaskFloat | kEidosValueMaskSingleton, "SLiM"))->AddObject("genomes", gSLiM_Genome_Class)->AddObject_OSN("mutType", gSLiM_MutationType_Class, gStaticEidosValueNULL));
+		
 		// Other built-in SLiM functions
 		sim_func_signatures_.emplace_back((EidosFunctionSignature *)(new EidosFunctionSignature("summarizeIndividuals", SLiM_ExecuteFunction_summarizeIndividuals, kEidosValueMaskFloat, "SLiM"))->AddObject("individuals", gSLiM_Individual_Class)->AddInt("dim")->AddNumeric("spatialBounds")->AddString_S("operation")->AddLogicalEquiv_OSN("empty", gStaticEidosValue_Float0)->AddLogical_OS("perUnitArea", gStaticEidosValue_LogicalF)->AddString_OSN("spatiality", gStaticEidosValueNULL));
 		sim_func_signatures_.emplace_back((EidosFunctionSignature *)(new EidosFunctionSignature("treeSeqMetadata", SLiM_ExecuteFunction_treeSeqMetadata, kEidosValueMaskObject | kEidosValueMaskSingleton, gEidosDictionaryRetained_Class, "SLiM"))->AddString_S("filePath")->AddLogical_OS("userData", gStaticEidosValue_LogicalT));
 		sim_func_signatures_.emplace_back((EidosFunctionSignature *)(new EidosFunctionSignature("calcHeterozygosityAtPosition", SLiM_ExecuteFunction_calcHeterozygosityAtPosition, kEidosValueMaskFloat, "SLiM"))->AddObject("individuals", gSLiM_Individual_Class)->AddInt("positions"));
-
+		
+		// Internal SLiM functions
+		sim_func_signatures_.emplace_back((EidosFunctionSignature *)(new EidosFunctionSignature("_startBenchmark", SLiM_ExecuteFunction__startBenchmark, kEidosValueMaskVOID, "SLiM"))->AddString_S("type"));
+		sim_func_signatures_.emplace_back((EidosFunctionSignature *)(new EidosFunctionSignature("_stopBenchmark", SLiM_ExecuteFunction__stopBenchmark, kEidosValueMaskFloat | kEidosValueMaskSingleton, "SLiM")));
+		
+		// ************************************************************************************
+		//
+		//	object instantiation – add in constructors for SLiM classes that have them
+		//	see also EidosInterpreter::BuiltInFunctions(), which this extends
+		//
+		const std::vector<EidosFunctionSignature_CSP> *class_functions = gSLiM_SpatialMap_Class->Functions();
+		
+		sim_func_signatures_.insert(sim_func_signatures_.end(), class_functions->begin(), class_functions->end());
 	}
 	
 	return &sim_func_signatures_;
@@ -85,25 +104,43 @@ const std::vector<EidosFunctionSignature_CSP> *SLiMSim::SLiMFunctionSignatures(v
 #pragma mark -
 
 // These are implemented in Eidos, for transparency/modifiability.  These strings are globals mostly so the
-// formatting of the code looks nice in Xcode; they are used only by SLiMSim::SLiMFunctionSignatures().
+// formatting of the code looks nice in Xcode; they are used only by Community::SLiMFunctionSignatures().
 
 // (float$)calcFST(object<Genome> genomes1, object<Genome> genomes2, [No<Mutation> muts = NULL], [Ni$ start = NULL], [Ni$ end = NULL])
 const char *gSLiMSourceCode_calcFST = 
 R"({
+	if ((genomes1.length() == 0) | (genomes2.length() == 0))
+		stop("ERROR (calcFST()): genomes1 and genomes2 must both be non-empty.");
+	if (community.allSpecies.length() > 1)
+	{
+		species = unique(genomes1.individual.subpopulation.species, preserveOrder=F);
+		if (species.length() != 1)
+			stop("ERROR (calcFST()): all genomes must belong to the same species.");
+		if (!all(species == genomes2.individual.subpopulation.species))
+			stop("ERROR (calcFST()): all genomes must belong to the same species.");
+		if (!isNULL(muts))
+			if (!all(species == muts.mutationType.species))
+				stop("ERROR (calcFST()): all mutations must belong to the same species as the genomes.");
+	}
+	else
+	{
+		species = community.allSpecies;
+	}
+	
 	// handle windowing
 	if (!isNULL(start) & !isNULL(end))
 	{
 		if (start > end)
-			stop("ERROR (calcFST()): start must be less than or equal to end");
+			stop("ERROR (calcFST()): start must be less than or equal to end.");
 		if (isNULL(muts))
-			muts = sim.mutations;
+			muts = species.mutations;
 		mpos = muts.position;
 		muts = muts[(mpos >= start) & (mpos <= end)];
 		length = end - start + 1;
 	}
 	else if (!isNULL(start) | !isNULL(end))
 	{
-		stop("ERROR (calcFST()): start and end must both be NULL or both be non-NULL");
+		stop("ERROR (calcFST()): start and end must both be NULL or both be non-NULL.");
 	}
 	
 	// do the calculation
@@ -112,17 +149,21 @@ R"({
 	mean_p = (p1_p + p2_p) / 2.0;
 	H_t = 2.0 * mean_p * (1.0 - mean_p);
 	H_s = p1_p * (1.0 - p1_p) + p2_p * (1.0 - p2_p);
-	fst = 1.0 - H_s/H_t;
-	fst = fst[!isNAN(fst)];  // exclude muts where mean_p is 0.0 or 1.0
-	return mean(fst);
+	fst = 1.0 - mean(H_s) / mean(H_t);
+	return fst;
 })";
 
 // (float$)calcVA(object<Individual> individuals, io<MutationType>$ mutType)
 const char *gSLiMSourceCode_calcVA = 
 R"({
+	species = mutType.species;
+	if (community.allSpecies.length() > 1)
+		if (!all(individuals.subpopulation.species == species))
+			stop("ERROR (calcVA()): all individuals must belong to the same species as mutType.");
+	
 	// look up an integer mutation type id
 	if (type(mutType) == "integer") {
-		mutType = sim.mutationTypes[sim.mutationTypes.id == mutType];
+		mutType = species.mutationTypes[species.mutationTypes.id == mutType];
 		assert(length(mutType) == 1, "calcVA() mutation type lookup failed");
 	}
 	return var(individuals.sumOfMutationsOfType(mutType));
@@ -131,15 +172,26 @@ R"({
 // (float$)calcPairHeterozygosity(object<Genome>$ genome1, object<Genome>$ genome2, [Ni$ start = NULL], [Ni$ end = NULL], [l$ infiniteSites = T])
 const char *gSLiMSourceCode_calcPairHeterozygosity = 
 R"({
+	if (community.allSpecies.length() > 1)
+	{
+		species = unique(c(genome1.individual.subpopulation.species, genome2.individual.subpopulation.species), preserveOrder=F);
+		if (species.length() != 1)
+			stop("ERROR (calcPairHeterozygosity()): genome1 and genome2 must belong to the same species.");
+	}
+	else
+	{
+		species = community.allSpecies;
+	}
+	
 	muts1 = genome1.mutations;
 	muts2 = genome2.mutations;
-	length = sim.chromosome.lastPosition + 1;
+	length = species.chromosome.lastPosition + 1;
 
 	// handle windowing
 	if (!isNULL(start) & !isNULL(end))
 	{
 		if (start > end)
-			stop("ERROR (calcPairHeterozygosity()): start must be less than or equal to end");
+			stop("ERROR (calcPairHeterozygosity()): start must be less than or equal to end.");
 		m1pos = muts1.position;
 		m2pos = muts2.position;
 		muts1 = muts1[(m1pos >= start) & (m1pos <= end)];
@@ -148,7 +200,7 @@ R"({
 	}
 	else if (!isNULL(start) | !isNULL(end))
 	{
-		stop("ERROR (calcPairHeterozygosity()): start and end must both be NULL or both be non-NULL");
+		stop("ERROR (calcPairHeterozygosity()): start and end must both be NULL or both be non-NULL.");
 	}
 
 	// do the calculation
@@ -162,22 +214,38 @@ R"({
 // (float$)calcHeterozygosity(o<Genome> genomes, [No<Mutation> muts = NULL], [Ni$ start = NULL], [Ni$ end = NULL])
 const char *gSLiMSourceCode_calcHeterozygosity = 
 R"({
-	length = sim.chromosome.lastPosition + 1;
+	if (genomes.length() == 0)
+		stop("ERROR (calcHeterozygosity()): genomes must be non-empty.");
+	if (community.allSpecies.length() > 1)
+	{
+		species = unique(genomes.individual.subpopulation.species, preserveOrder=F);
+		if (species.length() != 1)
+			stop("ERROR (calcHeterozygosity()): genomes must all belong to the same species.");
+		if (!isNULL(muts))
+			if (!all(muts.mutationType.species == species))
+				stop("ERROR (calcHeterozygosity()): muts must all belong to the same species as genomes.");
+	}
+	else
+	{
+		species = community.allSpecies;
+	}
+	
+	length = species.chromosome.lastPosition + 1;
 
 	// handle windowing
 	if (!isNULL(start) & !isNULL(end))
 	{
 		if (start > end)
-			stop("ERROR (calcHeterozygosity()): start must be less than or equal to end");
+			stop("ERROR (calcHeterozygosity()): start must be less than or equal to end.");
 		if (isNULL(muts))
-			muts = sim.mutations;
+			muts = species.mutations;
 		mpos = muts.position;
 		muts = muts[(mpos >= start) & (mpos <= end)];
 		length = end - start + 1;
 	}
 	else if (!isNULL(start) | !isNULL(end))
 	{
-		stop("ERROR (calcHeterozygosity()): start and end must both be NULL or both be non-NULL");
+		stop("ERROR (calcHeterozygosity()): start and end must both be NULL or both be non-NULL.");
 	}
 
 	// do the calculation
@@ -189,21 +257,37 @@ R"({
 // (float$)calcWattersonsTheta(o<Genome> genomes, [No<Mutation> muts = NULL], [Ni$ start = NULL], [Ni$ end = NULL])
 const char *gSLiMSourceCode_calcWattersonsTheta = 
 R"({
+	if (genomes.length() == 0)
+		stop("ERROR (calcWattersonsTheta()): genomes must be non-empty.");
+	if (community.allSpecies.length() > 1)
+	{
+		species = unique(genomes.individual.subpopulation.species, preserveOrder=F);
+		if (species.length() != 1)
+			stop("ERROR (calcWattersonsTheta()): genomes must all belong to the same species.");
+		if (!isNULL(muts))
+			if (!all(muts.mutationType.species == species))
+				stop("ERROR (calcWattersonsTheta()): muts must all belong to the same species as genomes.");
+	}
+	else
+	{
+		species = community.allSpecies;
+	}
+	
 	if (isNULL(muts))
-		muts = sim.mutations;
-
+		muts = species.mutations;
+	
 	// handle windowing
 	if (!isNULL(start) & !isNULL(end))
 	{
 		if (start > end)
-			stop("ERROR (calcWattersonsTheta()): start must be less than or equal to end");
+			stop("ERROR (calcWattersonsTheta()): start must be less than or equal to end.");
 		mpos = muts.position;
 		muts = muts[(mpos >= start) & (mpos <= end)];
 		length = end - start + 1;
 	}
 	else if (!isNULL(start) | !isNULL(end))
 	{
-		stop("ERROR (calcWattersonsTheta()): start and end must both be NULL or both be non-NULL");
+		stop("ERROR (calcWattersonsTheta()): start and end must both be NULL or both be non-NULL.");
 	}
 
 	// narrow down to the mutations that are actually present in the genomes and aren't fixed
@@ -214,8 +298,59 @@ R"({
 	k = size(muts);
 	n = genomes.size();
 	a_n = sum(1 / 1:(n-1));
-	theta = (k / a_n) / (sim.chromosome.lastPosition + 1);
+	theta = (k / a_n) / (species.chromosome.lastPosition + 1);
 	return theta;
+})";
+
+// (float$)calcInbreedingLoad(object<Genome> genomes, [No<MutationType>$ mutType = NULL])
+const char *gSLiMSourceCode_calcInbreedingLoad = 
+R"({
+	if (genomes.length() == 0)
+		stop("ERROR (calcInbreedingLoad()): genomes must be non-empty.");
+	if (community.allSpecies.length() > 1)
+	{
+		species = unique(genomes.individual.subpopulation.species, preserveOrder=F);
+		if (species.length() != 1)
+			stop("ERROR (calcInbreedingLoad()): genomes must all belong to the same species.");
+		if (!isNULL(mutType))
+			if (mutType.species != species)
+				stop("ERROR (calcInbreedingLoad()): mutType must belong to the same species as genomes.");
+	}
+	else
+	{
+		species = community.allSpecies;
+	}
+	
+	// get the focal mutations and narrow down to those that are deleterious
+	if (isNULL(mutType))
+		muts = species.mutations;
+	else
+		muts = species.mutationsOfType(mutType);
+	
+	muts = muts[muts.selectionCoeff < 0.0];
+	
+	// get frequencies and focus on those that are in the genomes
+	q = genomes.mutationFrequenciesInGenomes(muts);
+	inGenomes = (q > 0);
+	
+	muts = muts[inGenomes];
+	q = q[inGenomes];
+	
+	// fetch selection coefficients; note that we use the negation of
+	// SLiM's selection coefficient, following Morton et al. 1956's usage
+	s = -muts.selectionCoeff;
+	
+	// replace s > 1.0 with s == 1.0; a mutation can't be more lethal
+	// than lethal (this can happen when drawing from a gamma distribution)
+	s[s > 1.0] = 1.0;
+	
+	// get h for each mutation; note that this will not work if changing
+	// h using mutationEffect() callbacks or other scripted approaches
+	h = muts.mutationType.dominanceCoeff;
+	
+	// calculate number of haploid lethal equivalents (B or inbreeding load)
+	// this equation is from Morton et al. 1956
+	return (sum(q*s) - sum(q^2*s) - 2*sum(q*(1-q)*s*h));
 })";
 
 
@@ -970,10 +1105,12 @@ EidosValue_SP SLiM_ExecuteFunction_randomNucleotides(const std::vector<EidosValu
 		else						return gStaticEidosValue_String_ZeroVec;
 	}
 	
+	gsl_rng *rng = EIDOS_GSL_RNG(omp_get_thread_num());
+	
 	if (length == 1)
 	{
 		// Handle the singleton case separately for speed
-		double runif = Eidos_rng_uniform(EIDOS_GSL_RNG);
+		double runif = Eidos_rng_uniform(rng);
 		
 		if (format == "integer")
 		{
@@ -998,7 +1135,7 @@ EidosValue_SP SLiM_ExecuteFunction_randomNucleotides(const std::vector<EidosValu
 		
 		for (int value_index = 0; value_index < length; ++value_index)
 		{
-			double runif = Eidos_rng_uniform(EIDOS_GSL_RNG);
+			double runif = Eidos_rng_uniform(rng);
 			
 			if (runif < pA)			string_result->PushString(gStr_A);
 			else if (runif < pC)	string_result->PushString(gStr_C);
@@ -1015,7 +1152,7 @@ EidosValue_SP SLiM_ExecuteFunction_randomNucleotides(const std::vector<EidosValu
 		
 		for (int value_index = 0; value_index < length; ++value_index)
 		{
-			double runif = Eidos_rng_uniform(EIDOS_GSL_RNG);
+			double runif = Eidos_rng_uniform(rng);
 			
 			if (runif < pA)			int_result->set_int_no_check(0, value_index);
 			else if (runif < pC)	int_result->set_int_no_check(1, value_index);
@@ -1037,7 +1174,7 @@ EidosValue_SP SLiM_ExecuteFunction_randomNucleotides(const std::vector<EidosValu
 		
 		for (int value_index = 0; value_index < length; ++value_index)
 		{
-			double runif = Eidos_rng_uniform(EIDOS_GSL_RNG);
+			double runif = Eidos_rng_uniform(rng);
 			
 			if (runif < pA)			nuc_string_ptr[value_index] = 'A';
 			else if (runif < pC)	nuc_string_ptr[value_index] = 'C';
@@ -1132,7 +1269,6 @@ EidosValue_SP SLiM_ExecuteFunction_codonsToNucleotides(const std::vector<EidosVa
 		nuc_string.resize(length);	// create space for all the nucleotides we will generate
 		
 		char *nuc_string_ptr = &nuc_string[0];	// data() returns a const pointer, but this is safe in C++11 and later
-		static const char nuc_chars[4] = {'A', 'C', 'G', 'T'};
 		
 		for (int codon_index = 0; codon_index < codons_length; ++codon_index)
 		{
@@ -1145,9 +1281,9 @@ EidosValue_SP SLiM_ExecuteFunction_codonsToNucleotides(const std::vector<EidosVa
 			int nuc2 = (codon >> 2) & 0x03;
 			int nuc3 = codon & 0x03;
 			
-			nuc_string_ptr[codon_index * 3] = nuc_chars[nuc1];
-			nuc_string_ptr[codon_index * 3 + 1] = nuc_chars[nuc2];
-			nuc_string_ptr[codon_index * 3 + 2] = nuc_chars[nuc3];
+			nuc_string_ptr[codon_index * 3] = gSLiM_Nucleotides[nuc1];
+			nuc_string_ptr[codon_index * 3 + 1] = gSLiM_Nucleotides[nuc2];
+			nuc_string_ptr[codon_index * 3 + 2] = gSLiM_Nucleotides[nuc3];
 		}
 		
 		return EidosValue_SP(string_result);
@@ -1264,6 +1400,9 @@ EidosValue_SP SLiM_ExecuteFunction_summarizeIndividuals(const std::vector<EidosV
 	Individual *singleton_ind = nullptr;
 	Individual **individuals_buffer = nullptr;
 	
+	if (individuals_count == 0)
+		EIDOS_TERMINATION << "ERROR (SLiM_ExecuteFunction_summarizeIndividuals): summarizeIndividuals() cannot be called with a zero-length individuals vector, because the focal species, and thus the spatial dimensionality, cannot be determined." << EidosTerminate();
+	
 	if (individuals_count == 1)
 	{
 		singleton_ind = (Individual *)individuals_value->ObjectElementAtIndex(0, nullptr);
@@ -1274,27 +1413,32 @@ EidosValue_SP SLiM_ExecuteFunction_summarizeIndividuals(const std::vector<EidosV
 		individuals_buffer = (Individual **)((EidosValue_Object_vector *)individuals_value)->data();
 	}
 	
-	if (individuals_count > 0)
+	// This very weird code tests that the layout of ivars inside Individual is what we expect it to be below
+	// We use the first individual in the buffer as a test subject, rather than nullptr, to make UBSan happy
+	static bool beenHere = false;
+	
+	if (!beenHere)
 	{
-		static bool beenHere = false;
+		THREAD_SAFETY_IN_ACTIVE_PARALLEL("SLiM_ExecuteFunction_summarizeIndividuals(): usage of statics");
 		
-		if (!beenHere)
-		{
-			// This very weird code tests that the layout of ivars inside Individual is what we expect it to be below
-			// We use the first individual in the buffer as a test subject, rather than nullptr, to make UBSan happy
-			Individual *test_ind_layout = individuals_buffer[0];
+		Individual *test_ind_layout = individuals_buffer[0];
+	
+		if (((&(test_ind_layout->spatial_x_)) + 1 != (&(test_ind_layout->spatial_y_))) ||
+			((&(test_ind_layout->spatial_x_)) + 2 != (&(test_ind_layout->spatial_z_))))
+			EIDOS_TERMINATION << "ERROR (SLiM_ExecuteFunction_summarizeIndividuals): (internal error) Individual ivar layout unexpected." << EidosTerminate();
 		
-			if (((&(test_ind_layout->spatial_x_)) + 1 != (&(test_ind_layout->spatial_y_))) ||
-				((&(test_ind_layout->spatial_x_)) + 2 != (&(test_ind_layout->spatial_z_))))
-				EIDOS_TERMINATION << "ERROR (SLiM_ExecuteFunction_summarizeIndividuals): (internal error) Individual ivar layout unexpected." << EidosTerminate();
-			
-			beenHere = true;
-		}
+		beenHere = true;
 	}
 	
+	// SPECIES CONSISTENCY CHECK
+	Species *species = Community::SpeciesForIndividuals(individuals_value);
+	
+	if (!species)
+		EIDOS_TERMINATION << "ERROR (SLiM_ExecuteFunction_summarizeIndividuals): summarizeIndividuals() requires that all individuals belong to the same species." << EidosTerminate();
+	
 	// Get the model's dimensionality, which will be context for everything we do below
-	SLiMSim &sim = SLiM_GetSimFromInterpreter(p_interpreter);
-	int spatial_dimensionality = sim.SpatialDimensionality();
+	Community &community = species->community_;
+	int spatial_dimensionality = species->SpatialDimensionality();
 	
 	if (spatial_dimensionality <= 0)
 		EIDOS_TERMINATION << "ERROR (SLiM_ExecuteFunction_summarizeIndividuals): summarizeIndividuals() can only be called in spatial models, since it summarizes spatially-partitioned information." << EidosTerminate();
@@ -1473,6 +1617,8 @@ EidosValue_SP SLiM_ExecuteFunction_summarizeIndividuals(const std::vector<EidosV
 	else
 	{
 		// run the lambda on each bin, which does not depend upon the spatiality
+		THREAD_SAFETY_IN_ACTIVE_PARALLEL("SLiM_ExecuteFunction_summarizeIndividuals(): running Eidos lambda");
+		
 		EidosValue_String_singleton *lambda_value_singleton = dynamic_cast<EidosValue_String_singleton *>(operation_value);
 		EidosScript *script = (lambda_value_singleton ? lambda_value_singleton->CachedScript() : nullptr);
 		
@@ -1521,7 +1667,7 @@ EidosValue_SP SLiM_ExecuteFunction_summarizeIndividuals(const std::vector<EidosV
 			EidosSymbolTable constants(EidosSymbolTableType::kContextConstantsTable, &interpreter_symbols);
 			EidosSymbolTable symbols(EidosSymbolTableType::kLocalVariablesTable, &constants);	// add a variables symbol table on top, shared across all invocations
 			EidosFunctionMap &function_map = p_interpreter.FunctionMap();								// use our own function map
-			EidosInterpreter interpreter(*script, symbols, function_map, p_interpreter.Context(), p_interpreter.ExecutionOutputStream(), p_interpreter.ErrorOutputStream());
+			EidosInterpreter interpreter(*script, symbols, function_map, &community, p_interpreter.ExecutionOutputStream(), p_interpreter.ErrorOutputStream());
 			
 			// We set up a "constant" value for `individuals` that refers to the stack-allocated object vector made above
 			// For each grid cell we will munge the contents of that vector, without having to touch the symbol table again
@@ -1796,6 +1942,11 @@ EidosValue_SP SLiM_ExecuteFunction_calcHeterozygosityAtPosition(const std::vecto
 				continue;
 			}
 
+			for (int l = 0; l < 5; ++l)
+			{
+
+			}
+
 			// Sort ids
 			std::sort(mutsGenome1.begin(), mutsGenome1.end());
 			std::sort(mutsGenome2.begin(), mutsGenome2.end());
@@ -1812,6 +1963,7 @@ EidosValue_SP SLiM_ExecuteFunction_calcHeterozygosityAtPosition(const std::vecto
 
 			// add them to the accumulating list
 			hetCounts[j] += setDiff.size();
+
 		}
 	}
 
@@ -1825,9 +1977,6 @@ EidosValue_SP SLiM_ExecuteFunction_calcHeterozygosityAtPosition(const std::vecto
 	return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float_vector{out});
 
 }
-
-
-
 
 
 

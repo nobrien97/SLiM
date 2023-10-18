@@ -45,7 +45,7 @@ win32:CONFIG(release, debug|release): LIBS += -L$$OUT_PWD/../gsl/release/ -lgsl
 else:win32:CONFIG(debug, debug|release): LIBS += -L$$OUT_PWD/../gsl/debug/ -lgsl
 else:unix: LIBS += -L$$OUT_PWD/../gsl/ -lgsl
 INCLUDEPATH += $$PWD/../gsl $$PWD/../gsl/blas $$PWD/../gsl/block $$PWD/../gsl/cblas $$PWD/../gsl/cdf
-INCLUDEPATH += $$PWD/../gsl/complex $$PWD/../gsl/err $$PWD/../gsl/linalg $$PWD/../gsl/matrix
+INCLUDEPATH += $$PWD/../gsl/complex $$PWD/../gsl/err $$PWD/../gsl/interpolation $$PWD/../gsl/linalg $$PWD/../gsl/matrix
 INCLUDEPATH += $$PWD/../gsl/randist $$PWD/../gsl/rng $$PWD/../gsl/specfunc $$PWD/../gsl/sys $$PWD/../gsl/vector
 DEPENDPATH += $$PWD/../gsl
 win32-g++:CONFIG(release, debug|release): PRE_TARGETDEPS += $$OUT_PWD/../gsl/release/libgsl.a
@@ -77,11 +77,21 @@ SOURCES += \
     eidos_class_Object.cpp \
     eidos_class_TestElement.cpp \
     eidos_functions.cpp \
+    eidos_functions_colors.cpp \
+    eidos_functions_distributions.cpp \
+    eidos_functions_files.cpp \
+    eidos_functions_math.cpp \
+    eidos_functions_matrices.cpp \
+    eidos_functions_other.cpp \
+    eidos_functions_stats.cpp \
+    eidos_functions_strings.cpp \
+    eidos_functions_values.cpp \
     eidos_globals.cpp \
     eidos_interpreter.cpp \
     eidos_property_signature.cpp \
     eidos_rng.cpp \
     eidos_script.cpp \
+    eidos_sorting.cpp \
     eidos_symbol_table.cpp \
     eidos_test.cpp \
     eidos_test_functions_math.cpp \
@@ -114,6 +124,7 @@ HEADERS += \
     eidos_property_signature.h \
     eidos_rng.h \
     eidos_script.h \
+	eidos_sorting.h \
     eidos_symbol_table.h \
     eidos_test_builtins.h \
     eidos_test.h \

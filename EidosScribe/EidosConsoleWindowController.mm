@@ -3,7 +3,7 @@
 //  EidosScribe
 //
 //  Created by Ben Haller on 6/13/15.
-//  Copyright (c) 2015-2022 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2015-2023 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -166,6 +166,27 @@ NSString *EidosDefaultsSuppressScriptCheckSuccessPanelKey = @"EidosSuppressScrip
 - (void)hideWindow
 {
 	[scriptWindow performClose:nil];
+}
+
+- (void)displayStartupMessage
+{
+	NSDictionary *statusAttrs = [NSDictionary eidosTextAttributesWithColor:[NSColor textColor] size:11.0];
+	NSString *statusString = [NSString stringWithFormat:@"Eidos %s, %@ build.", EIDOS_VERSION_STRING,
+#if DEBUG
+							  @"debug"
+#else
+							  @"release"
+#endif
+							  ];
+	
+#ifdef _OPENMP
+	statusString = [statusString stringByAppendingFormat:@"  Running Eidos in parallel with %d threads maximum.", gEidosMaxThreads];
+#endif
+	
+	NSMutableAttributedString *statusAttrString = [[[NSMutableAttributedString alloc] initWithString:statusString attributes:statusAttrs] autorelease];
+	
+	[statusAttrString addAttribute:NSBaselineOffsetAttributeName value:[NSNumber numberWithFloat:2.0] range:NSMakeRange(0, [statusAttrString length])];
+	[statusTextField setAttributedStringValue:statusAttrString];
 }
 
 - (void)cleanup
@@ -605,7 +626,7 @@ NSString *EidosDefaultsSuppressScriptCheckSuccessPanelKey = @"EidosSuppressScrip
 			// On failure, we show an alert describing the error, and highlight the relevant script line
 			NSAlert *alert = [[NSAlert alloc] init];
 			
-			[alert setAlertStyle:NSWarningAlertStyle];
+			[alert setAlertStyle:NSAlertStyleWarning];
 			[alert setMessageText:@"Script error"];
 			[alert setInformativeText:errorDiagnostic];
 			[alert addButtonWithTitle:@"OK"];
@@ -629,7 +650,7 @@ NSString *EidosDefaultsSuppressScriptCheckSuccessPanelKey = @"EidosSuppressScrip
 			{
 				NSAlert *alert = [[NSAlert alloc] init];
 				
-				[alert setAlertStyle:NSInformationalAlertStyle];
+				[alert setAlertStyle:NSAlertStyleInformational];
 				[alert setMessageText:@"No script errors"];
 				[alert setInformativeText:@"No errors found."];
 				[alert addButtonWithTitle:@"OK"];

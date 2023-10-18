@@ -3,7 +3,7 @@
 //  Eidos
 //
 //  Created by Ben Haller on 6/28/15.
-//  Copyright (c) 2015-2022 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2015-2023 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -19,6 +19,7 @@
 
 
 #include "eidos_globals.h"
+#include "eidos_rng.h"
 #include "eidos_script.h"
 #include "eidos_value.h"
 #include "eidos_interpreter.h"
@@ -53,6 +54,7 @@
 #include <iomanip>
 #include <sys/param.h>
 #include <regex>
+#include <signal.h>
 
 // added for Eidos_mkstemps() and Eidos_TemporaryDirectoryExists()
 #include <sys/stat.h>
@@ -82,6 +84,16 @@
 #define gettimeofday gnulib::gettimeofday
 #endif
 
+#ifdef _OPENMP
+#include <stdlib.h>
+#endif
+
+
+// declared in eidos_openmp.h, set in Eidos_WarmUpOpenMP() when parallel
+int gEidosMaxThreads = 1;
+int gEidosNumThreads = 1;
+bool gEidosNumThreadsOverride = false;
+
 
 // Require 64-bit; apparently there are some issues on 32-bit, and nobody should be doing that anyway
 static_assert(sizeof(char *) == 8, "SLiM must be built for 64-bit, not 32-bit.");
@@ -102,17 +114,7 @@ int gEidosDebugIndent = 0;
 #pragma mark Profiling support
 #pragma mark -
 
-#if (defined(SLIMGUI) && (SLIMPROFILING == 1))
-// PROFILING
-
-int gEidosProfilingClientCount = 0;
-
-uint64_t gEidos_ProfileCounter;
-double gEidos_ProfileOverheadTicks;
-double gEidos_ProfileOverheadSeconds;
-double gEidos_ProfileLagTicks;
-double gEidos_ProfileLagSeconds;
-
+// Base support used by EidosBenchmark as well as profiling
 #if defined(MACH_PROFILING)
 
 double Eidos_ElapsedProfileTime(eidos_profile_t p_elapsed_profile_time)
@@ -149,6 +151,24 @@ double Eidos_ElapsedProfileTime(eidos_profile_t p_elapsed_profile_time)
 }
 
 #endif
+
+
+// EidosBenchmark support
+
+EidosBenchmarkType gEidosBenchmarkType = EidosBenchmarkType::kNone;
+eidos_profile_t gEidosBenchmarkAccumulator = 0;
+
+
+#if (SLIMPROFILING == 1)
+// PROFILING
+
+int gEidosProfilingClientCount = 0;
+
+uint64_t gEidos_ProfileCounter;
+double gEidos_ProfileOverheadTicks;
+double gEidos_ProfileOverheadSeconds;
+double gEidos_ProfileLagTicks;
+double gEidos_ProfileLagSeconds;
 
 static eidos_profile_t gEidos_ProfilePrep_Ticks;
 
@@ -194,7 +214,7 @@ void Eidos_PrepareForProfiling(void)
 	//std::cout << "Profile lag internal to block: " << gEidos_ProfileLag_double << " ticks, " << gEidos_ProfileLagSeconds << " seconds" << std::endl;
 }
 
-#endif	// (defined(SLIMGUI) && (SLIMPROFILING == 1))
+#endif	// (SLIMPROFILING == 1)
 
 
 #pragma mark -
@@ -205,13 +225,848 @@ bool Eidos_GoodSymbolForDefine(std::string &p_symbol_name);
 EidosValue_SP Eidos_ValueForCommandLineExpression(std::string &p_value_expression);
 
 
+#ifdef _OPENMP
+
+// Declarations for the number of threads we prefer to use for each parallel loop.
+// These default values are all EIDOS_OMP_MAX_THREADS, to use the maximum number
+// of threads in all cases.  This is primarily useful for benchmarking; normally
+// these default values get overwritten by _Eidos_SetOpenMPThreadCounts().
+int gEidos_OMP_threads_ABS_FLOAT = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_CEIL = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_EXP_FLOAT = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_FLOOR = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_LOG_FLOAT = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_LOG10_FLOAT = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_LOG2_FLOAT = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_ROUND = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_SQRT_FLOAT = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_SUM_INTEGER = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_SUM_FLOAT = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_SUM_LOGICAL = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_TRUNC = EIDOS_OMP_MAX_THREADS;
+
+int gEidos_OMP_threads_MAX_INT = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_MAX_FLOAT = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_MIN_INT = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_MIN_FLOAT = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_PMAX_INT_1 = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_PMAX_INT_2 = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_PMAX_FLOAT_1 = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_PMAX_FLOAT_2 = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_PMIN_INT_1 = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_PMIN_INT_2 = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_PMIN_FLOAT_1 = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_PMIN_FLOAT_2 = EIDOS_OMP_MAX_THREADS;
+
+int gEidos_OMP_threads_MATCH_INT = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_MATCH_FLOAT = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_MATCH_STRING = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_MATCH_OBJECT = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_SAMPLE_INDEX = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_SAMPLE_R_INT = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_SAMPLE_R_FLOAT = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_SAMPLE_R_OBJECT = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_SAMPLE_WR_INT = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_SAMPLE_WR_FLOAT = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_SAMPLE_WR_OBJECT = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_TABULATE_MAXBIN = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_TABULATE = EIDOS_OMP_MAX_THREADS;
+
+int gEidos_OMP_threads_CONTAINS_MARKER_MUT = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_I_COUNT_OF_MUTS_OF_TYPE = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_G_COUNT_OF_MUTS_OF_TYPE = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_INDS_W_PEDIGREE_IDS = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_RELATEDNESS = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_SAMPLE_INDIVIDUALS_1 = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_SAMPLE_INDIVIDUALS_2 = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_SET_FITNESS_SCALE_1 = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_SET_FITNESS_SCALE_2 = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_SUM_OF_MUTS_OF_TYPE = EIDOS_OMP_MAX_THREADS;
+
+int gEidos_OMP_threads_DNORM_1 = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_DNORM_2 = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_RBINOM_1 = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_RBINOM_2 = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_RBINOM_3 = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_RDUNIF_1 = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_RDUNIF_2 = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_RDUNIF_3 = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_REXP_1 = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_REXP_2 = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_RNORM_1 = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_RNORM_2 = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_RNORM_3 = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_RPOIS_1 = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_RPOIS_2 = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_RUNIF_1 = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_RUNIF_2 = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_RUNIF_3 = EIDOS_OMP_MAX_THREADS;
+
+int gEidos_OMP_threads_SORT_INT = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_SORT_FLOAT = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_SORT_STRING = EIDOS_OMP_MAX_THREADS;
+
+int gEidos_OMP_threads_POINT_IN_BOUNDS_1D = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_POINT_IN_BOUNDS_2D = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_POINT_IN_BOUNDS_3D = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_POINT_PERIODIC_1D = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_POINT_PERIODIC_2D = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_POINT_PERIODIC_3D = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_POINT_REFLECTED_1D = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_POINT_REFLECTED_2D = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_POINT_REFLECTED_3D = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_POINT_STOPPED_1D = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_POINT_STOPPED_2D = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_POINT_STOPPED_3D = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_POINT_UNIFORM_1D = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_POINT_UNIFORM_2D = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_POINT_UNIFORM_3D = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_SET_SPATIAL_POS_1_1D = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_SET_SPATIAL_POS_1_2D = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_SET_SPATIAL_POS_1_3D = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_SET_SPATIAL_POS_2_1D = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_SET_SPATIAL_POS_2_2D = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_SET_SPATIAL_POS_2_3D = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_SPATIAL_MAP_VALUE = EIDOS_OMP_MAX_THREADS;
+
+int gEidos_OMP_threads_CLIPPEDINTEGRAL_1S = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_CLIPPEDINTEGRAL_2S = EIDOS_OMP_MAX_THREADS;
+//int gEidos_OMP_threads_CLIPPEDINTEGRAL_3S = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_DRAWBYSTRENGTH = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_INTNEIGHCOUNT = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_LOCALPOPDENSITY = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_NEARESTINTNEIGH = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_NEARESTNEIGH = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_NEIGHCOUNT = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_TOTNEIGHSTRENGTH = EIDOS_OMP_MAX_THREADS;
+
+int gEidos_OMP_threads_AGE_INCR = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_DEFERRED_REPRO = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_WF_REPRO = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_FITNESS_ASEX_1 = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_FITNESS_ASEX_2 = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_FITNESS_ASEX_3 = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_FITNESS_SEX_1 = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_FITNESS_SEX_2 = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_FITNESS_SEX_3 = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_MIGRANT_CLEAR = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_SIMPLIFY_SORT_PRE = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_SIMPLIFY_SORT = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_SIMPLIFY_SORT_POST = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_PARENTS_CLEAR = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_UNIQUE_MUTRUNS = EIDOS_OMP_MAX_THREADS;
+int gEidos_OMP_threads_SURVIVAL = EIDOS_OMP_MAX_THREADS;
+
+EidosPerTaskThreadCounts gEidosDefaultPerTaskThreadCounts = EidosPerTaskThreadCounts::kDefault;
+std::string gEidosPerTaskThreadCountsSetName = "DEFAULT";	// should get overwritten
+int gEidosPerTaskOriginalMaxThreadCount = EIDOS_OMP_MAX_THREADS;
+int gEidosPerTaskClippedMaxThreadCount = EIDOS_OMP_MAX_THREADS;
+
+void _Eidos_SetOpenMPThreadCounts(EidosPerTaskThreadCounts per_task_thread_counts)
+{
+	// This switches to a set of per-task thread counts.  Ideally, these are determined using the
+	// SLiM-Benchmarks repo on GitHub, on the actual machine where production runs will be done.
+	// Where the scaling curve tops out for a given test, that determines the default number of
+	// threads that should be used (since performance degrades beyond that point).  The values
+	// here come from tests on specific hardware that I use; they may or may not correspond to
+	// what provides good performance on the end user's hardware!
+	
+	// One question is what to put in when a task scales all the way up to the maximum number of
+	// threads that was tested.  For example, if tests went to 16 threads and it scaled to 16,
+	// do you put 16, or do you put EIDOS_OMP_MAX_THREADS figuring that if someone uses those
+	// per-task maximum thread counts on a similar machine with even more cores, the task might
+	// well continue to scale?  This is a guess; it's extrapolating beyond the data we have.
+	// But I have chosen, for that example, to use 16, not EIDOS_OMP_MAX_THREADS.  The user can
+	// always fix this if they want to; better to err on the side of caution and not scale up
+	// to levels where performance might become atrocious.
+	
+	if (per_task_thread_counts == EidosPerTaskThreadCounts::kMaxThreads)
+	{
+		// These are all EIDOS_OMP_MAX_THREADS, as a template for modification
+		gEidosPerTaskThreadCountsSetName = "maxThreads";
+		gEidosPerTaskOriginalMaxThreadCount = EIDOS_OMP_MAX_THREADS;
+		gEidosPerTaskClippedMaxThreadCount = EIDOS_OMP_MAX_THREADS;
+		
+		gEidos_OMP_threads_ABS_FLOAT = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_CEIL = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_EXP_FLOAT = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_FLOOR = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_LOG_FLOAT = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_LOG10_FLOAT = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_LOG2_FLOAT = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_ROUND = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_SQRT_FLOAT = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_SUM_INTEGER = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_SUM_FLOAT = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_SUM_LOGICAL = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_TRUNC = EIDOS_OMP_MAX_THREADS;
+		
+		gEidos_OMP_threads_MAX_INT = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_MAX_FLOAT = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_MIN_INT = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_MIN_FLOAT = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_PMAX_INT_1 = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_PMAX_INT_2 = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_PMAX_FLOAT_1 = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_PMAX_FLOAT_2 = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_PMIN_INT_1 = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_PMIN_INT_2 = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_PMIN_FLOAT_1 = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_PMIN_FLOAT_2 = EIDOS_OMP_MAX_THREADS;
+		
+		gEidos_OMP_threads_MATCH_INT = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_MATCH_FLOAT = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_MATCH_STRING = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_MATCH_OBJECT = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_SAMPLE_INDEX = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_SAMPLE_R_INT = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_SAMPLE_R_FLOAT = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_SAMPLE_R_OBJECT = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_SAMPLE_WR_INT = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_SAMPLE_WR_FLOAT = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_SAMPLE_WR_OBJECT = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_TABULATE_MAXBIN = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_TABULATE = EIDOS_OMP_MAX_THREADS;
+		
+		gEidos_OMP_threads_CONTAINS_MARKER_MUT = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_I_COUNT_OF_MUTS_OF_TYPE = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_G_COUNT_OF_MUTS_OF_TYPE = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_INDS_W_PEDIGREE_IDS = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_RELATEDNESS = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_SAMPLE_INDIVIDUALS_1 = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_SAMPLE_INDIVIDUALS_2 = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_SET_FITNESS_SCALE_1 = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_SET_FITNESS_SCALE_2 = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_SUM_OF_MUTS_OF_TYPE = EIDOS_OMP_MAX_THREADS;
+		
+		gEidos_OMP_threads_DNORM_1 = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_DNORM_2 = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_RBINOM_1 = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_RBINOM_2 = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_RBINOM_3 = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_RDUNIF_1 = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_RDUNIF_2 = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_RDUNIF_3 = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_REXP_1 = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_REXP_2 = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_RNORM_1 = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_RNORM_2 = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_RNORM_3 = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_RPOIS_1 = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_RPOIS_2 = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_RUNIF_1 = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_RUNIF_2 = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_RUNIF_3 = EIDOS_OMP_MAX_THREADS;
+		
+		gEidos_OMP_threads_SORT_INT = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_SORT_FLOAT = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_SORT_STRING = EIDOS_OMP_MAX_THREADS;
+		
+		gEidos_OMP_threads_POINT_IN_BOUNDS_1D = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_POINT_IN_BOUNDS_2D = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_POINT_IN_BOUNDS_3D = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_POINT_PERIODIC_1D = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_POINT_PERIODIC_2D = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_POINT_PERIODIC_3D = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_POINT_REFLECTED_1D = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_POINT_REFLECTED_2D = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_POINT_REFLECTED_3D = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_POINT_STOPPED_1D = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_POINT_STOPPED_2D = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_POINT_STOPPED_3D = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_POINT_UNIFORM_1D = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_POINT_UNIFORM_2D = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_POINT_UNIFORM_3D = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_SET_SPATIAL_POS_1_1D = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_SET_SPATIAL_POS_1_2D = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_SET_SPATIAL_POS_1_3D = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_SET_SPATIAL_POS_2_1D = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_SET_SPATIAL_POS_2_2D = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_SET_SPATIAL_POS_2_3D = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_SPATIAL_MAP_VALUE = EIDOS_OMP_MAX_THREADS;
+		
+		gEidos_OMP_threads_CLIPPEDINTEGRAL_1S = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_CLIPPEDINTEGRAL_2S = EIDOS_OMP_MAX_THREADS;
+		//gEidos_OMP_threads_CLIPPEDINTEGRAL_3S = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_DRAWBYSTRENGTH = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_INTNEIGHCOUNT = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_LOCALPOPDENSITY = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_NEARESTINTNEIGH = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_NEARESTNEIGH = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_NEIGHCOUNT = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_TOTNEIGHSTRENGTH = EIDOS_OMP_MAX_THREADS;
+		
+		gEidos_OMP_threads_AGE_INCR = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_DEFERRED_REPRO = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_WF_REPRO = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_FITNESS_ASEX_1 = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_FITNESS_ASEX_2 = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_FITNESS_ASEX_3 = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_FITNESS_SEX_1 = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_FITNESS_SEX_2 = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_FITNESS_SEX_3 = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_MIGRANT_CLEAR = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_SIMPLIFY_SORT_PRE = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_SIMPLIFY_SORT = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_SIMPLIFY_SORT_POST = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_PARENTS_CLEAR = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_UNIQUE_MUTRUNS = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_SURVIVAL = EIDOS_OMP_MAX_THREADS;
+	}
+	else if (per_task_thread_counts == EidosPerTaskThreadCounts::kMacStudio2022_16)
+	{
+		// These counts are from a Mac Studio 2022 (Mac13,2), 20-core M1 Ultra, 128 GB
+		// It has 20 cores: 16 performance cores and 4 efficiency cores
+		// An effort was made with OMP_PLACES and OMP_PROC_BIND to stay on the perf cores,
+		// but I don't know how to tell whether that effort was successful or not, so.
+		// The raw data for these choices is presently in benchmarking/STUDIO 2023-08-07
+		gEidosPerTaskThreadCountsSetName = "MacStudio2022_16";
+		gEidosPerTaskOriginalMaxThreadCount = 16;
+		gEidosPerTaskClippedMaxThreadCount = 16;
+		
+		gEidos_OMP_threads_ABS_FLOAT = 8;
+		gEidos_OMP_threads_CEIL = 8;
+		gEidos_OMP_threads_EXP_FLOAT = 16;
+		gEidos_OMP_threads_FLOOR = 8;
+		gEidos_OMP_threads_LOG_FLOAT = 16;
+		gEidos_OMP_threads_LOG10_FLOAT = 16;
+		gEidos_OMP_threads_LOG2_FLOAT = 16;
+		gEidos_OMP_threads_ROUND = 8;
+		gEidos_OMP_threads_SQRT_FLOAT = 8;
+		gEidos_OMP_threads_SUM_INTEGER = 8;
+		gEidos_OMP_threads_SUM_FLOAT = 8;
+		gEidos_OMP_threads_SUM_LOGICAL = 8;
+		gEidos_OMP_threads_TRUNC = 8;
+		
+		gEidos_OMP_threads_MAX_INT = 8;
+		gEidos_OMP_threads_MAX_FLOAT = 16;
+		gEidos_OMP_threads_MIN_INT = 8;
+		gEidos_OMP_threads_MIN_FLOAT = 16;
+		gEidos_OMP_threads_PMAX_INT_1 = 8;
+		gEidos_OMP_threads_PMAX_INT_2 = 8;
+		gEidos_OMP_threads_PMAX_FLOAT_1 = 16;
+		gEidos_OMP_threads_PMAX_FLOAT_2 = 16;
+		gEidos_OMP_threads_PMIN_INT_1 = 8;
+		gEidos_OMP_threads_PMIN_INT_2 = 8;
+		gEidos_OMP_threads_PMIN_FLOAT_1 = 16;
+		gEidos_OMP_threads_PMIN_FLOAT_2 = 16;
+		
+		gEidos_OMP_threads_MATCH_INT = 16;
+		gEidos_OMP_threads_MATCH_FLOAT = 16;
+		gEidos_OMP_threads_MATCH_STRING = 16;
+		gEidos_OMP_threads_MATCH_OBJECT = 16;
+		gEidos_OMP_threads_SAMPLE_INDEX = 12;
+		gEidos_OMP_threads_SAMPLE_R_INT = 16;
+		gEidos_OMP_threads_SAMPLE_R_FLOAT = 16;
+		gEidos_OMP_threads_SAMPLE_R_OBJECT = 16;
+		gEidos_OMP_threads_SAMPLE_WR_INT = 12;
+		gEidos_OMP_threads_SAMPLE_WR_FLOAT = 8;
+		gEidos_OMP_threads_SAMPLE_WR_OBJECT = 16;
+		gEidos_OMP_threads_TABULATE_MAXBIN = 8;
+		gEidos_OMP_threads_TABULATE = 16;
+		
+		gEidos_OMP_threads_CONTAINS_MARKER_MUT = 16;
+		gEidos_OMP_threads_I_COUNT_OF_MUTS_OF_TYPE = 16;
+		gEidos_OMP_threads_G_COUNT_OF_MUTS_OF_TYPE = 16;
+		gEidos_OMP_threads_INDS_W_PEDIGREE_IDS = 8;
+		gEidos_OMP_threads_RELATEDNESS = 16;
+		gEidos_OMP_threads_SAMPLE_INDIVIDUALS_1 = 12;
+		gEidos_OMP_threads_SAMPLE_INDIVIDUALS_2 = 12;
+		gEidos_OMP_threads_SET_FITNESS_SCALE_1 = 8;
+		gEidos_OMP_threads_SET_FITNESS_SCALE_2 = 8;
+		gEidos_OMP_threads_SUM_OF_MUTS_OF_TYPE = 16;
+		
+		gEidos_OMP_threads_DNORM_1 = 16;
+		gEidos_OMP_threads_DNORM_2 = 16;
+		gEidos_OMP_threads_RBINOM_1 = 16;
+		gEidos_OMP_threads_RBINOM_2 = 16;
+		gEidos_OMP_threads_RBINOM_3 = 16;
+		gEidos_OMP_threads_RDUNIF_1 = 16;
+		gEidos_OMP_threads_RDUNIF_2 = 16;
+		gEidos_OMP_threads_RDUNIF_3 = 16;
+		gEidos_OMP_threads_REXP_1 = 16;
+		gEidos_OMP_threads_REXP_2 = 16;
+		gEidos_OMP_threads_RNORM_1 = 16;
+		gEidos_OMP_threads_RNORM_2 = 16;
+		gEidos_OMP_threads_RNORM_3 = 16;
+		gEidos_OMP_threads_RPOIS_1 = 16;
+		gEidos_OMP_threads_RPOIS_2 = 16;
+		gEidos_OMP_threads_RUNIF_1 = 16;
+		gEidos_OMP_threads_RUNIF_2 = 16;
+		gEidos_OMP_threads_RUNIF_3 = 16;
+		
+		gEidos_OMP_threads_SORT_INT = 16;
+		gEidos_OMP_threads_SORT_FLOAT = 4;
+		gEidos_OMP_threads_SORT_STRING = 16;
+		
+		gEidos_OMP_threads_POINT_IN_BOUNDS_1D = 12;
+		gEidos_OMP_threads_POINT_IN_BOUNDS_2D = 12;
+		gEidos_OMP_threads_POINT_IN_BOUNDS_3D = 16;
+		gEidos_OMP_threads_POINT_PERIODIC_1D = 16;
+		gEidos_OMP_threads_POINT_PERIODIC_2D = 16;
+		gEidos_OMP_threads_POINT_PERIODIC_3D = 16;
+		gEidos_OMP_threads_POINT_REFLECTED_1D = 16;
+		gEidos_OMP_threads_POINT_REFLECTED_2D = 16;
+		gEidos_OMP_threads_POINT_REFLECTED_3D = 16;
+		gEidos_OMP_threads_POINT_STOPPED_1D = 16;
+		gEidos_OMP_threads_POINT_STOPPED_2D = 8;
+		gEidos_OMP_threads_POINT_STOPPED_3D = 8;
+		gEidos_OMP_threads_POINT_UNIFORM_1D = 16;
+		gEidos_OMP_threads_POINT_UNIFORM_2D = 16;
+		gEidos_OMP_threads_POINT_UNIFORM_3D = 16;
+		gEidos_OMP_threads_SET_SPATIAL_POS_1_1D = 4;
+		gEidos_OMP_threads_SET_SPATIAL_POS_1_2D = 4;
+		gEidos_OMP_threads_SET_SPATIAL_POS_1_3D = 4;
+		gEidos_OMP_threads_SET_SPATIAL_POS_2_1D = 4;
+		gEidos_OMP_threads_SET_SPATIAL_POS_2_2D = 4;
+		gEidos_OMP_threads_SET_SPATIAL_POS_2_3D = 4;
+		gEidos_OMP_threads_SPATIAL_MAP_VALUE = 16;
+		
+		gEidos_OMP_threads_CLIPPEDINTEGRAL_1S = 16;
+		gEidos_OMP_threads_CLIPPEDINTEGRAL_2S = 16;
+		//gEidos_OMP_threads_CLIPPEDINTEGRAL_3S = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_DRAWBYSTRENGTH = 16;
+		gEidos_OMP_threads_INTNEIGHCOUNT = 16;
+		gEidos_OMP_threads_LOCALPOPDENSITY = 16;
+		gEidos_OMP_threads_NEARESTINTNEIGH = 16;
+		gEidos_OMP_threads_NEARESTNEIGH = 16;
+		gEidos_OMP_threads_NEIGHCOUNT = 16;
+		gEidos_OMP_threads_TOTNEIGHSTRENGTH = 16;
+		
+		gEidos_OMP_threads_AGE_INCR = 4;
+		gEidos_OMP_threads_DEFERRED_REPRO = 4;
+		gEidos_OMP_threads_WF_REPRO = 4;
+		gEidos_OMP_threads_FITNESS_ASEX_1 = 8;
+		gEidos_OMP_threads_FITNESS_ASEX_2 = 8;
+		gEidos_OMP_threads_FITNESS_ASEX_3 = 2;
+		gEidos_OMP_threads_FITNESS_SEX_1 = 8;
+		gEidos_OMP_threads_FITNESS_SEX_2 = 8;
+		gEidos_OMP_threads_FITNESS_SEX_3 = 2;
+		gEidos_OMP_threads_MIGRANT_CLEAR = 4;
+		gEidos_OMP_threads_SIMPLIFY_SORT_PRE = 8;
+		gEidos_OMP_threads_SIMPLIFY_SORT = 16;
+		gEidos_OMP_threads_SIMPLIFY_SORT_POST = 6;
+		gEidos_OMP_threads_PARENTS_CLEAR = 16;
+		gEidos_OMP_threads_UNIQUE_MUTRUNS = 16;
+		gEidos_OMP_threads_SURVIVAL = 16;
+	}
+	else if (per_task_thread_counts == EidosPerTaskThreadCounts::kXeonGold2_40)
+	{
+		// These counts are from cbsulm21, a node in Cornell's BioHPC cluster
+		// It has two 20-core (40-hyperthreaded) Intel Xeon Gold 6148 2.4GHz
+		// That makes a total of 40 physical cores, 80 virtual cores
+		// These tests went up to 40 cores, avoiding hyperthreading
+		// The raw data for these choices is presently in benchmarking/BHPC 2023-08-07
+		// These should be the defaults for production builds, on the
+		// assumption that users will be on similar big HPC nodes
+		gEidosPerTaskThreadCountsSetName = "XeonGold2_40";
+		gEidosPerTaskOriginalMaxThreadCount = 40;
+		gEidosPerTaskClippedMaxThreadCount = 40;
+		
+		gEidos_OMP_threads_ABS_FLOAT = 40;
+		gEidos_OMP_threads_CEIL = 40;
+		gEidos_OMP_threads_EXP_FLOAT = 40;
+		gEidos_OMP_threads_FLOOR = 40;
+		gEidos_OMP_threads_LOG_FLOAT = 40;
+		gEidos_OMP_threads_LOG10_FLOAT = 40;
+		gEidos_OMP_threads_LOG2_FLOAT = 40;
+		gEidos_OMP_threads_ROUND = 40;
+		gEidos_OMP_threads_SQRT_FLOAT = 40;
+		gEidos_OMP_threads_SUM_INTEGER = 40;
+		gEidos_OMP_threads_SUM_FLOAT = 40;
+		gEidos_OMP_threads_SUM_LOGICAL = 40;
+		gEidos_OMP_threads_TRUNC = 40;
+		
+		gEidos_OMP_threads_MAX_INT = 40;
+		gEidos_OMP_threads_MAX_FLOAT = 40;
+		gEidos_OMP_threads_MIN_INT = 40;
+		gEidos_OMP_threads_MIN_FLOAT = 40;
+		gEidos_OMP_threads_PMAX_INT_1 = 40;
+		gEidos_OMP_threads_PMAX_INT_2 = 40;
+		gEidos_OMP_threads_PMAX_FLOAT_1 = 40;
+		gEidos_OMP_threads_PMAX_FLOAT_2 = 40;
+		gEidos_OMP_threads_PMIN_INT_1 = 40;
+		gEidos_OMP_threads_PMIN_INT_2 = 40;
+		gEidos_OMP_threads_PMIN_FLOAT_1 = 40;
+		gEidos_OMP_threads_PMIN_FLOAT_2 = 40;
+		
+		gEidos_OMP_threads_MATCH_INT = 40;
+		gEidos_OMP_threads_MATCH_FLOAT = 40;
+		gEidos_OMP_threads_MATCH_STRING = 40;
+		gEidos_OMP_threads_MATCH_OBJECT = 40;
+		gEidos_OMP_threads_SAMPLE_INDEX = 40;
+		gEidos_OMP_threads_SAMPLE_R_INT = 40;
+		gEidos_OMP_threads_SAMPLE_R_FLOAT = 40;
+		gEidos_OMP_threads_SAMPLE_R_OBJECT = 40;
+		gEidos_OMP_threads_SAMPLE_WR_INT = 40;
+		gEidos_OMP_threads_SAMPLE_WR_FLOAT = 40;
+		gEidos_OMP_threads_SAMPLE_WR_OBJECT = 40;
+		gEidos_OMP_threads_TABULATE_MAXBIN = 40;
+		gEidos_OMP_threads_TABULATE = 20;
+		
+		gEidos_OMP_threads_CONTAINS_MARKER_MUT = 40;
+		gEidos_OMP_threads_I_COUNT_OF_MUTS_OF_TYPE = 40;
+		gEidos_OMP_threads_G_COUNT_OF_MUTS_OF_TYPE = 40;
+		gEidos_OMP_threads_INDS_W_PEDIGREE_IDS = 5;
+		gEidos_OMP_threads_RELATEDNESS = 40;
+		gEidos_OMP_threads_SAMPLE_INDIVIDUALS_1 = 40;
+		gEidos_OMP_threads_SAMPLE_INDIVIDUALS_2 = 40;
+		gEidos_OMP_threads_SET_FITNESS_SCALE_1 = 40;
+		gEidos_OMP_threads_SET_FITNESS_SCALE_2 = 40;
+		gEidos_OMP_threads_SUM_OF_MUTS_OF_TYPE = 40;
+		
+		gEidos_OMP_threads_DNORM_1 = 40;
+		gEidos_OMP_threads_DNORM_2 = 40;
+		gEidos_OMP_threads_RBINOM_1 = 10;
+		gEidos_OMP_threads_RBINOM_2 = 40;
+		gEidos_OMP_threads_RBINOM_3 = 40;
+		gEidos_OMP_threads_RDUNIF_1 = 10;
+		gEidos_OMP_threads_RDUNIF_2 = 10;
+		gEidos_OMP_threads_RDUNIF_3 = 20;
+		gEidos_OMP_threads_REXP_1 = 40;
+		gEidos_OMP_threads_REXP_2 = 40;
+		gEidos_OMP_threads_RNORM_1 = 40;
+		gEidos_OMP_threads_RNORM_2 = 40;
+		gEidos_OMP_threads_RNORM_3 = 40;
+		gEidos_OMP_threads_RPOIS_1 = 40;
+		gEidos_OMP_threads_RPOIS_2 = 40;
+		gEidos_OMP_threads_RUNIF_1 = 40;
+		gEidos_OMP_threads_RUNIF_2 = 40;
+		gEidos_OMP_threads_RUNIF_3 = 40;
+		
+		gEidos_OMP_threads_SORT_INT = 10;
+		gEidos_OMP_threads_SORT_FLOAT = 10;
+		gEidos_OMP_threads_SORT_STRING = 10;
+		
+		gEidos_OMP_threads_POINT_IN_BOUNDS_1D = 40;
+		gEidos_OMP_threads_POINT_IN_BOUNDS_2D = 40;
+		gEidos_OMP_threads_POINT_IN_BOUNDS_3D = 40;
+		gEidos_OMP_threads_POINT_PERIODIC_1D = 40;
+		gEidos_OMP_threads_POINT_PERIODIC_2D = 40;
+		gEidos_OMP_threads_POINT_PERIODIC_3D = 40;
+		gEidos_OMP_threads_POINT_REFLECTED_1D = 40;
+		gEidos_OMP_threads_POINT_REFLECTED_2D = 40;
+		gEidos_OMP_threads_POINT_REFLECTED_3D = 40;
+		gEidos_OMP_threads_POINT_STOPPED_1D = 40;
+		gEidos_OMP_threads_POINT_STOPPED_2D = 40;
+		gEidos_OMP_threads_POINT_STOPPED_3D = 40;
+		gEidos_OMP_threads_POINT_UNIFORM_1D = 40;
+		gEidos_OMP_threads_POINT_UNIFORM_2D = 40;
+		gEidos_OMP_threads_POINT_UNIFORM_3D = 40;
+		gEidos_OMP_threads_SET_SPATIAL_POS_1_1D = 5;
+		gEidos_OMP_threads_SET_SPATIAL_POS_1_2D = 20;
+		gEidos_OMP_threads_SET_SPATIAL_POS_1_3D = 20;
+		gEidos_OMP_threads_SET_SPATIAL_POS_2_1D = 10;
+		gEidos_OMP_threads_SET_SPATIAL_POS_2_2D = 20;
+		gEidos_OMP_threads_SET_SPATIAL_POS_2_3D = 20;
+		gEidos_OMP_threads_SPATIAL_MAP_VALUE = 40;
+		
+		gEidos_OMP_threads_CLIPPEDINTEGRAL_1S = 40;
+		gEidos_OMP_threads_CLIPPEDINTEGRAL_2S = 40;
+		//gEidos_OMP_threads_CLIPPEDINTEGRAL_3S = EIDOS_OMP_MAX_THREADS;
+		gEidos_OMP_threads_DRAWBYSTRENGTH = 40;
+		gEidos_OMP_threads_INTNEIGHCOUNT = 40;
+		gEidos_OMP_threads_LOCALPOPDENSITY = 40;
+		gEidos_OMP_threads_NEARESTINTNEIGH = 10;
+		gEidos_OMP_threads_NEARESTNEIGH = 10;
+		gEidos_OMP_threads_NEIGHCOUNT = 40;
+		gEidos_OMP_threads_TOTNEIGHSTRENGTH = 40;
+		
+		gEidos_OMP_threads_AGE_INCR = 10;
+		gEidos_OMP_threads_DEFERRED_REPRO = 5;
+		gEidos_OMP_threads_WF_REPRO = 5;
+		gEidos_OMP_threads_FITNESS_ASEX_1 = 40;
+		gEidos_OMP_threads_FITNESS_ASEX_2 = 40;
+		gEidos_OMP_threads_FITNESS_ASEX_3 = 5;
+		gEidos_OMP_threads_FITNESS_SEX_1 = 40;
+		gEidos_OMP_threads_FITNESS_SEX_2 = 40;
+		gEidos_OMP_threads_FITNESS_SEX_3 = 5;
+		gEidos_OMP_threads_MIGRANT_CLEAR = 20;
+		gEidos_OMP_threads_SIMPLIFY_SORT_PRE = 20;
+		gEidos_OMP_threads_SIMPLIFY_SORT = 40;
+		gEidos_OMP_threads_SIMPLIFY_SORT_POST = 40;
+		gEidos_OMP_threads_PARENTS_CLEAR = 40;
+		gEidos_OMP_threads_UNIQUE_MUTRUNS = 40;
+		gEidos_OMP_threads_SURVIVAL = 40;
+	}
+	else
+	{
+		EIDOS_TERMINATION << "ERROR (_Eidos_SetOpenMPThreadCounts): (internal error) unrecognized EidosPerTaskThreadCounts value." << EidosTerminate(nullptr);
+	}
+	
+	// Always clip the above counts to gEidosMaxThreads
+	_Eidos_ClipOpenMPThreadCounts();
+}
+
+void _Eidos_ChooseDefaultOpenMPThreadCounts()
+{
+#if USE_OMP_LIMITS
+	
+	// If we are supposed to use our built-in default OMP limits, set them for our task thread counts
+	// Note that the default behavior here is nothing but a wild shot in the dark!
+#ifdef __APPLE__
+	// On macOS, we use the results from my Mac Studio 2022 by default; note it maxes out at 16 threads
+	gEidosDefaultPerTaskThreadCounts = EidosPerTaskThreadCounts::kMacStudio2022_16;
+#else
+	// On other systems, we use the results from the Cornell BioHPC cluster machine I test on, with a max of 40 threads
+	gEidosDefaultPerTaskThreadCounts = EidosPerTaskThreadCounts::kXeonGold2_40;
+#endif
+	
+#else
+	
+	// Enforce gEidosMaxThreads for the thread count ivars that govern how many threads various loops will use
+	gEidosDefaultPerTaskThreadCounts = EidosPerTaskThreadCounts::kMaxThreads;
+	
+#endif
+	
+	_Eidos_SetOpenMPThreadCounts(gEidosDefaultPerTaskThreadCounts);
+}
+
+void _Eidos_ClipOpenMPThreadCounts(void)
+{
+	// This clips all thread-count ivars to gEidosMaxThreads, so they can be used at runtime without checking
+	gEidosPerTaskClippedMaxThreadCount = std::min(gEidosMaxThreads, gEidosPerTaskOriginalMaxThreadCount);
+	
+	gEidos_OMP_threads_ABS_FLOAT = std::min(gEidosMaxThreads, gEidos_OMP_threads_ABS_FLOAT);
+	gEidos_OMP_threads_CEIL = std::min(gEidosMaxThreads, gEidos_OMP_threads_CEIL);
+	gEidos_OMP_threads_EXP_FLOAT = std::min(gEidosMaxThreads, gEidos_OMP_threads_EXP_FLOAT);
+	gEidos_OMP_threads_FLOOR = std::min(gEidosMaxThreads, gEidos_OMP_threads_FLOOR);
+	gEidos_OMP_threads_LOG_FLOAT = std::min(gEidosMaxThreads, gEidos_OMP_threads_LOG_FLOAT);
+	gEidos_OMP_threads_LOG10_FLOAT = std::min(gEidosMaxThreads, gEidos_OMP_threads_LOG10_FLOAT);
+	gEidos_OMP_threads_LOG2_FLOAT = std::min(gEidosMaxThreads, gEidos_OMP_threads_LOG2_FLOAT);
+	gEidos_OMP_threads_ROUND = std::min(gEidosMaxThreads, gEidos_OMP_threads_ROUND);
+	gEidos_OMP_threads_SQRT_FLOAT = std::min(gEidosMaxThreads, gEidos_OMP_threads_SQRT_FLOAT);
+	gEidos_OMP_threads_SUM_INTEGER = std::min(gEidosMaxThreads, gEidos_OMP_threads_SUM_INTEGER);
+	gEidos_OMP_threads_SUM_FLOAT = std::min(gEidosMaxThreads, gEidos_OMP_threads_SUM_FLOAT);
+	gEidos_OMP_threads_SUM_LOGICAL = std::min(gEidosMaxThreads, gEidos_OMP_threads_SUM_LOGICAL);
+	gEidos_OMP_threads_TRUNC = std::min(gEidosMaxThreads, gEidos_OMP_threads_TRUNC);
+
+	gEidos_OMP_threads_MAX_INT = std::min(gEidosMaxThreads, gEidos_OMP_threads_MAX_INT);
+	gEidos_OMP_threads_MAX_FLOAT = std::min(gEidosMaxThreads, gEidos_OMP_threads_MAX_FLOAT);
+	gEidos_OMP_threads_MIN_INT = std::min(gEidosMaxThreads, gEidos_OMP_threads_MIN_INT);
+	gEidos_OMP_threads_MIN_FLOAT = std::min(gEidosMaxThreads, gEidos_OMP_threads_MIN_FLOAT);
+	gEidos_OMP_threads_PMAX_INT_1 = std::min(gEidosMaxThreads, gEidos_OMP_threads_PMAX_INT_1);
+	gEidos_OMP_threads_PMAX_INT_2 = std::min(gEidosMaxThreads, gEidos_OMP_threads_PMAX_INT_2);
+	gEidos_OMP_threads_PMAX_FLOAT_1 = std::min(gEidosMaxThreads, gEidos_OMP_threads_PMAX_FLOAT_1);
+	gEidos_OMP_threads_PMAX_FLOAT_2 = std::min(gEidosMaxThreads, gEidos_OMP_threads_PMAX_FLOAT_2);
+	gEidos_OMP_threads_PMIN_INT_1 = std::min(gEidosMaxThreads, gEidos_OMP_threads_PMIN_INT_1);
+	gEidos_OMP_threads_PMIN_INT_2 = std::min(gEidosMaxThreads, gEidos_OMP_threads_PMIN_INT_2);
+	gEidos_OMP_threads_PMIN_FLOAT_1 = std::min(gEidosMaxThreads, gEidos_OMP_threads_PMIN_FLOAT_1);
+	gEidos_OMP_threads_PMIN_FLOAT_2 = std::min(gEidosMaxThreads, gEidos_OMP_threads_PMIN_FLOAT_2);
+
+	gEidos_OMP_threads_MATCH_INT = std::min(gEidosMaxThreads, gEidos_OMP_threads_MATCH_INT);
+	gEidos_OMP_threads_MATCH_FLOAT = std::min(gEidosMaxThreads, gEidos_OMP_threads_MATCH_FLOAT);
+	gEidos_OMP_threads_MATCH_STRING = std::min(gEidosMaxThreads, gEidos_OMP_threads_MATCH_STRING);
+	gEidos_OMP_threads_MATCH_OBJECT = std::min(gEidosMaxThreads, gEidos_OMP_threads_MATCH_OBJECT);
+	gEidos_OMP_threads_SAMPLE_INDEX = std::min(gEidosMaxThreads, gEidos_OMP_threads_SAMPLE_INDEX);
+	gEidos_OMP_threads_SAMPLE_R_INT = std::min(gEidosMaxThreads, gEidos_OMP_threads_SAMPLE_R_INT);
+	gEidos_OMP_threads_SAMPLE_R_FLOAT = std::min(gEidosMaxThreads, gEidos_OMP_threads_SAMPLE_R_FLOAT);
+	gEidos_OMP_threads_SAMPLE_R_OBJECT = std::min(gEidosMaxThreads, gEidos_OMP_threads_SAMPLE_R_OBJECT);
+	gEidos_OMP_threads_SAMPLE_WR_INT = std::min(gEidosMaxThreads, gEidos_OMP_threads_SAMPLE_WR_INT);
+	gEidos_OMP_threads_SAMPLE_WR_FLOAT = std::min(gEidosMaxThreads, gEidos_OMP_threads_SAMPLE_WR_FLOAT);
+	gEidos_OMP_threads_SAMPLE_WR_OBJECT = std::min(gEidosMaxThreads, gEidos_OMP_threads_SAMPLE_WR_OBJECT);
+	gEidos_OMP_threads_TABULATE_MAXBIN = std::min(gEidosMaxThreads, gEidos_OMP_threads_TABULATE_MAXBIN);
+	gEidos_OMP_threads_TABULATE = std::min(gEidosMaxThreads, gEidos_OMP_threads_TABULATE);
+
+	gEidos_OMP_threads_CONTAINS_MARKER_MUT = std::min(gEidosMaxThreads, gEidos_OMP_threads_CONTAINS_MARKER_MUT);
+	gEidos_OMP_threads_I_COUNT_OF_MUTS_OF_TYPE = std::min(gEidosMaxThreads, gEidos_OMP_threads_I_COUNT_OF_MUTS_OF_TYPE);
+	gEidos_OMP_threads_G_COUNT_OF_MUTS_OF_TYPE = std::min(gEidosMaxThreads, gEidos_OMP_threads_G_COUNT_OF_MUTS_OF_TYPE);
+	gEidos_OMP_threads_INDS_W_PEDIGREE_IDS = std::min(gEidosMaxThreads, gEidos_OMP_threads_INDS_W_PEDIGREE_IDS);
+	gEidos_OMP_threads_RELATEDNESS = std::min(gEidosMaxThreads, gEidos_OMP_threads_RELATEDNESS);
+	gEidos_OMP_threads_SAMPLE_INDIVIDUALS_1 = std::min(gEidosMaxThreads, gEidos_OMP_threads_SAMPLE_INDIVIDUALS_1);
+	gEidos_OMP_threads_SAMPLE_INDIVIDUALS_2 = std::min(gEidosMaxThreads, gEidos_OMP_threads_SAMPLE_INDIVIDUALS_2);
+	gEidos_OMP_threads_SET_FITNESS_SCALE_1 = std::min(gEidosMaxThreads, gEidos_OMP_threads_SET_FITNESS_SCALE_1);
+	gEidos_OMP_threads_SET_FITNESS_SCALE_2 = std::min(gEidosMaxThreads, gEidos_OMP_threads_SET_FITNESS_SCALE_2);
+	gEidos_OMP_threads_SUM_OF_MUTS_OF_TYPE = std::min(gEidosMaxThreads, gEidos_OMP_threads_SUM_OF_MUTS_OF_TYPE);
+
+	gEidos_OMP_threads_DNORM_1 = std::min(gEidosMaxThreads, gEidos_OMP_threads_DNORM_1);
+	gEidos_OMP_threads_DNORM_2 = std::min(gEidosMaxThreads, gEidos_OMP_threads_DNORM_2);
+	gEidos_OMP_threads_RBINOM_1 = std::min(gEidosMaxThreads, gEidos_OMP_threads_RBINOM_1);
+	gEidos_OMP_threads_RBINOM_2 = std::min(gEidosMaxThreads, gEidos_OMP_threads_RBINOM_2);
+	gEidos_OMP_threads_RBINOM_3 = std::min(gEidosMaxThreads, gEidos_OMP_threads_RBINOM_3);
+	gEidos_OMP_threads_RDUNIF_1 = std::min(gEidosMaxThreads, gEidos_OMP_threads_RDUNIF_1);
+	gEidos_OMP_threads_RDUNIF_2 = std::min(gEidosMaxThreads, gEidos_OMP_threads_RDUNIF_2);
+	gEidos_OMP_threads_RDUNIF_3 = std::min(gEidosMaxThreads, gEidos_OMP_threads_RDUNIF_3);
+	gEidos_OMP_threads_REXP_1 = std::min(gEidosMaxThreads, gEidos_OMP_threads_REXP_1);
+	gEidos_OMP_threads_REXP_2 = std::min(gEidosMaxThreads, gEidos_OMP_threads_REXP_2);
+	gEidos_OMP_threads_RNORM_1 = std::min(gEidosMaxThreads, gEidos_OMP_threads_RNORM_1);
+	gEidos_OMP_threads_RNORM_2 = std::min(gEidosMaxThreads, gEidos_OMP_threads_RNORM_2);
+	gEidos_OMP_threads_RNORM_3 = std::min(gEidosMaxThreads, gEidos_OMP_threads_RNORM_3);
+	gEidos_OMP_threads_RPOIS_1 = std::min(gEidosMaxThreads, gEidos_OMP_threads_RPOIS_1);
+	gEidos_OMP_threads_RPOIS_2 = std::min(gEidosMaxThreads, gEidos_OMP_threads_RPOIS_2);
+	gEidos_OMP_threads_RUNIF_1 = std::min(gEidosMaxThreads, gEidos_OMP_threads_RUNIF_1);
+	gEidos_OMP_threads_RUNIF_2 = std::min(gEidosMaxThreads, gEidos_OMP_threads_RUNIF_2);
+	gEidos_OMP_threads_RUNIF_3 = std::min(gEidosMaxThreads, gEidos_OMP_threads_RUNIF_3);
+
+	gEidos_OMP_threads_SORT_INT = std::min(gEidosMaxThreads, gEidos_OMP_threads_SORT_INT);
+	gEidos_OMP_threads_SORT_FLOAT = std::min(gEidosMaxThreads, gEidos_OMP_threads_SORT_FLOAT);
+	gEidos_OMP_threads_SORT_STRING = std::min(gEidosMaxThreads, gEidos_OMP_threads_SORT_STRING);
+	
+	gEidos_OMP_threads_POINT_IN_BOUNDS_1D = std::min(gEidosMaxThreads, gEidos_OMP_threads_POINT_IN_BOUNDS_1D);
+	gEidos_OMP_threads_POINT_IN_BOUNDS_2D = std::min(gEidosMaxThreads, gEidos_OMP_threads_POINT_IN_BOUNDS_2D);
+	gEidos_OMP_threads_POINT_IN_BOUNDS_3D = std::min(gEidosMaxThreads, gEidos_OMP_threads_POINT_IN_BOUNDS_3D);
+	gEidos_OMP_threads_POINT_PERIODIC_1D = std::min(gEidosMaxThreads, gEidos_OMP_threads_POINT_PERIODIC_1D);
+	gEidos_OMP_threads_POINT_PERIODIC_2D = std::min(gEidosMaxThreads, gEidos_OMP_threads_POINT_PERIODIC_2D);
+	gEidos_OMP_threads_POINT_PERIODIC_3D = std::min(gEidosMaxThreads, gEidos_OMP_threads_POINT_PERIODIC_3D);
+	gEidos_OMP_threads_POINT_REFLECTED_1D = std::min(gEidosMaxThreads, gEidos_OMP_threads_POINT_REFLECTED_1D);
+	gEidos_OMP_threads_POINT_REFLECTED_2D = std::min(gEidosMaxThreads, gEidos_OMP_threads_POINT_REFLECTED_2D);
+	gEidos_OMP_threads_POINT_REFLECTED_3D = std::min(gEidosMaxThreads, gEidos_OMP_threads_POINT_REFLECTED_3D);
+	gEidos_OMP_threads_POINT_STOPPED_1D = std::min(gEidosMaxThreads, gEidos_OMP_threads_POINT_STOPPED_1D);
+	gEidos_OMP_threads_POINT_STOPPED_2D = std::min(gEidosMaxThreads, gEidos_OMP_threads_POINT_STOPPED_2D);
+	gEidos_OMP_threads_POINT_STOPPED_3D = std::min(gEidosMaxThreads, gEidos_OMP_threads_POINT_STOPPED_3D);
+	gEidos_OMP_threads_POINT_UNIFORM_1D = std::min(gEidosMaxThreads, gEidos_OMP_threads_POINT_UNIFORM_1D);
+	gEidos_OMP_threads_POINT_UNIFORM_2D = std::min(gEidosMaxThreads, gEidos_OMP_threads_POINT_UNIFORM_2D);
+	gEidos_OMP_threads_POINT_UNIFORM_3D = std::min(gEidosMaxThreads, gEidos_OMP_threads_POINT_UNIFORM_3D);
+	gEidos_OMP_threads_SET_SPATIAL_POS_1_1D = std::min(gEidosMaxThreads, gEidos_OMP_threads_SET_SPATIAL_POS_1_1D);
+	gEidos_OMP_threads_SET_SPATIAL_POS_1_2D = std::min(gEidosMaxThreads, gEidos_OMP_threads_SET_SPATIAL_POS_1_2D);
+	gEidos_OMP_threads_SET_SPATIAL_POS_1_3D = std::min(gEidosMaxThreads, gEidos_OMP_threads_SET_SPATIAL_POS_1_3D);
+	gEidos_OMP_threads_SET_SPATIAL_POS_2_1D = std::min(gEidosMaxThreads, gEidos_OMP_threads_SET_SPATIAL_POS_2_1D);
+	gEidos_OMP_threads_SET_SPATIAL_POS_2_2D = std::min(gEidosMaxThreads, gEidos_OMP_threads_SET_SPATIAL_POS_2_2D);
+	gEidos_OMP_threads_SET_SPATIAL_POS_2_3D = std::min(gEidosMaxThreads, gEidos_OMP_threads_SET_SPATIAL_POS_2_3D);
+	gEidos_OMP_threads_SPATIAL_MAP_VALUE = std::min(gEidosMaxThreads, gEidos_OMP_threads_SPATIAL_MAP_VALUE);
+
+	gEidos_OMP_threads_CLIPPEDINTEGRAL_1S = std::min(gEidosMaxThreads, gEidos_OMP_threads_CLIPPEDINTEGRAL_1S);
+	gEidos_OMP_threads_CLIPPEDINTEGRAL_2S = std::min(gEidosMaxThreads, gEidos_OMP_threads_CLIPPEDINTEGRAL_2S);
+	//gEidos_OMP_threads_CLIPPEDINTEGRAL_3S = std::min(gEidosMaxThreads, gEidos_OMP_threads_CLIPPEDINTEGRAL_3S);
+	gEidos_OMP_threads_DRAWBYSTRENGTH = std::min(gEidosMaxThreads, gEidos_OMP_threads_DRAWBYSTRENGTH);
+	gEidos_OMP_threads_INTNEIGHCOUNT = std::min(gEidosMaxThreads, gEidos_OMP_threads_INTNEIGHCOUNT);
+	gEidos_OMP_threads_LOCALPOPDENSITY = std::min(gEidosMaxThreads, gEidos_OMP_threads_LOCALPOPDENSITY);
+	gEidos_OMP_threads_NEARESTINTNEIGH = std::min(gEidosMaxThreads, gEidos_OMP_threads_NEARESTINTNEIGH);
+	gEidos_OMP_threads_NEARESTNEIGH = std::min(gEidosMaxThreads, gEidos_OMP_threads_NEARESTNEIGH);
+	gEidos_OMP_threads_NEIGHCOUNT = std::min(gEidosMaxThreads, gEidos_OMP_threads_NEIGHCOUNT);
+	gEidos_OMP_threads_TOTNEIGHSTRENGTH = std::min(gEidosMaxThreads, gEidos_OMP_threads_TOTNEIGHSTRENGTH);
+
+	gEidos_OMP_threads_AGE_INCR = std::min(gEidosMaxThreads, gEidos_OMP_threads_AGE_INCR);
+	gEidos_OMP_threads_DEFERRED_REPRO = std::min(gEidosMaxThreads, gEidos_OMP_threads_DEFERRED_REPRO);
+	gEidos_OMP_threads_WF_REPRO = std::min(gEidosMaxThreads, gEidos_OMP_threads_WF_REPRO);
+	gEidos_OMP_threads_FITNESS_ASEX_1 = std::min(gEidosMaxThreads, gEidos_OMP_threads_FITNESS_ASEX_1);
+	gEidos_OMP_threads_FITNESS_ASEX_2 = std::min(gEidosMaxThreads, gEidos_OMP_threads_FITNESS_ASEX_2);
+	gEidos_OMP_threads_FITNESS_ASEX_3 = std::min(gEidosMaxThreads, gEidos_OMP_threads_FITNESS_ASEX_3);
+	gEidos_OMP_threads_FITNESS_SEX_1 = std::min(gEidosMaxThreads, gEidos_OMP_threads_FITNESS_SEX_1);
+	gEidos_OMP_threads_FITNESS_SEX_2 = std::min(gEidosMaxThreads, gEidos_OMP_threads_FITNESS_SEX_2);
+	gEidos_OMP_threads_FITNESS_SEX_3 = std::min(gEidosMaxThreads, gEidos_OMP_threads_FITNESS_SEX_3);
+	gEidos_OMP_threads_MIGRANT_CLEAR = std::min(gEidosMaxThreads, gEidos_OMP_threads_MIGRANT_CLEAR);
+	gEidos_OMP_threads_SIMPLIFY_SORT_PRE = std::min(gEidosMaxThreads, gEidos_OMP_threads_SIMPLIFY_SORT_PRE);
+	gEidos_OMP_threads_SIMPLIFY_SORT = std::min(gEidosMaxThreads, gEidos_OMP_threads_SIMPLIFY_SORT);
+	gEidos_OMP_threads_SIMPLIFY_SORT_POST = std::min(gEidosMaxThreads, gEidos_OMP_threads_SIMPLIFY_SORT_POST);
+	gEidos_OMP_threads_PARENTS_CLEAR = std::min(gEidosMaxThreads, gEidos_OMP_threads_PARENTS_CLEAR);
+	gEidos_OMP_threads_UNIQUE_MUTRUNS = std::min(gEidosMaxThreads, gEidos_OMP_threads_UNIQUE_MUTRUNS);
+	gEidos_OMP_threads_SURVIVAL = std::min(gEidosMaxThreads, gEidos_OMP_threads_SURVIVAL);
+}
+
+void Eidos_WarmUpOpenMP(std::ostream *outstream, bool changed_max_thread_count, int new_max_thread_count, bool active_threads, std::string thread_count_set_name)
+{
+	// When running under OpenMP, print a log, and also set values for the OpenMP ICV's that we want to guarantee
+	// See http://www.archer.ac.uk/training/course-material/2018/09/openmp-imp/Slides/L10-TipsTricksGotchas.pdf
+	// We set these with overwrite=0 so the user can override them with custom values from the environment
+	// FIXME: This should all be documented somewhere...
+	
+	// "active" encourages idle threads to spin rather than sleep; "active" seems to be much faster, maybe lower lag?
+	// In SLiMgui and EidosScribe, we don't want to use "active", though, as it will pin the CPU usage even when not running a parallel section.
+	const char *wait_policy = active_threads ? "ACTIVE" : "PASSIVE";
+	setenv("OMP_WAIT_POLICY", wait_policy, 0);
+	
+	// "true" prevents threads migrating between cores; this generally improves performance, especially with per-thread memory usage
+	const char *bind_policy = "true";
+	setenv("OMP_PROC_BIND", bind_policy, 0);
+	
+	// We do not support dynamic adjustment of the number of threads; if we ask for N threads, we expect N threads
+	// It is important not to change that, or a variety of things will no longer work correctly
+	omp_set_dynamic(false);
+	
+	// We do not support nested parallelism; we set the relevant ICVs here to make sure it is off, overriding defaults/environment
+	omp_set_max_active_levels(1);
+	//omp_set_nested(false);		// deprecated in favor of omp_set_max_active_levels()
+	
+	// Set the maximum number of threads to the user's request, but never higher than the intrinsic max thread count
+	if (changed_max_thread_count)
+	{
+		int thread_limit = omp_get_thread_limit();
+		
+		if (new_max_thread_count > thread_limit)
+			new_max_thread_count = thread_limit;
+		
+		omp_set_num_threads(new_max_thread_count);		// confusingly, sets the *max* threads as returned by omp_get_max_threads()
+	}
+	
+	// Get the maximum number of threads in effect, which might be different from the number requested
+	gEidosMaxThreads = omp_get_max_threads();
+	gEidosNumThreads = gEidosMaxThreads;
+	gEidosNumThreadsOverride = false;
+	
+	// Set up per-task thread counts according to thread_count_set_name.  If it is empty, we choose a
+	// default set heuristically, based upon the hardware platform.  Otherwise, we look for a name we
+	// recognize, or error out.  There are very few sets here now, so this is not terribly useful;
+	// but it does allow the benchmarking suite to turn off per-task limits with "maxThreads".
+	if (thread_count_set_name.length() == 0)
+		_Eidos_ChooseDefaultOpenMPThreadCounts();
+	else if (thread_count_set_name == "maxThreads")
+		_Eidos_SetOpenMPThreadCounts(EidosPerTaskThreadCounts::kMaxThreads);
+	else if (thread_count_set_name == "MacStudio2022_16")
+		_Eidos_SetOpenMPThreadCounts(EidosPerTaskThreadCounts::kMacStudio2022_16);
+	else if (thread_count_set_name == "XeonGold2_40")
+		_Eidos_SetOpenMPThreadCounts(EidosPerTaskThreadCounts::kXeonGold2_40);
+	else
+		EIDOS_TERMINATION << "ERROR (_Eidos_SetOpenMPThreadCounts): (internal error) unrecognized EidosPerTaskThreadCounts value." << EidosTerminate(nullptr);
+	
+	// Write some diagnostic output about our configuration.  If the verbosity level is 0, outstream will be nullptr.
+	if (outstream)
+	{
+		(*outstream) << "// ********** Running multithreaded with OpenMP (maxThreads == " << gEidosMaxThreads << ")" << std::endl;
+		(*outstream) << "// ********** OMP_WAIT_POLICY == " << getenv("OMP_WAIT_POLICY") << ", OMP_PROC_BIND == " << getenv("OMP_PROC_BIND") << std::endl;
+		
+#if 1
+		(*outstream) << "// ********** Per-task thread counts: '" << gEidosPerTaskThreadCountsSetName << "', max " << gEidosPerTaskOriginalMaxThreadCount;
+		if (gEidosPerTaskClippedMaxThreadCount < gEidosPerTaskOriginalMaxThreadCount)
+			(*outstream) << " (clipped to " << gEidosPerTaskClippedMaxThreadCount << ")";
+		(*outstream) << std::endl;
+#endif
+		
+#if 0
+		// BCH 5/19/2023: #if 0 for now, because this gives an error on some platforms; we don't support offloading anyway.
+		// Look for devices (GPUs, accelerators) that we are able to offload to.
+		// Note that OpenMP offloading to the GPUs on Apple Silicon is not currently supported by any compiler.
+		// Other devices may not be visible unless you build slim_multi with a special build of your compiler;
+		// see https://stackoverflow.com/a/66337011/2752221 for some details.
+		int num_devices = omp_get_num_devices();
+		int default_device = omp_get_default_device();
+		
+		if (num_devices > 0)
+		{
+			(*outstream) << "// ********** OpenMP target device count (GPUs, accelerators): " << num_devices << std::endl;
+			(*outstream) << "// ********** Default target device for OpenMP offloading: " << default_device << std::endl;
+		}
+#endif
+	}
+	
+#ifdef EIDOS_GUI
+	// The GUI apps don't work well multithreaded.  They have to allow threads to sleep (otherwise they peg the
+	// CPU the whole time they're running), and that is so inefficient that it makes the apps actually run much
+	// slower than if they were just single-threaded, as far as I can tell.  I think the threads fall asleep
+	// whenever they get suspended at all, and then waking them up again is heavyweight.  So running them
+	// multithreaded is really just for my own development/testing work; end users should not do so.
+	if (outstream)
+		(*outstream) << "// ********** RUNNING SLIMGUI / EIDOSSCRIBE WITH OPENMP IS NOT RECOMMENDED!" << std::endl;
+#endif
+	
+	if (outstream)
+		(*outstream) << std::endl;
+}
+#endif
+
 void Eidos_WarmUp(void)
 {
+	THREAD_SAFETY_IN_ANY_PARALLEL("Eidos_WarmUp(): illegal when parallel");
+	
 	static bool been_here = false;
 	
 	if (!been_here)
 	{
 		been_here = true;
+		
+		// Initialize the random number generator with a random-ish seed.  This seed may be overridden by the Context downstream.
+		Eidos_InitializeRNG();
+		Eidos_SetRNGSeed(Eidos_GenerateRNGSeed());
 		
 		// Set up the vector of Eidos constant names
 		gEidosConstantNames.emplace_back(gEidosStr_T);
@@ -257,10 +1112,10 @@ void Eidos_WarmUp(void)
 //		std::cout << "sizeof(EidosValue_Object_singleton) == " << sizeof(EidosValue_Object_singleton) << std::endl;
 //		std::cout << "maxEidosValueSize ==                   " << maxEidosValueSize << std::endl;
 		
-		gEidosValuePool = new EidosObjectPool(maxEidosValueSize);
+		gEidosValuePool = new EidosObjectPool("EidosObjectPool(EidosValue)", maxEidosValueSize);
 		
 		// Make the shared EidosASTNode pool
-		gEidosASTNodePool = new EidosObjectPool(sizeof(EidosASTNode));
+		gEidosASTNodePool = new EidosObjectPool("EidosObjectPool(EidosASTNode)", sizeof(EidosASTNode));
 		
 		// Allocate global permanents
 		gStaticEidosValueVOID = EidosValue_VOID::Static_EidosValue_VOID();
@@ -299,6 +1154,7 @@ void Eidos_WarmUp(void)
 		gStaticEidosValue_StringDoubleQuote = EidosValue_String_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String_singleton("\""));
 		gStaticEidosValue_String_ECMAScript = EidosValue_String_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String_singleton("ECMAScript"));
 		gStaticEidosValue_String_indices = EidosValue_String_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String_singleton("indices"));
+		gStaticEidosValue_String_average = EidosValue_String_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String_singleton("average"));
 		
 		// Create the global class objects for all Eidos classes, from superclass to subclass
 		// This breaks encapsulation, kind of, but it needs to be done here, in order, so that superclass objects exist,
@@ -309,6 +1165,7 @@ void Eidos_WarmUp(void)
 		gEidosDataFrame_Class =				new EidosDataFrame_Class(				gEidosStr_DataFrame,		gEidosDictionaryRetained_Class);
 		gEidosImage_Class =					new EidosImage_Class(					gEidosStr_Image,			gEidosDictionaryRetained_Class);
 		gEidosTestElement_Class =			new EidosTestElement_Class(				gEidosStr__TestElement,		gEidosDictionaryRetained_Class);
+		gEidosTestElementNRR_Class =		new EidosTestElementNRR_Class(			gEidosStr__TestElementNRR,	gEidosObject_Class);
 		
 		// This has to be allocated after gEidosObject_Class has been initialized above; the other global permanents must be initialized
 		// before that point, however, since properties and method signatures may use some of those global permanent values
@@ -332,9 +1189,36 @@ void Eidos_WarmUp(void)
 		if (&gEidosImage_Class->ClassName() != &gEidosStr_Image)
 		{
 			std::cerr << "***** Class name mismatch in Eidos_WarmUp()!";
-			exit(0);
+			exit(EXIT_FAILURE);
 		}
-
+		
+		// Check that EidosDictionaryState_StringKeys and EidosDictionaryState_IntegerKeys have matching layouts
+		// as far as keys_are_integers_ is concerned, so that that flag can distinguish between them
+		// BCH 3/27/2023: we have to actually allocate objects here to avoid getting flagged by UBSan...
+		{
+			EidosDictionaryState_StringKeys *dict_state_ptr_string = new EidosDictionaryState_StringKeys;
+			EidosDictionaryState_IntegerKeys *dict_state_ptr_integer = new EidosDictionaryState_IntegerKeys;
+			
+			uint8_t *flag_addr_string_keys = &((dict_state_ptr_string)->keys_are_integers_);
+			uint8_t *flag_addr_integer_keys = &((dict_state_ptr_integer)->keys_are_integers_);
+			uint8_t *flag_addr_string_contains = &((dict_state_ptr_string)->contains_non_retain_release_objects_);
+			uint8_t *flag_addr_integer_contains = &((dict_state_ptr_integer)->contains_non_retain_release_objects_);
+			
+			size_t string_keys_offset = flag_addr_string_keys - (uint8_t *)dict_state_ptr_string;
+			size_t integer_keys_offset = flag_addr_integer_keys - (uint8_t *)dict_state_ptr_integer;
+			size_t string_contains_offset = flag_addr_string_contains - (uint8_t *)dict_state_ptr_string;
+			size_t integer_contains_offset = flag_addr_integer_contains - (uint8_t *)dict_state_ptr_integer;
+			
+			if ((string_keys_offset != integer_keys_offset) || (string_contains_offset != integer_contains_offset))
+			{
+				std::cerr << "***** EidosDictionaryState layout mismatch in Eidos_WarmUp()!";
+				exit(EXIT_FAILURE);
+			}
+			
+			delete dict_state_ptr_string;
+			delete dict_state_ptr_integer;
+		}
+		
 #if (defined(_MSC_VER) && _MSC_VER <= 1900) || (defined(__MINGW32__) && !defined(_UCRT))
 		// Work around non-conformance of Microsoft's printf %e format specifier,
 		// which uses 3 digits for the exponent instead of 2.
@@ -359,7 +1243,7 @@ bool Eidos_GoodSymbolForDefine(std::string &p_symbol_name)
 	
 	// SLiM constants are reserved too; this code belongs in SLiM, but only
 	// SLiM uses this facility right now anyway, so I'm not going to sweat it...
-	if ((p_symbol_name == "sim") || (p_symbol_name == "slimgui"))
+	if ((p_symbol_name == "community") || (p_symbol_name == "sim") || (p_symbol_name == "slimgui"))
 		good_symbol = false;
 	
 	int len = (int)p_symbol_name.length();
@@ -552,7 +1436,9 @@ std::ostringstream gEidosTermination;
 bool gEidosTerminated;
 
 
-/** Print a demangled stack backtrace of the caller function to FILE* out. */
+// Print a demangled stack backtrace of the caller function to FILE* out.
+// Note that in Cocoa this works better: NSLog(@"%@", NSThread.callStackSymbols);
+// For a shortened backtrace: NSLog(@"%@", [NSThread.callStackSymbols subarrayWithRange:NSMakeRange(0, MIN(5UL, NSThread.callStackSymbols.count))]);
 void Eidos_PrintStacktrace(FILE *p_out, unsigned int p_max_frames)
 {
 	fprintf(p_out, "stack trace:\n");
@@ -859,6 +1745,12 @@ void operator<<(std::ostream& p_out, const EidosTerminate &p_terminator)
 	
 	if (gEidosTerminateThrows)
 	{
+		// BCH 5/14/2023: I used to have a check here for (omp_get_level() > 0), and would do raise(SIGTRAP) in that situation
+		// to get a trap in the debugger for the point when an exception was raised inside a parallel region.  However, we now
+		// have some places in the code where such raises are guarded by try/catch, so they are no longer unambiguously wrong.
+		// So I've deleted that check here.  The throw below will happen, and if no try/catch is in place and we're inside a
+		// parallel region, we will end up with an uncaught C++ exception error.
+		
 		// In this case, EidosTerminate() throws an exception that gets caught by the Context.  That invalidates the simulation object, and
 		// causes the Context to display an error message and ends the simulation run, but it does not terminate the app.
 		throw std::runtime_error("A runtime error occurred in Eidos");
@@ -914,6 +1806,28 @@ std::string Eidos_GetUntrimmedRaiseMessage(void)
 	{
 		return gEidosStr_empty_string;
 	}
+}
+
+
+#pragma mark -
+#pragma mark Debugging support
+#pragma mark -
+
+void CheckLongTermBoundary()
+{
+	THREAD_SAFETY_IN_ANY_PARALLEL("CheckLongTermBoundary(): illegal when parallel");
+	
+	// Right now, EidosDictionary is the only part of Eidos that is smart about long-term
+	// boundaries, so we just need to check its state.  But in future, we could allow the
+	// user to call defineGlobal() with a non-retain-release object as long as they fix
+	// the reference by the next long-term boundary.
+	bool violation = false;
+	
+	if (gEidos_DictionaryNonRetainReleaseReferenceCounter != 0)
+		violation = true;
+	
+	if (violation)
+		EIDOS_TERMINATION << "ERROR (CheckLongTermBoundary): A long-term reference has been kept to an Eidos object that is not under retain-release memory management.  For example, a SLiM Individual or Subpopulation may have been placed in a global dictionary.  This is illegal; only objects that are under retain-release memory management can be kept long-term." << EidosTerminate(nullptr);
 }
 
 
@@ -1042,8 +1956,55 @@ size_t Eidos_GetCurrentRSS(void)
 #endif
 }
 
+/**
+ *This is my own code, patterned after Nadeau's code above
+ *
+ * Returns the current virtual memory use measured
+ * in bytes, or zero if the value cannot be determined on this OS.
+ */
+size_t Eidos_GetVMUsage(void)
+{
+#if defined(_WIN32)
+	/* Windows -------------------------------------------------- */
+	// see https://learn.microsoft.com/en-us/windows/win32/api/psapi/ns-psapi-process_memory_counters
+	PROCESS_MEMORY_COUNTERS info;
+	GetProcessMemoryInfo( GetCurrentProcess( ), &info, sizeof(info) );
+	return (size_t)info.PagefileUsage;
+	
+#elif defined(__APPLE__) && defined(__MACH__)
+	/* OSX ------------------------------------------------------ */
+	struct mach_task_basic_info info;
+	mach_msg_type_number_t infoCount = MACH_TASK_BASIC_INFO_COUNT;
+	if ( task_info( mach_task_self( ), MACH_TASK_BASIC_INFO,
+				   (task_info_t)&info, &infoCount ) != KERN_SUCCESS )
+		return (size_t)0L;		/* Can't access? */
+	return (size_t)info.virtual_size;
+	
+#elif defined(__linux__) || defined(__linux) || defined(linux) || defined(__gnu_linux__)
+	/* Linux ---------------------------------------------------- */
+	// see https://man7.org/linux/man-pages/man5/proc.5.html
+	long vmsize = 0L;
+	FILE* fp = NULL;
+	if ( (fp = fopen( "/proc/self/statm", "r" )) == NULL )
+		return (size_t)0L;		/* Can't open? */
+	if ( fscanf( fp, "%ld", &vmsize ) != 1 )
+	{
+		fclose( fp );
+		return (size_t)0L;		/* Can't read? */
+	}
+	fclose( fp );
+	return (size_t)vmsize * (size_t)sysconf( _SC_PAGESIZE);
+	
+#else
+	/* AIX, BSD, Solaris, and Unknown OS ------------------------ */
+	return (size_t)0L;			/* Unsupported. */
+#endif
+}
+
 size_t Eidos_GetMaxRSS(void)
 {
+	THREAD_SAFETY_IN_ACTIVE_PARALLEL("Eidos_GetMaxRSS(): usage of statics");
+	
 	static bool beenHere = false;
 	static size_t max_rss = 0;
 	
@@ -1052,7 +2013,7 @@ size_t Eidos_GetMaxRSS(void)
 
 #if defined(_WIN32)
 	// Assume unlimited on Windows with warning
-	std::cerr << "Warning: Eidos_GetMaxRSS() does not work properly in Windows, so return assumes no limit, which may be incorrect.";
+	std::cerr << "WARNING: Eidos_GetMaxRSS() does not work properly in Windows, so return assumes no limit, which may be incorrect.";
 	max_rss = 0;
 
 #else
@@ -1097,7 +2058,7 @@ size_t Eidos_GetMaxRSS(void)
 			max_rss = (uint64_t)rlim.rlim_max;
 			
 			// If the claim is that we have more than 1024 TB at our disposal, then we will consider ourselves unlimited :->
-			if (max_rss > 1024L * 1024L * 1024L * 1024L * 1024L)
+			if (max_rss > 1024LL * 1024L * 1024L * 1024L * 1024L)
 				max_rss = 0;
 		}
 		else
@@ -1116,6 +2077,8 @@ size_t Eidos_GetMaxRSS(void)
 
 void Eidos_CheckRSSAgainstMax(std::string p_message1, std::string p_message2)
 {
+	THREAD_SAFETY_IN_ACTIVE_PARALLEL("Eidos_CheckRSSAgainstMax():  usage of statics");
+	
 	static bool beenHere = false;
 	static size_t max_rss = 0;
 	
@@ -1241,6 +2204,8 @@ std::string Eidos_LastPathComponent(const std::string &p_path)
 // Get the current working directory; oddly, C++ has no API for this
 std::string Eidos_CurrentDirectory(void)
 {
+	THREAD_SAFETY_IN_ACTIVE_PARALLEL("Eidos_CurrentDirectory(): usage of statics");
+	
 	// buffer of size MAXPATHLEN * 8 to accommodate relatively long paths
 	static char *path_buffer = nullptr;
 	
@@ -1279,6 +2244,8 @@ std::string Eidos_StripTrailingSlash(const std::string &p_path)
 // Create a directory at the given path if it does not already exist; returns false if an error occurred (which emits a warning)
 bool Eidos_CreateDirectory(const std::string &p_path, std::string *p_error_string)
 {
+	THREAD_SAFETY_IN_ACTIVE_PARALLEL("Eidos_CreateDirectory():  filesystem write");
+	
 	std::string path = Eidos_ResolvedPath(Eidos_StripTrailingSlash(p_path));
 	
 	errno = 0;
@@ -1347,6 +2314,8 @@ std::string Eidos_TemporaryDirectory(void)
 
 bool Eidos_TemporaryDirectoryExists(void)
 {
+	THREAD_SAFETY_IN_ACTIVE_PARALLEL("Eidos_TemporaryDirectoryExists(): usage of statics");
+	
 	// we cache the result for speed, making the assumption that the temporary directory will not change underneath us
 	static bool been_here = false;
 	static bool exists = false;
@@ -1458,6 +2427,8 @@ bool Eidos_TemporaryDirectoryExists(void)
 
 int Eidos_mkstemps(char *p_pattern, int p_suffix_len)
 {
+	THREAD_SAFETY_IN_ACTIVE_PARALLEL("Eidos_mkstemps():  filesystem write");
+	
 	static const char letters[] = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 	static uint64_t value;
 	size_t len = strlen(p_pattern);
@@ -1510,6 +2481,8 @@ int Eidos_mkstemps(char *p_pattern, int p_suffix_len)
 
 int Eidos_mkstemps_directory(char *p_pattern, int p_suffix_len)
 {
+	THREAD_SAFETY_IN_ACTIVE_PARALLEL("Eidos_mkstemps_directory():  filesystem write");
+	
 	static const char letters[] = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 	static uint64_t value;
 	size_t len = strlen(p_pattern);
@@ -1568,9 +2541,11 @@ std::unordered_map<std::string, std::string> gEidosBufferedZipAppendData;
 // This flushes the bytes in outstring to the file at file_path, with gzip append
 bool _Eidos_FlushZipBuffer(const std::string &file_path, const std::string &outstring)
 {
+	THREAD_SAFETY_IN_ACTIVE_PARALLEL("_Eidos_FlushZipBuffer():  filesystem write");
+	
 	//std::cout << "_Eidos_FlushZipBuffer() called for " << file_path << std::endl;
 	
-	gzFile gzf = z_gzopen(file_path.c_str(), "ab");
+	gzFile gzf = gzopen(file_path.c_str(), "ab");
 	
 	if (!gzf)
 		return false;
@@ -1602,6 +2577,8 @@ bool _Eidos_FlushZipBuffer(const std::string &file_path, const std::string &outs
 // This flushes a given file, if it is buffering zip output
 void Eidos_FlushFile(const std::string &p_file_path)
 {
+	THREAD_SAFETY_IN_ACTIVE_PARALLEL("Eidos_FlushFile():  filesystem write");
+	
 #if EIDOS_BUFFER_ZIP_APPENDS
 	auto buffer_iter = gEidosBufferedZipAppendData.find(p_file_path);
 	
@@ -1620,6 +2597,8 @@ void Eidos_FlushFile(const std::string &p_file_path)
 // This flushes all outstanding buffered zip data to the appropriate files
 void Eidos_FlushFiles(void)
 {
+	THREAD_SAFETY_IN_ACTIVE_PARALLEL("Eidos_FlushFiles():  filesystem write");
+	
 #if EIDOS_BUFFER_ZIP_APPENDS
 	// Write out buffered data in gEidosBufferedZipAppendData to the appropriate files, using zlib's gzip append mode
 	for (auto &buffer_pair : gEidosBufferedZipAppendData)
@@ -1639,6 +2618,8 @@ void Eidos_FlushFiles(void)
 
 void Eidos_WriteToFile(const std::string &p_file_path, std::vector<const std::string *> p_contents, bool p_append, bool p_compress, EidosFileFlush p_flush_option)
 {
+	THREAD_SAFETY_IN_ACTIVE_PARALLEL("Eidos_WriteToFile():  filesystem write");
+	
 	// note that we add a newline after the last line in all cases, so that appending new content to a file produces correct line breaks
 	
 	if (p_compress)
@@ -1678,7 +2659,7 @@ void Eidos_WriteToFile(const std::string &p_file_path, std::vector<const std::st
 		{
 			// this code can handle both the append and the non-append case, but the append case may generate very low-quality
 			// compression (potentially even worse than the uncompressed data) due to having an excess of gzip headers
-			gzFile gzf = z_gzopen(p_file_path.c_str(), p_append ? "ab" : "wb");
+			gzFile gzf = gzopen(p_file_path.c_str(), p_append ? "ab" : "wb");
 			
 			if (!gzf)
 				EIDOS_TERMINATION << "#ERROR (Eidos_WriteToFile): could not write to file at path " << p_file_path << "." << EidosTerminate(nullptr);
@@ -1993,6 +2974,8 @@ to be bound by the terms and conditions of this License Agreement.
 
 double Eidos_ExactSum(const double *p_double_vec, int64_t p_vec_length)
 {
+	THREAD_SAFETY_IN_ACTIVE_PARALLEL("Eidos_ExactSum(): usage of statics");
+	
 	// We allocate the partials using malloc() rather than initially using the stack,
 	// and keep the allocated block around forever; simpler if a bit less efficient.
 	static double *p = nullptr;		// partials array
@@ -2349,21 +3332,35 @@ std::string EidosStringForFloat(double p_value)
 	}
 }
 
+int DisplayDigitsForIntegerPart(double x)
+{
+	// This function just uses log10 to give the number of digits needed to display the integer part of a double.
+	// The reason it's split out into a function is that the result, for x==0, is -inf, and we want to return 1.
+	double digits = ceil(log10(floor(x)));
+	
+	if (std::isfinite(digits))
+		return (int)digits;
+	return 1;
+}
+
 bool Eidos_RegexWorks(void)
 {
 	// check whether <regex> works, because on some platforms it doesn't (!); test just once and cache the result
 	static bool beenHere = false;
 	static bool regex_works = false;
 	
-	if (!beenHere)
+#pragma omp critical (Eidos_RegexWorks)
 	{
-		std::regex pattern_regex("cd", std::regex_constants::ECMAScript);
-		std::string x_element = "bcd";
-		std::smatch match_info;
-		bool is_match = std::regex_search(x_element, match_info, pattern_regex);
-		
-		regex_works = is_match;
-		beenHere = true;
+		if (!beenHere)
+		{
+			std::regex pattern_regex("cd", std::regex_constants::ECMAScript);
+			std::string x_element = "bcd";
+			std::smatch match_info;
+			bool is_match = std::regex_search(x_element, match_info, pattern_regex);
+			
+			regex_works = is_match;
+			beenHere = true;
+		}
 	}
 	
 	return regex_works;
@@ -2633,7 +3630,7 @@ void Eidos_hash_to_string(char string[65], const uint8_t hash[32])
 {
 	size_t i;
 	for (i = 0; i < 32; i++) {
-		string += sprintf(string, "%02x", hash[i]);
+		string += snprintf(string, 65, "%02x", hash[i]);
 	}
 }	
 
@@ -2654,6 +3651,7 @@ const std::string &gEidosStr_executeLambda = EidosRegisteredString("executeLambd
 const std::string &gEidosStr__executeLambda_OUTER = EidosRegisteredString("_executeLambda_OUTER", gEidosID__executeLambda_OUTER);
 const std::string &gEidosStr_ls = EidosRegisteredString("ls", gEidosID_ls);
 const std::string &gEidosStr_rm = EidosRegisteredString("rm", gEidosID_rm);
+const std::string &gEidosStr_usage = EidosRegisteredString("usage", gEidosID_usage);
 
 // mostly language keywords
 const std::string &gEidosStr_if = EidosRegisteredString("if", gEidosID_if);
@@ -2702,9 +3700,11 @@ const std::string &gEidosStr_length = EidosRegisteredString("length", gEidosID_l
 const std::string &gEidosStr_methodSignature = EidosRegisteredString("methodSignature", gEidosID_methodSignature);
 const std::string &gEidosStr_propertySignature = EidosRegisteredString("propertySignature", gEidosID_propertySignature);
 const std::string &gEidosStr_str = EidosRegisteredString("str", gEidosID_str);
+const std::string &gEidosStr_stringRepresentation = EidosRegisteredString("stringRepresentation", gEidosID_stringRepresentation);
 
 // strings for EidosTestElement
 const std::string &gEidosStr__TestElement = EidosRegisteredString("_TestElement", gEidosID__TestElement);
+const std::string &gEidosStr__TestElementNRR = EidosRegisteredString("_TestElementNRR", gEidosID__TestElementNRR);
 const std::string &gEidosStr__yolk = EidosRegisteredString("_yolk", gEidosID__yolk);
 const std::string &gEidosStr__increment = EidosRegisteredString("_increment", gEidosID__increment);
 const std::string &gEidosStr__cubicYolk = EidosRegisteredString("_cubicYolk", gEidosID__cubicYolk);
@@ -2716,6 +3716,7 @@ const std::string &gEidosStr_allKeys = EidosRegisteredString("allKeys", gEidosID
 const std::string &gEidosStr_addKeysAndValuesFrom = EidosRegisteredString("addKeysAndValuesFrom", gEidosID_addKeysAndValuesFrom);
 const std::string &gEidosStr_appendKeysAndValuesFrom = EidosRegisteredString("appendKeysAndValuesFrom", gEidosID_appendKeysAndValuesFrom);
 const std::string &gEidosStr_clearKeysAndValues = EidosRegisteredString("clearKeysAndValues", gEidosID_clearKeysAndValues);
+const std::string &gEidosStr_compactIndices = EidosRegisteredString("compactIndices", gEidosID_compactIndices);
 const std::string &gEidosStr_getRowValues = EidosRegisteredString("getRowValues", gEidosID_getRowValues);
 const std::string &gEidosStr_getValue = EidosRegisteredString("getValue", gEidosID_getValue);
 const std::string &gEidosStr_identicalContents = EidosRegisteredString("identicalContents", gEidosID_identicalContents);
@@ -2731,6 +3732,7 @@ const std::string &gEidosStr_colNames = EidosRegisteredString("colNames", gEidos
 const std::string &gEidosStr_dim = EidosRegisteredString("dim", gEidosID_dim);
 const std::string &gEidosStr_ncol = EidosRegisteredString("ncol", gEidosID_ncol);
 const std::string &gEidosStr_nrow = EidosRegisteredString("nrow", gEidosID_nrow);
+const std::string &gEidosStr_asMatrix = EidosRegisteredString("asMatrix", gEidosID_asMatrix);
 const std::string &gEidosStr_cbind = EidosRegisteredString("cbind", gEidosID_cbind);
 const std::string &gEidosStr_rbind = EidosRegisteredString("rbind", gEidosID_rbind);
 const std::string &gEidosStr_subset = EidosRegisteredString("subset", gEidosID_subset);
@@ -2758,7 +3760,9 @@ const std::string &gEidosStr_write = EidosRegisteredString("write", gEidosID_wri
 const std::string &gEidosStr_start = EidosRegisteredString("start", gEidosID_start);
 const std::string &gEidosStr_end = EidosRegisteredString("end", gEidosID_end);
 const std::string &gEidosStr_weights = EidosRegisteredString("weights", gEidosID_weights);
+const std::string &gEidosStr_range = EidosRegisteredString("range", gEidosID_range);
 const std::string &gEidosStr_c = EidosRegisteredString("c", gEidosID_c);
+const std::string &gEidosStr_t = EidosRegisteredString("t", gEidosID_t);
 const std::string &gEidosStr_n = EidosRegisteredString("n", gEidosID_n);
 const std::string &gEidosStr_s = EidosRegisteredString("s", gEidosID_s);
 const std::string &gEidosStr_la = EidosRegisteredString("la", gEidosID_laplace);
@@ -2804,6 +3808,8 @@ EidosStringRegistry::~EidosStringRegistry(void)
 
 void EidosStringRegistry::_RegisterStringForGlobalID(const std::string &p_string, EidosGlobalStringID p_string_id)
 {
+	THREAD_SAFETY_IN_ANY_PARALLEL("EidosStringRegistry::_RegisterStringForGlobalID(): string registry change");
+	
 	// BCH 13 September 2016: So, this is a tricky issue without a good resolution at the moment.  Eidos explicitly registers
 	// a few strings, using this method, using the function EidosRegisteredString().  And SLiM explicitly registers
 	// a bunch more strings, in SLiM_RegisterGlobalStringsAndIDs().  So far so good.  But Eidos also registers a bunch of
@@ -3661,6 +4667,24 @@ void Eidos_GetColorString(double p_red, double p_green, double p_blue, char *p_s
 	int r_i = (int)round(p_red * 255.0);
 	int g_i = (int)round(p_green * 255.0);
 	int b_i = (int)round(p_blue * 255.0);
+	
+	static char hex[16] = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F'};
+	
+	p_string_buffer[0] = '#';
+	p_string_buffer[1] = hex[r_i / 16];
+	p_string_buffer[2] = hex[r_i % 16];
+	p_string_buffer[3] = hex[g_i / 16];
+	p_string_buffer[4] = hex[g_i % 16];
+	p_string_buffer[5] = hex[b_i / 16];
+	p_string_buffer[6] = hex[b_i % 16];
+	p_string_buffer[7] = 0;
+}
+
+void Eidos_GetColorString(uint8_t p_red, uint8_t p_green, uint8_t p_blue, char *p_string_buffer)
+{
+	int r_i = (int)p_red;
+	int g_i = (int)p_green;
+	int b_i = (int)p_blue;
 	
 	static char hex[16] = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F'};
 	

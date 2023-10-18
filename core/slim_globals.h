@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 1/4/15.
-//  Copyright (c) 2015-2022 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2015-2023 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -28,12 +28,14 @@
 
 
 #include <stdio.h>
+#include <cstdint>
 
 #include "eidos_globals.h"
 #include "eidos_value.h"
 
 class MutationType;
-class SLiMSim;
+class Community;
+class Species;
 class EidosInterpreter;
 class Population;
 class GenomicElementType;
@@ -41,30 +43,12 @@ class Subpopulation;
 class SLiMEidosBlock;
 
 
-#define SLIM_VERSION_STRING	("3.7.1 OB Lab")
-#define SLIM_VERSION_FLOAT	(3.71)
+// SLiM version: see also Info.plist and QtSLiM.pro
+#define SLIM_VERSION_STRING	("4.0.1 OB Lab")
+#define SLIM_VERSION_FLOAT	(4.01)
 
 
 void SLiM_WarmUp(void);
-
-
-// *******************************************************************************************************************
-//
-//	WF versus nonWF models
-//
-#pragma mark -
-#pragma mark WF versus nonWF
-#pragma mark -
-
-// These preprocessor flags effectively let you build a version of SLiM that supports only WF models (if SLIM_WF_ONLY
-// is defined) or only nonWF models (if SLIM_NONWF_ONLY is defined).  It is not recommended that anybody actually do
-// that; there isn't really any reason to, and such builds have not been tested or debugged.  The reason this is
-// useful is so we can use the compiler to guarantee isolation between the WF and nonWF cases; we can make methods
-// and ivars and such be available in only one case or the other, and test that they are not referenced at all except
-// in the case that is supposed to reference them.  Always nice for peace of mind.  For a normal build of SLiM, both
-// of these should be defined, so that all the code needed for both cases is included.
-#define SLIM_WF_ONLY
-#define SLIM_NONWF_ONLY
 
 
 // *******************************************************************************************************************
@@ -99,6 +83,11 @@ extern std::ostringstream gSLiMError;
 #define SLIM_OUTSTREAM		(gEidosTerminateThrows ? gSLiMOut : std::cout)
 #define SLIM_ERRSTREAM		(gEidosTerminateThrows ? gSLiMError : std::cerr)
 
+#ifdef SLIMGUI
+// When running under SLiMgui, we can have additional output streams that do not exist when running at the command line
+extern std::ostringstream gSLiMScheduling;		// information about scheduling in each tick
+#endif
+
 
 // *******************************************************************************************************************
 //
@@ -109,7 +98,7 @@ extern std::ostringstream gSLiMError;
 #pragma mark -
 
 // This is the standard setup for SLiM: 32 bit ints for most values.  This is recommended.  This gives a maximum of
-// 1 billion for quantities such as object IDs, generations, population sizes, and chromosome positions.  This is
+// 1 billion for quantities such as object IDs, ticks, population sizes, and chromosome positions.  This is
 // comfortably under INT_MAX, which is a bit over 2 billion.  The goal is to try to avoid overflow bugs by keeping
 // a large amount of headroom, so that we are not at risk of simple calculations with these quantities overflowing.
 // Raising these limits to int64_t is reasonable if you need to run a larger simulation.  Lowering them to int16_t
@@ -121,7 +110,7 @@ extern std::ostringstream gSLiMError;
 // double mandates 52 bits for the fractional part, which means that the ability to uniquely identify every integer
 // position breaks down a little bit shy of 1e16.  Thus we limit to 1e15, as a round limit with lots of headroom.
 
-typedef int32_t	slim_generation_t;		// generation numbers, generation durations
+typedef int32_t	slim_tick_t;			// tick numbers, tick durations
 typedef int32_t	slim_age_t;				// individual ages which may be from zero on up
 typedef int64_t	slim_position_t;		// chromosome positions, lengths in base pairs
 typedef int64_t slim_mutrun_index_t;	// indices of mutation runs within genomes; SLIM_INF_BASE_POSITION leads to very large values, thus 64-bit
@@ -130,12 +119,12 @@ typedef int32_t	slim_popsize_t;			// subpopulation sizes and indices, include ge
 typedef int64_t slim_usertag_t;			// user-provided "tag" values; also used for the "active" property, which is like tag
 typedef int32_t slim_refcount_t;		// mutation refcounts, counts of the number of occurrences of a mutation
 typedef int64_t slim_mutationid_t;		// identifiers for mutations, which require 64 bits since there can be so many
-typedef int64_t slim_pedigreeid_t;		// identifiers for pedigreed individuals; over many generations in a large model maybe 64 bits?
+typedef int64_t slim_pedigreeid_t;		// identifiers for pedigreed individuals; over many ticks in a large model maybe 64 bits?
 typedef int64_t slim_genomeid_t;		// identifiers for pedigreed genomes; not user-visible, used by the tree-recording code, pedigree_id*2 + [0/1]
 typedef int32_t slim_polymorphismid_t;	// identifiers for polymorphisms, which need only 32 bits since they are only segregating mutations
 typedef float slim_selcoeff_t;			// storage of selection coefficients in memory-tight classes; also dominance coefficients
 
-#define SLIM_MAX_GENERATION		(1000000000L)	// generation ranges from 0 (init time) to this; SLIM_MAX_GENERATION + 1 is an "infinite" marker value
+#define SLIM_MAX_TICK			(1000000000L)	// ticks range from 0 (init time) to this; SLIM_MAX_TICK + 1 is an "infinite" marker value
 #define SLIM_MAX_BASE_POSITION	(1000000000000000L)	// base positions in the chromosome can range from 0 to 1e15; see above
 #define SLIM_INF_BASE_POSITION	(1100000000000000L)	// used to represent a base position infinitely beyond the end of the chromosome
 #define SLIM_MAX_PEDIGREE_ID	(1000000000000000000L)	// pedigree IDs for individuals can range from 0 to 1e18 (~2^60)
@@ -145,7 +134,7 @@ typedef float slim_selcoeff_t;			// storage of selection coefficients in memory-
 #define SLIM_TAGF_UNSET_VALUE	(-DBL_MAX)		// for tags of type double (i.e. tagF), the flag value for "unset"
 
 // Functions for casting from Eidos ints (int64_t) to SLiM int types safely; not needed for slim_refcount_t at present
-void SLiM_RaiseGenerationRangeError(int64_t p_long_value);
+void SLiM_RaiseTickRangeError(int64_t p_long_value);
 void SLiM_RaiseAgeRangeError(int64_t p_long_value);
 void SLiM_RaisePositionRangeError(int64_t p_long_value);
 void SLiM_RaisePedigreeIDRangeError(int64_t p_long_value);
@@ -154,17 +143,17 @@ void SLiM_RaisePopsizeRangeError(int64_t p_long_value);
 void SLiM_RaiseUsertagRangeError(int64_t p_long_value);
 void SLiM_RaisePolymorphismidRangeError(int64_t p_long_value);
 
-inline __attribute__((always_inline)) slim_generation_t SLiMCastToGenerationTypeOrRaise(int64_t p_long_value)
+inline __attribute__((always_inline)) slim_tick_t SLiMCastToTickTypeOrRaise(int64_t p_long_value)
 {
-	if ((p_long_value < 1) || (p_long_value > SLIM_MAX_GENERATION))
-		SLiM_RaiseGenerationRangeError(p_long_value);
+	if ((p_long_value < 1) || (p_long_value > SLIM_MAX_TICK))
+		SLiM_RaiseTickRangeError(p_long_value);
 	
-	return static_cast<slim_generation_t>(p_long_value);
+	return static_cast<slim_tick_t>(p_long_value);
 }
 
 inline __attribute__((always_inline)) slim_age_t SLiMCastToAgeTypeOrRaise(int64_t p_long_value)
 {
-	if ((p_long_value < 0) || (p_long_value > SLIM_MAX_GENERATION))
+	if ((p_long_value < 0) || (p_long_value > SLIM_MAX_TICK))
 		SLiM_RaiseAgeRangeError(p_long_value);
 	
 	return static_cast<slim_age_t>(p_long_value);
@@ -218,13 +207,13 @@ inline __attribute__((always_inline)) slim_polymorphismid_t SLiMCastToPolymorphi
 	return static_cast<slim_polymorphismid_t>(p_long_value);
 }
 
-inline __attribute__((always_inline)) slim_generation_t SLiMClampToGenerationType(int64_t p_long_value)
+inline __attribute__((always_inline)) slim_tick_t SLiMClampToTickType(int64_t p_long_value)
 {
 	if (p_long_value < 1)
 		return 1;
-	if (p_long_value > SLIM_MAX_GENERATION)
-		return SLIM_MAX_GENERATION;
-	return static_cast<slim_generation_t>(p_long_value);
+	if (p_long_value > SLIM_MAX_TICK)
+		return SLIM_MAX_TICK;
+	return static_cast<slim_tick_t>(p_long_value);
 }
 
 inline __attribute__((always_inline)) slim_position_t SLiMClampToPositionType(int64_t p_long_value)
@@ -260,12 +249,18 @@ inline __attribute__((always_inline)) slim_usertag_t SLiMClampToUsertagType(int6
 	return static_cast<slim_usertag_t>(p_long_value);
 }
 
-SLiMSim &SLiM_GetSimFromInterpreter(EidosInterpreter &p_interpreter);
+Community &SLiM_GetCommunityFromInterpreter(EidosInterpreter &p_interpreter);
 slim_objectid_t SLiM_ExtractObjectIDFromEidosValue_is(EidosValue *p_value, int p_index, char p_prefix_char);
-MutationType *SLiM_ExtractMutationTypeFromEidosValue_io(EidosValue *p_value, int p_index, SLiMSim &p_sim, const char *p_method_name);
-GenomicElementType *SLiM_ExtractGenomicElementTypeFromEidosValue_io(EidosValue *p_value, int p_index, SLiMSim &p_sim, const char *p_method_name);
-Subpopulation *SLiM_ExtractSubpopulationFromEidosValue_io(EidosValue *p_value, int p_index, SLiMSim &p_sim, const char *p_method_name);
-SLiMEidosBlock *SLiM_ExtractSLiMEidosBlockFromEidosValue_io(EidosValue *p_value, int p_index, SLiMSim &p_sim, const char *p_method_name);
+
+// These take both a Community and a Species.  If the species is non-nullptr, the lookup is done in that species
+// and the community is not used (and may be nullptr).  If the species is nullptr, the lookup is in the community,
+// and an object in any species will be found.  So: supply a species if you want a species-specific search.
+MutationType *SLiM_ExtractMutationTypeFromEidosValue_io(EidosValue *p_value, int p_index, Community *p_community, Species *p_species, const char *p_method_name);
+GenomicElementType *SLiM_ExtractGenomicElementTypeFromEidosValue_io(EidosValue *p_value, int p_index, Community *p_community, Species *p_species, const char *p_method_name);
+Subpopulation *SLiM_ExtractSubpopulationFromEidosValue_io(EidosValue *p_value, int p_index, Community *p_community, Species *p_species, const char *p_method_name);
+SLiMEidosBlock *SLiM_ExtractSLiMEidosBlockFromEidosValue_io(EidosValue *p_value, int p_index, Community *p_community, Species *p_species, const char *p_method_name);
+
+Species *SLiM_ExtractSpeciesFromEidosValue_No(EidosValue *p_value, int p_index, Community *p_community, const char *p_method_name);		// NULL tries for a single-species default
 
 
 // *******************************************************************************************************************
@@ -279,13 +274,13 @@ SLiMEidosBlock *SLiM_ExtractSLiMEidosBlockFromEidosValue_io(EidosValue *p_value,
 /*
  
  Memory management in SLiM is a complex topic which I'll try to summarize here.  Classes that are visible in Eidos
- descend from EidosObject.  Most of these have their ownership and lifetime managed by the simulation; when
- an Individual dies, for example, the object ceases to exist at that time, and will be disposed of.  A subclass of
- EidosObject, EidosDictionaryRetained, provides retain/release style memory management for objects that are
- visible in Eidos; Chromosome, Mutation, and Substitution take advantage of this optional facility, and can thus be
+ descend from EidosObject.  Most of these have their ownership and lifetime managed by the simulation; whenever an
+ Individual dies, for example, the Individual object ceases to exist at that time, and is disposed of.  A subclass
+ of EidosObject, EidosDictionaryRetained, provides optional retain/release style memory management for all objects
+ visible in Eidos; Chromosome, Mutation, Substitution, and LogFile utilize this facility, and can therefore all be
  held onto long-term in Eidos with defineConstant() or setValue().  In either case, objects might be allocated out
  of several different pools: some objects are allocated with new, some out of EidosObjectPool.  EidosValue objects
- themselves (which can contain pointers to EidosObjects) are always allocated from a global EidosObjectPool
+ themselves (which can contain pointers to EidosObjects) are always allocated from a single global EidosObjectPool
  that is shared across the process, gEidosValuePool, and EidosASTNodes are similarly allocated from another global
  pool, gEidosASTNodePool.  Here are details on the memory management scheme for various SLiM classes (note that by
  "never deleted", this means not deleted within a run of a simulation; in SLiMgui they can be deleted):
@@ -296,14 +291,15 @@ SLiMEidosBlock *SLiM_ExtractSLiMEidosBlockFromEidosValue_io(EidosValue *p_value,
  EidosDictionaryRetained : EidosDictionaryUnretained subclass that provides retain/release memory management
  
  GenomicElement : EidosObject subclass, allocated with new and never deleted
- SLiMgui : EidosObject subclass, allocated with new and never deleted
+ SLiMgui : EidosDictionaryUnretained subclass, allocated with new and never deleted
  GenomicElementType : EidosDictionaryUnretained subclass, allocated with new and never deleted
  MutationType : EidosDictionaryUnretained subclass, allocated with new and never deleted
  InteractionType : EidosDictionaryUnretained subclass, allocated with new and never deleted
- SLiMSim : EidosDictionaryUnretained subclass, allocated with new and never deleted
- SLiMEidosBlock : EidosObject subclass, dynamic lifetime with a deferred deletion scheme in SLiMSim
+ Community : EidosDictionaryUnretained subclass, allocated with new and never deleted
+ Species : EidosDictionaryUnretained subclass, allocated with new and never deleted
+ SLiMEidosBlock : EidosObject subclass, dynamic lifetime with a deferred deletion scheme in Community
  
- MutationRun : no superclass, not visible in Eidos, shared by Genome, private pool for very efficient reuse
+ MutationRun : no superclass, not visible in Eidos, shared by Genome, private pools for very efficient reuse
  Genome : EidosObject subclass, allocated out of an EidosObjectPool owned by its subpopulation
  Individual : EidosDictionaryUnretained subclass, allocated out of an EidosObjectPool owned by its subpopulation
  Subpopulation : EidosDictionaryUnretained subclass, allocated with new/delete
@@ -311,7 +307,8 @@ SLiMEidosBlock *SLiM_ExtractSLiMEidosBlockFromEidosValue_io(EidosValue *p_value,
  Chromosome : EidosDictionaryRetained subclass, allocated with new/delete
  Substitution : EidosDictionaryRetained subclass, allocated with new/delete
  Mutation : EidosDictionaryRetained subclass, allocated out of a special global pool, gSLiM_Mutation_Block
- 
+ LogFile : EidosDictionaryRetained subclass, allocated with new/delete
+
  The dynamics of Mutation are unusual and require further discussion.  The global shared gSLiM_Mutation_Block pool
  is used instead of EidosObjectPool because all mutations must be allocated out of a single contiguous memory bloc
  in order to be indexable with MutationIndex (whereas EidosObjectPool dynamically creates new blocs).  This allows
@@ -328,10 +325,10 @@ SLiMEidosBlock *SLiM_ExtractSLiMEidosBlockFromEidosValue_io(EidosValue *p_value,
  been lost or fixed.
  
  MutationRun is similarly complex.  It is not visible in Eidos, but a single MutationRun can be shared by multiple
- Genomes, so it keeps a refcount that is maintained by Eidos_intrusive_ptr, like EidosValue.  All MutationRuns are
- allocated out of a single pool, but when their retain count goes to zero they do not get destructed; instead they
- are returned to a "freed list" while still in a constructed state, for the fastest possible reuse, since they are
- a central bottleneck in most SLiM models.
+ Genomes, so it keeps a refcount that is updated each tick by tallying usage across genomes.  All MutationRuns are
+ allocated out of a single pool per species.  When their refcount goes to zero they do not get destructed; instead
+ they are returned to a per-species "freed list" while still in a constructed state, allowing extremely fast reuse
+ since they are a central bottleneck in most SLiM models.
  
  In summary, there are two different retain/release schemes in SLiM, one run by Eidos_intrusive_ptr and one run by
  EidosDictionaryRetained.  Eidos_intrusive_ptr is a template-based solution that can be incorporated in class with
@@ -347,10 +344,122 @@ SLiMEidosBlock *SLiM_ExtractSLiMEidosBlockFromEidosValue_io(EidosValue *p_value,
  advantages of being able to keep Mutation objects long-term seemed to justify this; no similar advantages seem to
  exist for the other SLiM classes that would justify this additional overhead.
  
+ BCH 3/28/2023: Apropos of the previous paragraph, I looked into having the managed-lifetime objects that live for
+ the whole simulation (Community, Species, GenomicElementType, MutationType, InteractionType, SLiMgui) behave like
+ they're under retain-release (so they can be put into Dictionaries and defined as global constants and so forth),
+ but it proved difficult and fragile.  There are two choices for this.  You could actually put these objects under
+ retain-release, and design things so that at the end of the simulation they get a Release() call and that trigger
+ causes their deallocation.  The problem with that is that retained references to them - even their self_symbol_ -
+ make it so they don't actually get deallocated at the point in time that they should be, and so they leak.  A way
+ to break retain cycles would be needed, but that's a very complex thing.  The other possible approach is for them
+ to just pretend to be under retain-release, but to get forced to dealloc at the end of the simulation, regardless
+ of their retain count.  The problem in this case is that Release() calls will come in for the objects after their
+ deallocation; trying to prevent that by chasing down and clearing every retained reference before deallocation is
+ a very complex thing too.  What is really needed is a weak-reference scheme where only the simulation's reference
+ is strong, and all other references are weak and get cleared when the strong reference is released; but again, it
+ is a very complex thing to implement.  In the end I decided it wasn't worth the time, effort, and complexity.
+ 
+ BCH 5/24/2022: Adding a new note regarding memory policy in multispecies SLiM.  The above points still apply, but
+ it is worth emphasizing that the shared global pools now apply across species.  Multiple species share a pool for
+ Mutation objects, and a pool for MutationRun objects, in other words; they do not share their pools of Individual
+ and Genome objects, however, as those are kept by the Population.  This is the simplest design, and seems to work
+ fine.  It might provide greater memory locality benefits for each species to have its own pool, but that would be
+ more than offset by the added complexity of having to walk up to the species to get the active pool.  This design
+ means that mutaton indexes and gSLiM_next_mutation_id are shared across species; a given mutation index is unique
+ not only within the species, but across species.  Similarly, the "bulk operation" facilities of MutationRun share
+ globals used by all species, so a bulk operation can only be in progress for one species at a time.  Other shared
+ globals include s_freed_sparse_vectors_ (which keeps freed SparseVector objects for reuse by InteractionType) and
+ gSLiM_next_pedigree_id (which keeps the next pedigree ID to be used).  This implies that pedigree IDs are uniqued
+ across species, like mutation IDs, which in turn implies that genome IDs used in tree-sequence recording are too,
+ given the invariant relationship between pedigree and genome IDs.
+ 
  */
 
 #define DEBUG_MUTATIONS				0		// turn on logging of mutation construction and destruction
-#define DEBUG_MUTATION_RUNS			0		// turn on stat collection and logging regarding mutation run usage
+
+// Per-species memory usage assessment as done by Species::TabulateSLiMMemoryUsage_Species() is placed into this struct
+typedef struct
+{
+	int64_t chromosomeObjects_count;
+	size_t chromosomeObjects;
+	size_t chromosomeMutationRateMaps;
+	size_t chromosomeRecombinationRateMaps;
+	size_t chromosomeAncestralSequence;
+	
+	int64_t genomeObjects_count;
+	size_t genomeObjects;
+	size_t genomeExternalBuffers;
+	size_t genomeUnusedPoolSpace;				// this pool is kept by Population, per-species
+	size_t genomeUnusedPoolBuffers;
+	
+	int64_t genomicElementObjects_count;
+	size_t genomicElementObjects;
+	
+	int64_t genomicElementTypeObjects_count;
+	size_t genomicElementTypeObjects;
+	
+	int64_t individualObjects_count;
+	size_t individualObjects;
+	size_t individualUnusedPoolSpace;			// this pool is kept by Population, per-species
+	
+	int64_t mutationObjects_count;
+	size_t mutationObjects;
+	
+	int64_t mutationRunObjects_count;
+	size_t mutationRunObjects;
+	size_t mutationRunExternalBuffers;
+	size_t mutationRunNonneutralCaches;
+	size_t mutationRunUnusedPoolSpace;			// this pool is kept by Species
+	size_t mutationRunUnusedPoolBuffers;		// this pool is kept by Species
+	
+	int64_t mutationTypeObjects_count;
+	size_t mutationTypeObjects;
+	
+	int64_t speciesObjects_count;
+	size_t speciesObjects;
+	size_t speciesTreeSeqTables;
+	
+	int64_t subpopulationObjects_count;
+	size_t subpopulationObjects;
+	size_t subpopulationFitnessCaches;
+	size_t subpopulationParentTables;
+	size_t subpopulationSpatialMaps;
+	size_t subpopulationSpatialMapsDisplay;
+	
+	int64_t substitutionObjects_count;
+	size_t substitutionObjects;
+	
+	size_t totalMemoryUsage;
+} SLiMMemoryUsage_Species;
+
+// Community-wide memory usage assessment as done by Community::TabulateSLiMMemoryUsage_Community() is placed into this struct
+typedef struct
+{
+	int64_t communityObjects_count;
+	size_t communityObjects;
+	
+	size_t mutationRefcountBuffer;			// this pool is kept globally by Mutation
+	size_t mutationUnusedPoolSpace;			// this pool is kept globally by Mutation
+	
+	int64_t interactionTypeObjects_count;	// InteractionType is kept by Community now
+	size_t interactionTypeObjects;
+	size_t interactionTypeKDTrees;
+	size_t interactionTypePositionCaches;
+	size_t interactionTypeSparseVectorPool;	// This pool is kept globally by InteractionType
+	
+	size_t eidosASTNodePool;				// this pool is kept globally by Eidos
+	size_t eidosSymbolTablePool;			// this pool is kept globally by EidosSymbolTable
+	size_t eidosValuePool;					// this pool is kept globally by Eidos
+	size_t fileBuffers;						// these buffers are kept globally by Eidos
+	
+	size_t totalMemoryUsage;
+} SLiMMemoryUsage_Community;
+
+void SumUpMemoryUsage_Species(SLiMMemoryUsage_Species &p_usage);
+void SumUpMemoryUsage_Community(SLiMMemoryUsage_Community &p_usage);
+
+void AccumulateMemoryUsageIntoTotal_Species(SLiMMemoryUsage_Species &p_usage, SLiMMemoryUsage_Species &p_total);
+void AccumulateMemoryUsageIntoTotal_Community(SLiMMemoryUsage_Community &p_usage, SLiMMemoryUsage_Community &p_total);
 
 
 // *******************************************************************************************************************
@@ -385,8 +494,8 @@ SLiMEidosBlock *SLiM_ExtractSLiMEidosBlockFromEidosValue_io(EidosValue *p_value,
 #define DO_MEMORY_CHECKS	1
 #endif
 
-// If 1, and SLiM_verbose_output == true, additional output will be generated regarding the mutation run count
-// experiments performed by SLiMSim.
+// If 1, and SLiM_verbosity_level >= 2, additional output will be generated regarding the mutation run count
+// experiments performed by Species.
 #define MUTRUN_EXPERIMENT_OUTPUT	0
 
 // Verbosity, from the command-line option -l[ong]; defaults to 1 if -l[ong] is not used
@@ -400,6 +509,43 @@ extern int64_t SLiM_verbosity_level;
 #pragma mark -
 #pragma mark Shared SLiM types and enumerations
 #pragma mark -
+
+// This enumeration represents the type of model: presently WF or nonWF
+enum class SLiMModelType
+{
+	kModelTypeWF = 0,			// a Wright-Fisher model: the original model type supported by SLiM
+	kModelTypeNonWF				// a non-Wright-Fisher model: a new model type that is more general
+};
+
+enum class SLiMCycleStage
+{
+	kStagePreCycle = 0,
+	
+	// stages for WF models
+	kWFStage0ExecuteFirstScripts = 1,
+	kWFStage1ExecuteEarlyScripts,
+	kWFStage2GenerateOffspring,
+	kWFStage3RemoveFixedMutations,
+	kWFStage4SwapGenerations,
+	kWFStage5ExecuteLateScripts,
+	kWFStage6CalculateFitness,
+	kWFStage7AdvanceTickCounter,
+	
+	// stages for nonWF models
+	kNonWFStage0ExecuteFirstScripts = 101,
+	kNonWFStage1GenerateOffspring,
+	kNonWFStage2ExecuteEarlyScripts,
+	kNonWFStage3CalculateFitness,
+	kNonWFStage4SurvivalSelection,
+	kNonWFStage5RemoveFixedMutations,
+	kNonWFStage6ExecuteLateScripts,
+	kNonWFStage7AdvanceTickCounter,
+	
+	// end stage between ticks; things in the Eidos console happen here
+	kStagePostCycle = 201,
+};
+
+std::string StringForSLiMCycleStage(SLiMCycleStage p_stage);
 
 // This enumeration represents the type of chromosome represented by a genome: autosome, X, or Y.  Note that this is somewhat
 // separate from the sex of the individual; one can model sexual individuals but model only an autosome, in which case the sex
@@ -416,7 +562,7 @@ std::ostream& operator<<(std::ostream& p_out, GenomeType p_genome_type);
 
 // This enumeration represents the sex of an individual: hermaphrodite, female, or male.  It also includes an "unspecified"
 // value that is useful in situations where the code wants to say that it doesn't care what sex is present.
-enum class IndividualSex : int32_t
+enum class IndividualSex : int8_t
 {
 	kUnspecified = -2,
 	kHermaphrodite = -1,
@@ -440,6 +586,8 @@ extern EidosValue_String_SP gStaticEidosValue_StringA;
 extern EidosValue_String_SP gStaticEidosValue_StringC;
 extern EidosValue_String_SP gStaticEidosValue_StringG;
 extern EidosValue_String_SP gStaticEidosValue_StringT;
+
+extern const char gSLiM_Nucleotides[4];		// A, C, G, T
 
 
 // *******************************************************************************************************************
@@ -565,6 +713,7 @@ extern const std::string &gStr_initializeHotspotMap;
 extern const std::string &gStr_initializeRecombinationRate;
 extern const std::string &gStr_initializeSex;
 extern const std::string &gStr_initializeSLiMOptions;
+extern const std::string &gStr_initializeSpecies;
 extern const std::string &gStr_initializeTreeSeq;
 extern const std::string &gStr_initializeSLiMModelType;
 extern const std::string &gStr_initializeInteractionType;
@@ -616,7 +765,7 @@ extern const std::string &gStr_isSegregating;
 extern const std::string &gStr_mutationType;
 extern const std::string &gStr_nucleotide;
 extern const std::string &gStr_nucleotideValue;
-extern const std::string &gStr_originGeneration;
+extern const std::string &gStr_originTick;
 extern const std::string &gStr_position;
 extern const std::string &gStr_selectionCoeff;
 extern const std::string &gStr_subpopID;
@@ -632,11 +781,15 @@ extern const std::string &gStr_mutationStackPolicy;
 //extern const std::string &gStr_type;		now gEidosStr_type
 //extern const std::string &gStr_source;		now gEidosStr_source
 extern const std::string &gStr_active;
+extern const std::string &gStr_allGenomicElementTypes;
+extern const std::string &gStr_allInteractionTypes;
+extern const std::string &gStr_allMutationTypes;
+extern const std::string &gStr_allScriptBlocks;
+extern const std::string &gStr_allSpecies;
+extern const std::string &gStr_allSubpopulations;
 extern const std::string &gStr_chromosome;
 extern const std::string &gStr_chromosomeType;
 extern const std::string &gStr_genomicElementTypes;
-extern const std::string &gStr_inSLiMgui;
-extern const std::string &gStr_interactionTypes;
 extern const std::string &gStr_lifetimeReproductiveOutput;
 extern const std::string &gStr_lifetimeReproductiveOutputM;
 extern const std::string &gStr_lifetimeReproductiveOutputF;
@@ -646,13 +799,18 @@ extern const std::string &gStr_scriptBlocks;
 extern const std::string &gStr_sexEnabled;
 extern const std::string &gStr_subpopulations;
 extern const std::string &gStr_substitutions;
-extern const std::string &gStr_dominanceCoeffX;
-extern const std::string &gStr_generation;
-extern const std::string &gStr_generationStage;
+extern const std::string &gStr_tick;
+extern const std::string &gStr_cycle;
+extern const std::string &gStr_cycleStage;
 extern const std::string &gStr_colorSubstitution;
 extern const std::string &gStr_verbosity;
 extern const std::string &gStr_tag;
 extern const std::string &gStr_tagF;
+extern const std::string &gStr_tagL0;
+extern const std::string &gStr_tagL1;
+extern const std::string &gStr_tagL2;
+extern const std::string &gStr_tagL3;
+extern const std::string &gStr_tagL4;
 extern const std::string &gStr_phenotype;
 extern const std::string &gStr_phenotype4;
 extern const std::string &gStr_ODEPars;
@@ -667,15 +825,20 @@ extern const std::string &gStr_subpopulation;
 extern const std::string &gStr_index;
 extern const std::string &gStr_immigrantSubpopIDs;
 extern const std::string &gStr_immigrantSubpopFractions;
+extern const std::string &gStr_avatar;
 extern const std::string &gStr_name;
 extern const std::string &gStr_description;
 extern const std::string &gStr_selfingRate;
 extern const std::string &gStr_cloningRate;
 extern const std::string &gStr_sexRatio;
+extern const std::string &gStr_gridDimensions;
+extern const std::string &gStr_interpolate;
 extern const std::string &gStr_spatialBounds;
+extern const std::string &gStr_spatialMaps;
 extern const std::string &gStr_individualCount;
-extern const std::string &gStr_fixationGeneration;
+extern const std::string &gStr_fixationTick;
 extern const std::string &gStr_age;
+extern const std::string &gStr_meanParentAge;
 extern const std::string &gStr_pedigreeID;
 extern const std::string &gStr_pedigreeParentIDs;
 extern const std::string &gStr_pedigreeGrandparentIDs;
@@ -705,6 +868,7 @@ extern const std::string &gStr_countOfMutationsOfType;
 extern const std::string &gStr_positionsOfMutationsOfType;
 extern const std::string &gStr_containsMarkerMutation;
 extern const std::string &gStr_relatedness;
+extern const std::string &gStr_sharedParentCount;
 extern const std::string &gStr_NARIntegrate;
 extern const std::string &gStr_pairwiseR2;
 extern const std::string &gStr_getHaplos;
@@ -725,7 +889,14 @@ extern const std::string &gStr_setDistribution;
 extern const std::string &gStr_addSubpop;
 extern const std::string &gStr_addSubpopSplit;
 extern const std::string &gStr_deregisterScriptBlock;
+extern const std::string &gStr_genomicElementTypesWithIDs;
+extern const std::string &gStr_interactionTypesWithIDs;
+extern const std::string &gStr_mutationTypesWithIDs;
+extern const std::string &gStr_scriptBlocksWithIDs;
+extern const std::string &gStr_speciesWithIDs;
+extern const std::string &gStr_subpopulationsWithIDs;
 extern const std::string &gStr_individualsWithPedigreeIDs;
+extern const std::string &gStr_killIndividuals;
 extern const std::string &gStr_mutationCounts;
 extern const std::string &gStr_mutationCountsInGenomes;
 extern const std::string &gStr_mutationFrequencies;
@@ -741,22 +912,25 @@ extern const std::string &gStr_recalculateFitness;
 extern const std::string &gStr_registerFirstEvent;
 extern const std::string &gStr_registerEarlyEvent;
 extern const std::string &gStr_registerLateEvent;
-extern const std::string &gStr_registerFitnessCallback;
+extern const std::string &gStr_registerFitnessEffectCallback;
 extern const std::string &gStr_registerInteractionCallback;
 extern const std::string &gStr_registerMateChoiceCallback;
 extern const std::string &gStr_registerModifyChildCallback;
 extern const std::string &gStr_registerRecombinationCallback;
 extern const std::string &gStr_registerMutationCallback;
+extern const std::string &gStr_registerMutationEffectCallback;
 extern const std::string &gStr_registerSurvivalCallback;
 extern const std::string &gStr_registerReproductionCallback;
 extern const std::string &gStr_rescheduleScriptBlock;
 extern const std::string &gStr_simulationFinished;
+extern const std::string &gStr_skipTick;
 extern const std::string &gStr_subsetMutations;
 extern const std::string &gStr_treeSeqCoalesced;
 extern const std::string &gStr_treeSeqSimplify;
 extern const std::string &gStr_treeSeqRememberIndividuals;
 extern const std::string &gStr_treeSeqOutput;
 extern const std::string &gStr_setMigrationRates;
+extern const std::string &gStr_pointDeviated;
 extern const std::string &gStr_pointInBounds;
 extern const std::string &gStr_pointReflected;
 extern const std::string &gStr_pointStopped;
@@ -778,9 +952,28 @@ extern const std::string &gStr_cachedFitness;
 extern const std::string &gStr_sampleIndividuals;
 extern const std::string &gStr_subsetIndividuals;
 extern const std::string &gStr_defineSpatialMap;
+extern const std::string &gStr_addSpatialMap;
+extern const std::string &gStr_removeSpatialMap;
 extern const std::string &gStr_spatialMapColor;
 extern const std::string &gStr_spatialMapImage;
 extern const std::string &gStr_spatialMapValue;
+extern const std::string &gStr_add;
+extern const std::string &gStr_blend;
+extern const std::string &gStr_multiply;
+extern const std::string &gStr_divide;
+extern const std::string &gStr_subtract;
+extern const std::string &gStr_power;
+extern const std::string &gStr_exp;
+extern const std::string &gStr_changeColors;
+extern const std::string &gStr_changeValues;
+extern const std::string &gStr_gridValues;
+extern const std::string &gStr_mapColor;
+extern const std::string &gStr_mapImage;
+extern const std::string &gStr_mapValue;
+extern const std::string &gStr_rescale;
+extern const std::string &gStr_sampleImprovedNearbyPoint;
+extern const std::string &gStr_sampleNearbyPoint;
+extern const std::string &gStr_smooth;
 extern const std::string &gStr_outputMSSample;
 extern const std::string &gStr_outputVCFSample;
 extern const std::string &gStr_outputSample;
@@ -793,8 +986,10 @@ extern const std::string &gStr_distance;
 extern const std::string &gStr_localPopulationDensity;
 extern const std::string &gStr_interactionDistance;
 extern const std::string &gStr_clippedIntegral;
-extern const std::string &gStr_distanceToPoint;
+extern const std::string &gStr_distanceFromPoint;
 extern const std::string &gStr_nearestNeighbors;
+extern const std::string &gStr_neighborCount;
+extern const std::string &gStr_neighborCountOfPoint;
 extern const std::string &gStr_nearestInteractingNeighbors;
 extern const std::string &gStr_interactingNeighborCount;
 extern const std::string &gStr_nearestNeighborsOfPoint;
@@ -804,6 +999,7 @@ extern const std::string &gStr_totalOfNeighborStrengths;
 extern const std::string &gStr_unevaluate;
 extern const std::string &gStr_drawByStrength;
 
+extern const std::string &gStr_community;
 extern const std::string &gStr_sim;
 extern const std::string &gStr_self;
 extern const std::string &gStr_individual;
@@ -815,25 +1011,19 @@ extern const std::string &gStr_subpop;
 extern const std::string &gStr_sourceSubpop;
 //extern const std::string &gStr_weights;		now gEidosStr_weights
 extern const std::string &gStr_child;
-extern const std::string &gStr_childGenome1;
-extern const std::string &gStr_childGenome2;
-extern const std::string &gStr_childIsFemale;
 extern const std::string &gStr_parent;
 extern const std::string &gStr_parent1;
-extern const std::string &gStr_parent1Genome1;
-extern const std::string &gStr_parent1Genome2;
 extern const std::string &gStr_isCloning;
 extern const std::string &gStr_isSelfing;
 extern const std::string &gStr_parent2;
-extern const std::string &gStr_parent2Genome1;
-extern const std::string &gStr_parent2Genome2;
 extern const std::string &gStr_mut;
-extern const std::string &gStr_relFitness;
+extern const std::string &gStr_effect;
 extern const std::string &gStr_homozygous;
 extern const std::string &gStr_breakpoints;
 extern const std::string &gStr_receiver;
 extern const std::string &gStr_exerter;
 extern const std::string &gStr_originalNuc;
+extern const std::string &gStr_fitness;
 extern const std::string &gStr_surviving;
 extern const std::string &gStr_draw;
 
@@ -850,7 +1040,9 @@ extern const std::string &gStr_GenomicElementType;
 //extern const std::string &gStr_Mutation;		// in Eidos; see EidosValue_Object::EidosValue_Object()
 extern const std::string &gStr_MutationType;
 extern const std::string &gStr_SLiMEidosBlock;
-extern const std::string &gStr_SLiMSim;
+extern const std::string &gStr_Community;
+extern const std::string &gStr_SpatialMap;
+extern const std::string &gStr_Species;
 extern const std::string &gStr_Subpopulation;
 //extern const std::string &gStr_Individual;		// in Eidos; see EidosValue_Object::EidosValue_Object()
 extern const std::string &gStr_Substitution;
@@ -863,17 +1055,21 @@ extern const std::string &gStr_LogFile;
 extern const std::string &gStr_logInterval;
 extern const std::string &gStr_precision;
 extern const std::string &gStr_addCustomColumn;
-extern const std::string &gStr_addGeneration;
-extern const std::string &gStr_addGenerationStage;
+extern const std::string &gStr_addCycle;
+extern const std::string &gStr_addCycleStage;
 extern const std::string &gStr_addMeanSDColumns;
 extern const std::string &gStr_addPopulationSexRatio;
 extern const std::string &gStr_addPopulationSize;
 extern const std::string &gStr_addSubpopulationSexRatio;
 extern const std::string &gStr_addSubpopulationSize;
+extern const std::string &gStr_addSuppliedColumn;
+extern const std::string &gStr_addTick;
 extern const std::string &gStr_flush;
 extern const std::string &gStr_logRow;
 extern const std::string &gStr_setLogInterval;
 extern const std::string &gStr_setFilePath;
+extern const std::string &gStr_setSuppliedValue;
+extern const std::string &gStr_willAutolog;
 extern const std::string &gStr_context;
 
 extern const std::string &gStr_A;
@@ -887,13 +1083,19 @@ extern const std::string &gStr_g;
 extern const std::string &gStr_e;
 //extern const std::string &gStr_n;		now gEidosStr_n
 extern const std::string &gStr_w;
+extern const std::string &gStr_p;
 extern const std::string &gStr_l;
 //extern const std::string &gStr_s;		now gEidosStr_s
+extern const std::string &gStr_species;
+extern const std::string &gStr_ticks;
+extern const std::string &gStr_speciesSpec;
+extern const std::string &gStr_ticksSpec;
 extern const std::string &gStr_first;
 extern const std::string &gStr_early;
 extern const std::string &gStr_late;
 extern const std::string &gStr_initialize;
-extern const std::string &gStr_fitness;
+extern const std::string &gStr_fitnessEffect;
+extern const std::string &gStr_mutationEffect;
 extern const std::string &gStr_interaction;
 extern const std::string &gStr_mateChoice;
 extern const std::string &gStr_modifyChild;
@@ -915,6 +1117,7 @@ enum _SLiMGlobalStringID : int {
 	gID_initializeRecombinationRate,
 	gID_initializeSex,
 	gID_initializeSLiMOptions,
+	gID_initializeSpecies,
 	gID_initializeTreeSeq,
 	gID_initializeSLiMModelType,
 	gID_initializeInteractionType,
@@ -966,7 +1169,7 @@ enum _SLiMGlobalStringID : int {
 	gID_mutationType,
 	gID_nucleotide,
 	gID_nucleotideValue,
-	gID_originGeneration,
+	gID_originTick,
 	gID_position,
 	gID_selectionCoeff,
 	gID_subpopID,
@@ -982,11 +1185,15 @@ enum _SLiMGlobalStringID : int {
 	//gID_type,		now gEidosID_type
 	//gID_source,	now gEidosID_source
 	gID_active,
+	gID_allGenomicElementTypes,
+	gID_allInteractionTypes,
+	gID_allMutationTypes,
+	gID_allScriptBlocks,
+	gID_allSpecies,
+	gID_allSubpopulations,
 	gID_chromosome,
 	gID_chromosomeType,
 	gID_genomicElementTypes,
-	gID_inSLiMgui,
-	gID_interactionTypes,
 	gID_lifetimeReproductiveOutput,
 	gID_lifetimeReproductiveOutputM,
 	gID_lifetimeReproductiveOutputF,
@@ -996,13 +1203,18 @@ enum _SLiMGlobalStringID : int {
 	gID_sexEnabled,
 	gID_subpopulations,
 	gID_substitutions,
-	gID_dominanceCoeffX,
-	gID_generation,
-	gID_generationStage,
+	gID_tick,
+	gID_cycle,
+	gID_cycleStage,
 	gID_colorSubstitution,
 	gID_verbosity,
 	gID_tag,
 	gID_tagF,
+	gID_tagL0,
+	gID_tagL1,
+	gID_tagL2,
+	gID_tagL3,
+	gID_tagL4,
 	gID_phenotype,
 	gID_phenotype4,
 	gID_ODEPars,
@@ -1017,15 +1229,20 @@ enum _SLiMGlobalStringID : int {
 	gID_index,
 	gID_immigrantSubpopIDs,
 	gID_immigrantSubpopFractions,
+	gID_avatar,
 	gID_name,
 	gID_description,
 	gID_selfingRate,
 	gID_cloningRate,
 	gID_sexRatio,
+	gID_gridDimensions,
+	gID_interpolate,
 	gID_spatialBounds,
+	gID_spatialMaps,
 	gID_individualCount,
-	gID_fixationGeneration,
+	gID_fixationTick,
 	gID_age,
+	gID_meanParentAge,
 	gID_pedigreeID,
 	gID_pedigreeParentIDs,
 	gID_pedigreeGrandparentIDs,
@@ -1058,6 +1275,7 @@ enum _SLiMGlobalStringID : int {
 	gID_positionsOfMutationsOfType,
 	gID_containsMarkerMutation,
 	gID_relatedness,
+	gID_sharedParentCount,
 	gID_mutationsOfType,
 	gID_setSpatialPosition,
 	gID_sumOfMutationsOfType,
@@ -1075,7 +1293,14 @@ enum _SLiMGlobalStringID : int {
 	gID_addSubpop,
 	gID_addSubpopSplit,
 	gID_deregisterScriptBlock,
+	gID_genomicElementTypesWithIDs,
+	gID_interactionTypesWithIDs,
+	gID_mutationTypesWithIDs,
+	gID_scriptBlocksWithIDs,
+	gID_speciesWithIDs,
+	gID_subpopulationsWithIDs,
 	gID_individualsWithPedigreeIDs,
+	gID_killIndividuals,
 	gID_mutationCounts,
 	gID_mutationCountsInGenomes,
 	gID_mutationFrequencies,
@@ -1091,22 +1316,25 @@ enum _SLiMGlobalStringID : int {
 	gID_registerFirstEvent,
 	gID_registerEarlyEvent,
 	gID_registerLateEvent,
-	gID_registerFitnessCallback,
+	gID_registerFitnessEffectCallback,
 	gID_registerInteractionCallback,
 	gID_registerMateChoiceCallback,
 	gID_registerModifyChildCallback,
 	gID_registerRecombinationCallback,
 	gID_registerMutationCallback,
+	gID_registerMutationEffectCallback,
 	gID_registerSurvivalCallback,
 	gID_registerReproductionCallback,
 	gID_rescheduleScriptBlock,
 	gID_simulationFinished,
+	gID_skipTick,
 	gID_subsetMutations,
 	gID_treeSeqCoalesced,
 	gID_treeSeqSimplify,
 	gID_treeSeqRememberIndividuals,
 	gID_treeSeqOutput,
 	gID_setMigrationRates,
+	gID_pointDeviated,
 	gID_pointInBounds,
 	gID_pointReflected,
 	gID_pointStopped,
@@ -1128,9 +1356,28 @@ enum _SLiMGlobalStringID : int {
 	gID_sampleIndividuals,
 	gID_subsetIndividuals,
 	gID_defineSpatialMap,
+	gID_addSpatialMap,
+	gID_removeSpatialMap,
 	gID_spatialMapColor,
 	gID_spatialMapImage,
 	gID_spatialMapValue,
+	gID_add,
+	gID_blend,
+	gID_multiply,
+	gID_subtract,
+	gID_divide,
+	gID_power,
+	gID_exp,
+	gID_changeColors,
+	gID_changeValues,
+	gID_gridValues,
+	gID_mapColor,
+	gID_mapImage,
+	gID_mapValue,
+	gID_rescale,
+	gID_sampleImprovedNearbyPoint,
+	gID_sampleNearbyPoint,
+	gID_smooth,
 	gID_outputMSSample,
 	gID_outputVCFSample,
 	gID_outputSample,
@@ -1143,8 +1390,10 @@ enum _SLiMGlobalStringID : int {
 	gID_localPopulationDensity,
 	gID_interactionDistance,
 	gID_clippedIntegral,
-	gID_distanceToPoint,
+	gID_distanceFromPoint,
 	gID_nearestNeighbors,
+	gID_neighborCount,
+	gID_neighborCountOfPoint,
 	gID_nearestInteractingNeighbors,
 	gID_interactingNeighborCount,
 	gID_nearestNeighborsOfPoint,
@@ -1154,6 +1403,7 @@ enum _SLiMGlobalStringID : int {
 	gID_unevaluate,
 	gID_drawByStrength,
 	
+	gID_community,
 	gID_sim,
 	gID_self,
 	gID_individual,
@@ -1165,25 +1415,19 @@ enum _SLiMGlobalStringID : int {
 	gID_sourceSubpop,
 	//gID_weights,		now gEidosID_weights
 	gID_child,
-	gID_childGenome1,
-	gID_childGenome2,
-	gID_childIsFemale,
 	gID_parent,
 	gID_parent1,
-	gID_parent1Genome1,
-	gID_parent1Genome2,
 	gID_isCloning,
 	gID_isSelfing,
 	gID_parent2,
-	gID_parent2Genome1,
-	gID_parent2Genome2,
 	gID_mut,
-	gID_relFitness,
+	gID_effect,
 	gID_homozygous,
 	gID_breakpoints,
 	gID_receiver,
 	gID_exerter,
 	gID_originalNuc,
+	gID_fitness,
 	gID_surviving,
 	gID_draw,
 	
@@ -1200,7 +1444,9 @@ enum _SLiMGlobalStringID : int {
 	//gID_Mutation,		// in Eidos; see EidosValue_Object::EidosValue_Object()
 	gID_MutationType,
 	gID_SLiMEidosBlock,
-	gID_SLiMSim,
+	gID_Community,
+	gID_SpatialMap,
+	gID_Species,
 	gID_Subpopulation,
 	gID_Individual,
 	gID_Substitution,
@@ -1213,17 +1459,21 @@ enum _SLiMGlobalStringID : int {
 	gID_logInterval,
 	gID_precision,
 	gID_addCustomColumn,
-	gID_addGeneration,
-	gID_addGenerationStage,
+	gID_addCycle,
+	gID_addCycleStage,
 	gID_addMeanSDColumns,
 	gID_addPopulationSexRatio,
 	gID_addPopulationSize,
 	gID_addSubpopulationSexRatio,
 	gID_addSubpopulationSize,
+	gID_addSuppliedColumn,
+	gID_addTick,
 	gID_flush,
 	gID_logRow,
 	gID_setLogInterval,
 	gID_setFilePath,
+	gID_setSuppliedValue,
+	gID_willAutolog,
 	gID_context,
 	
 	gID_A,
@@ -1234,13 +1484,19 @@ enum _SLiMGlobalStringID : int {
 	gID_e,
 	// gID_n,		now gEidosID_n
 	gID_w,
+	gID_p,
 	gID_l,
 	//gID_s,	now gEidosID_s
+	gID_species,
+	gID_ticks,
+	gID_speciesSpec,
+	gID_ticksSpec,
 	gID_first,
 	gID_early,
 	gID_late,
 	gID_initialize,
-	gID_fitness,
+	gID_fitnessEffect,
+	gID_mutationEffect,
 	gID_interaction,
 	gID_mateChoice,
 	gID_modifyChild,
@@ -1253,6 +1509,20 @@ enum _SLiMGlobalStringID : int {
 };
 
 static_assert((int)gID_LastSLiMEntry <= (int)gEidosID_LastContextEntry, "the Context's last EidosGlobalStringID is greater than Eidos's upper limit");
+
+
+// *******************************************************************************************************************
+//
+//	Profiling
+//
+#pragma mark -
+#pragma mark Profiling
+#pragma mark -
+
+#if (SLIMPROFILING == 1)
+void WriteProfileResults(std::string profile_output_path, std::string model_name, Community *community);
+#endif
+
 
 #endif /* defined(__SLiM__slim_globals__) */
 

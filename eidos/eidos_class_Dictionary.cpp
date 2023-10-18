@@ -3,7 +3,7 @@
 //  Eidos
 //
 //  Created by Ben Haller on 10/12/20.
-//  Copyright (c) 2020-2022 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2020-2023 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -31,6 +31,9 @@
 #include <string>
 
 
+int64_t gEidos_DictionaryNonRetainReleaseReferenceCounter = 0;
+
+
 //
 // EidosDictionaryUnretained
 //
@@ -38,82 +41,266 @@
 #pragma mark EidosDictionaryUnretained
 #pragma mark -
 
-void EidosDictionaryUnretained::KeyAddedToDictionary(const std::string &p_key)
+EidosDictionaryUnretained::~EidosDictionaryUnretained(void)
 {
-	if (!state_ptr_)
-		state_ptr_ = new EidosDictionaryState();
-	
-	std::vector<std::string> &sorted_keys = state_ptr_->sorted_keys_;
-	
-	auto iter = std::find(sorted_keys.begin(), sorted_keys.end(), p_key);
-	
-	if (iter == sorted_keys.end())
+	// maintain the global counter of dictionaries that contain non-retain-released objects
+	if (state_ptr_)
 	{
-		sorted_keys.emplace_back(p_key);
+		uint8_t contains = ((EidosDictionaryState_StringKeys *)state_ptr_)->contains_non_retain_release_objects_;
 		
-		// Dictionary keeps its keys in sorted order regardless of the order in which they are added
-		// Sorting every time would be painful with many keys, but we don't expect that...
-		std::sort(sorted_keys.begin(), sorted_keys.end());
+		if (contains)
+		{
+#pragma omp critical (EidosDictionary_Internal)
+			{
+				gEidos_DictionaryNonRetainReleaseReferenceCounter--;
+				
+				if (gEidos_DictionaryNonRetainReleaseReferenceCounter < 0)
+					EIDOS_TERMINATION << "ERROR (EidosDictionaryUnretained::~EidosDictionaryUnretained): (internal error) gEidos_DictionaryNonRetainReleaseReferenceCounter is negative" << EidosTerminate(nullptr);
+				
+				//std::cerr << "=== dictionary " << this << " INC   ->   " << gEidos_DictionaryNonRetainReleaseReferenceCounter << std::endl;
+			}
+		}
 	}
+	
+	// delete our internal state
+	if (state_ptr_)
+	{
+		if (KeysAreStrings())
+			delete (EidosDictionaryState_StringKeys *)state_ptr_;
+		else
+			delete (EidosDictionaryState_IntegerKeys *)state_ptr_;
+		
+		state_ptr_ = nullptr;
+	}
+}
+
+void EidosDictionaryUnretained::Raise_UsesStringKeys() const
+{
+	EIDOS_TERMINATION << "ERROR (EidosDictionaryUnretained::Raise_UsesStringKeys): the target Dictionary object is configured to use string keys; an integer key cannot be used." << EidosTerminate(nullptr);
+}
+
+void EidosDictionaryUnretained::Raise_UsesIntegerKeys() const
+{
+	EIDOS_TERMINATION << "ERROR (EidosDictionaryUnretained::Raise_UsesIntegerKeys): the target Dictionary object is configured to use integer keys; a string key cannot be used." << EidosTerminate(nullptr);
+}
+
+std::vector<std::string> EidosDictionaryUnretained::SortedKeys_StringKeys(void) const
+{
+	// Dictionary provides keys in sorted order, which is done on demand.  Many use cases
+	// never need the keys at all, or only once, so we do not maintain the keys sorted.
+	const EidosDictionaryHashTable_StringKeys *dict_symbols = DictionarySymbols_StringKeys();
+	
+	std::vector<std::string> string_keys;
+	
+	if (dict_symbols)
+	{
+		for (auto &iter : *dict_symbols)
+			string_keys.push_back(iter.first);
+		
+		std::sort(string_keys.begin(), string_keys.end());
+	}
+	
+	return string_keys;
+}
+
+std::vector<int64_t> EidosDictionaryUnretained::SortedKeys_IntegerKeys(void) const
+{
+	// Dictionary provides keys in sorted order, which is done on demand.  Many use cases
+	// never need the keys at all, or only once, so we do not maintain the keys sorted.
+	const EidosDictionaryHashTable_IntegerKeys *dict_symbols = DictionarySymbols_IntegerKeys();
+	
+	std::vector<int64_t> integer_keys;
+	
+	if (dict_symbols)
+	{
+		for (auto &iter : *dict_symbols)
+			integer_keys.push_back(iter.first);
+		
+		std::sort(integer_keys.begin(), integer_keys.end());
+	}
+	
+	return integer_keys;
+}
+
+void EidosDictionaryUnretained::KeyAddedToDictionary_StringKeys(__attribute__((unused)) const std::string &p_key)
+{
+	// Dictionary does not need to do any extra work when a key is added; this is for subclasses
+}
+
+void EidosDictionaryUnretained::KeyAddedToDictionary_IntegerKeys(__attribute__((unused)) int64_t p_key)
+{
+	// Dictionary does not need to do any extra work when a key is added; this is for subclasses
+}
+
+void EidosDictionaryUnretained::KeyRemovedFromDictionary_StringKeys(__attribute__((unused)) const std::string &p_key)
+{
+	// Dictionary does not need to do any extra work when a key is removed; this is for subclasses
+}
+
+void EidosDictionaryUnretained::KeyRemovedFromDictionary_IntegerKeys(__attribute__((unused)) int64_t p_key)
+{
+	// Dictionary does not need to do any extra work when a key is removed; this is for subclasses
+}
+
+void EidosDictionaryUnretained::AllKeysRemoved(void)
+{
+	// Dictionary does not need to do any extra work when a key is removed; this is for subclasses
 }
 
 void EidosDictionaryUnretained::ContentsChanged(const std::string &p_operation_name)
 {
-	// Check that SortedKeys matches DictionarySymbols().
-	const EidosDictionaryHashTable *symbols = DictionarySymbols();
-	
-	if (!symbols)
+	// Here we keep track of whether or not we contain any non-retain-release objects
+	// Note that we don't need to scan down into contained Dictionary objects;
+	// we retain them, and they will do their own checks of their own contents
+	if (!state_ptr_)
 		return;
 	
-	const std::vector<std::string> *keys = SortedKeys();
-	size_t symbols_count = symbols->size();
-	size_t keys_count = keys->size();
+	uint8_t old_contains = ((EidosDictionaryState_StringKeys *)state_ptr_)->contains_non_retain_release_objects_;
+	uint8_t new_contains = false;
 	
-	if (symbols_count != keys_count)
-		EIDOS_TERMINATION << "ERROR (EidosDataFrame::ContentsChanged): (internal error) DataFrame found key count mismatch after " << p_operation_name << "." << EidosTerminate(nullptr);
+	if (KeysAreStrings())
+	{
+		const EidosDictionaryHashTable_StringKeys *dict_symbols = DictionarySymbols_StringKeys();
+		
+		for (auto &iter : *dict_symbols)
+		{
+			EidosValue *value = iter.second.get();
+			
+			if ((value->Type() == EidosValueType::kValueObject) && (value->Count() > 0))
+			{
+				const EidosClass *value_class = ((EidosValue_Object *)value)->Class();
+				
+				if (!value_class->UsesRetainRelease())
+				{
+					new_contains = true;
+					break;
+				}
+			}
+		}
+	}
+	else
+	{
+		const EidosDictionaryHashTable_IntegerKeys *dict_symbols = DictionarySymbols_IntegerKeys();
+		
+		for (auto &iter : *dict_symbols)
+		{
+			EidosValue *value = iter.second.get();
+			
+			if ((value->Type() == EidosValueType::kValueObject) && (value->Count() > 0))
+			{
+				const EidosClass *value_class = ((EidosValue_Object *)value)->Class();
+				
+				if (!value_class->UsesRetainRelease())
+				{
+					new_contains = true;
+					break;
+				}
+			}
+		}
+	}
+	
+	if (old_contains != new_contains)
+	{
+		((EidosDictionaryState_StringKeys *)state_ptr_)->contains_non_retain_release_objects_ = new_contains;
+		
+#pragma omp critical (EidosDictionary_Internal)
+		{
+			if (new_contains)
+			{
+				gEidos_DictionaryNonRetainReleaseReferenceCounter++;
+				
+				//std::cerr << "=== dictionary " << this << " INC   ->   " << gEidos_DictionaryNonRetainReleaseReferenceCounter << std::endl;
+			}
+			else
+			{
+				gEidos_DictionaryNonRetainReleaseReferenceCounter--;
+				
+				if (gEidos_DictionaryNonRetainReleaseReferenceCounter < 0)
+					EIDOS_TERMINATION << "ERROR (EidosDictionaryUnretained::ContentsChanged): (internal error) gEidos_DictionaryNonRetainReleaseReferenceCounter is negative in operation " << p_operation_name << EidosTerminate(nullptr);
+				
+				//std::cerr << "   === dictionary " << this << " DEC   ->   " << gEidos_DictionaryNonRetainReleaseReferenceCounter << std::endl;
+			}
+		}
+	}
 }
 
 std::string EidosDictionaryUnretained::Serialization_SLiM(void) const
 {
 	// Loop through our key-value pairs and serialize them
-	const EidosDictionaryHashTable *symbols = DictionarySymbols();
-	
-	if (!symbols)
+	if (!state_ptr_)
 		return "";
 	
 	std::ostringstream ss;
 	
-	// We want to output our keys in the same order as allKeys, so we just use AllKeys()
-	EidosValue_SP all_keys = AllKeys();
-	EidosValue_String_vector *string_vec = dynamic_cast<EidosValue_String_vector *>(all_keys.get());
-	
-	if (!string_vec)
-		EIDOS_TERMINATION << "ERROR (EidosDictionaryUnretained::Serialization_SLiM): (internal error) allKeys did not return a string vector." << EidosTerminate(nullptr);
-	
-	const std::vector<std::string> *all_key_strings = string_vec->StringVector();
-	
-	for (const std::string &key : *all_key_strings)
+	if (KeysAreStrings())
 	{
-		// emit the key; quote the key string only if it contains characters that will make parsing difficult/ambiguous
-		EidosStringQuoting key_quoting = EidosStringQuoting::kNoQuotes;
+		// Serialize a dictionary with string keys
+		const EidosDictionaryHashTable_StringKeys *symbols = DictionarySymbols_StringKeys();
 		
-		if (key.find_first_of("\"\'\\\r\n\t =;") != std::string::npos)
-			key_quoting = EidosStringQuoting::kDoubleQuotes;		// if we use quotes, always use double quotes, for ease of parsing
+		// We want to output our keys in the same order as allKeys, so we just use AllKeys()
+		EidosValue_SP all_keys = AllKeys();
+		EidosValue_String_vector *string_vec = dynamic_cast<EidosValue_String_vector *>(all_keys.get());
 		
-		ss << Eidos_string_escaped(key, key_quoting) << "=";
+		if (!string_vec)
+			EIDOS_TERMINATION << "ERROR (EidosDictionaryUnretained::Serialization_SLiM): (internal error) allKeys did not return a string vector." << EidosTerminate(nullptr);
 		
-		// emit the value
-		auto hash_iter = symbols->find(key);
+		const std::vector<std::string> *all_key_strings = string_vec->StringVector();
 		
-		if (hash_iter == symbols->end())
+		for (const std::string &key : *all_key_strings)
 		{
-			// We assume that this is not an internal error, but is instead LogFile with a column that is NA;
-			// it returns all of its column names for AllKeys() even if they have NA as a value, so we play along
-			ss << "NA;";
+			// emit the key; note that we now always quote stringkeys, to distinguish them from the integer-key case easily
+			ss << Eidos_string_escaped(key, EidosStringQuoting::kDoubleQuotes) << "=";
+			
+			// emit the value
+			auto hash_iter = symbols->find(key);
+			
+			if (hash_iter == symbols->end())
+			{
+				// We assume that this is not an internal error, but is instead LogFile with a column that is NA;
+				// it returns all of its column names for AllKeys() even if they have NA as a value, so we play along
+				ss << "NA;";
+			}
+			else
+			{
+				ss << *(hash_iter->second) << ";";
+			}
 		}
-		else
+	}
+	else	// KeysAreIntegers()
+	{
+		// Serialize a dictionary with integer keys
+		const EidosDictionaryHashTable_IntegerKeys *symbols = DictionarySymbols_IntegerKeys();
+		
+		// We want to output our keys in the same order as allKeys, so we just use AllKeys()
+		EidosValue_SP all_keys = AllKeys();
+		EidosValue_Int_vector *integer_vec = dynamic_cast<EidosValue_Int_vector *>(all_keys.get());
+		
+		if (!integer_vec)
+			EIDOS_TERMINATION << "ERROR (EidosDictionaryUnretained::Serialization_SLiM): (internal error) allKeys did not return an integer vector." << EidosTerminate(nullptr);
+		
+		const int64_t *all_key_integers = integer_vec->data();
+		int all_keys_count = integer_vec->Count();
+		
+		for (int i = 0; i < all_keys_count; ++i)
 		{
-			ss << *(hash_iter->second) << ";";
+			int64_t key = all_key_integers[i];
+			
+			// emit the key
+			ss << key << "=";
+			
+			// emit the value
+			auto hash_iter = symbols->find(key);
+			
+			if (hash_iter == symbols->end())
+			{
+				// We assume that this is not an internal error, but is instead LogFile with a column that is NA;
+				// it returns all of its column names for AllKeys() even if they have NA as a value, so we play along
+				ss << "NA;";
+			}
+			else
+			{
+				ss << *(hash_iter->second) << ";";
+			}
 		}
 	}
 	
@@ -122,16 +309,36 @@ std::string EidosDictionaryUnretained::Serialization_SLiM(void) const
 
 EidosValue_SP EidosDictionaryUnretained::Serialization_CSV(std::string p_delimiter) const
 {
-	// Determine the longest column, and also generate our header string
-	const EidosDictionaryHashTable *symbols = DictionarySymbols();
-	const std::vector<std::string> *keys = SortedKeys();
-	int longest_col = 0;
-	
-	if (!symbols)
+	if (!state_ptr_)
 		return gStaticEidosValue_StringEmpty;
 	
-	for (auto const &kv_pair : *symbols)
-		longest_col = std::max(longest_col, kv_pair.second->Count());
+	// Determine the longest column, and also generate our header string
+	bool keysAreStrings = KeysAreStrings();
+	const EidosDictionaryHashTable_StringKeys *symbols_string = nullptr;
+	const EidosDictionaryHashTable_IntegerKeys *symbols_integer = nullptr;
+	std::vector<std::string> keys_string;
+	std::vector<int64_t> keys_integer;
+	size_t keys_count;
+	int longest_col = 0;
+	
+	if (keysAreStrings)
+	{
+		symbols_string = DictionarySymbols_StringKeys();
+		keys_string = SortedKeys_StringKeys();
+		keys_count = keys_string.size();
+		
+		for (auto const &kv_pair : *symbols_string)
+			longest_col = std::max(longest_col, kv_pair.second->Count());
+	}
+	else
+	{
+		symbols_integer = DictionarySymbols_IntegerKeys();
+		keys_integer = SortedKeys_IntegerKeys();
+		keys_count = keys_integer.size();
+		
+		for (auto const &kv_pair : *symbols_integer)
+			longest_col = std::max(longest_col, kv_pair.second->Count());
+	}
 	
 	// Make a string vector big enough for everything
 	int result_count = longest_col + 1;		// room for the header
@@ -143,13 +350,16 @@ EidosValue_SP EidosDictionaryUnretained::Serialization_CSV(std::string p_delimit
 		std::ostringstream ss;
 		bool first = true;
 		
-		for (const std::string &key : *keys)
+		for (size_t i = 0; i < keys_count; ++i)
 		{
 			if (!first)
 				ss << p_delimiter;
 			first = false;
 			
-			ss << Eidos_string_escaped_CSV(key);
+			if (keysAreStrings)
+				ss << Eidos_string_escaped_CSV(keys_string[i]);
+			else
+				ss << keys_integer[i];
 		}
 		
 		string_result->PushString(ss.str());
@@ -161,18 +371,32 @@ EidosValue_SP EidosDictionaryUnretained::Serialization_CSV(std::string p_delimit
 		std::ostringstream ss;
 		bool first = true;
 		
-		for (const std::string &key : *keys)
+		for (size_t i = 0; i < keys_count; ++i)
 		{
 			if (!first)
 				ss << p_delimiter;
 			first = false;
 			
-			auto col_iter = symbols->find(key);
+			EidosValue *value = nullptr;
 			
-			if (col_iter == symbols->end())
+			if (keysAreStrings)
+			{
+				auto col_iter = symbols_string->find(keys_string[i]);
+				
+				if (col_iter != symbols_string->end())
+					value = col_iter->second.get();
+			}
+			else
+			{
+				auto col_iter = symbols_integer->find(keys_integer[i]);
+				
+				if (col_iter != symbols_integer->end())
+					value = col_iter->second.get();
+			}
+			
+			if (!value)
 				EIDOS_TERMINATION << "ERROR (EidosDictionaryUnretained::Serialization_CSV): (internal error) column not found." << EidosTerminate(nullptr);
 			
-			EidosValue *value = col_iter->second.get();
 			int value_count = value->Count();
 			
 			// if a column has no value for this row, we just skip it (but with the delimiter we already emitted)
@@ -214,7 +438,10 @@ EidosValue_SP EidosDictionaryUnretained::Serialization_CSV(std::string p_delimit
 
 nlohmann::json EidosDictionaryUnretained::JSONRepresentation(void) const
 {
-	const EidosDictionaryHashTable *symbols = DictionarySymbols();
+	if (!KeysAreStrings())
+		EIDOS_TERMINATION << "ERROR (EidosDictionaryUnretained::JSONRepresentation): Dictionary does not support JSON serialization with integer keys, because JSON itself does not support integer keys." << EidosTerminate(nullptr);
+	
+	const EidosDictionaryHashTable_StringKeys *symbols = DictionarySymbols_StringKeys();
 	nlohmann::json json_object = nlohmann::json::object();
 	
 	// We want to output our keys in the same order as allKeys, so we just use AllKeys()
@@ -222,7 +449,7 @@ nlohmann::json EidosDictionaryUnretained::JSONRepresentation(void) const
 	EidosValue_String_vector *string_vec = dynamic_cast<EidosValue_String_vector *>(all_keys.get());
 	
 	if (!string_vec)
-		EIDOS_TERMINATION << "ERROR (EidosDictionaryUnretained::Serialization_SLiM): (internal error) allKeys did not return a string vector." << EidosTerminate(nullptr);
+		EIDOS_TERMINATION << "ERROR (EidosDictionaryUnretained::JSONRepresentation): (internal error) allKeys did not return a string vector." << EidosTerminate(nullptr);
 	
 	const std::vector<std::string> *all_key_strings = string_vec->StringVector();
 	
@@ -248,95 +475,246 @@ nlohmann::json EidosDictionaryUnretained::JSONRepresentation(void) const
 	return json_object;
 }
 
-void EidosDictionaryUnretained::SetKeyValue(const std::string &key, EidosValue_SP value)
+void EidosDictionaryUnretained::SetKeyValue_StringKeys(const std::string &key, EidosValue_SP value)
 {
+	AssertKeysAreStrings();
+	
+	EidosDictionaryState_StringKeys *state_ptr = (EidosDictionaryState_StringKeys *)state_ptr_;
 	EidosValueType value_type = value->Type();
 	
-	// Object values can only be remembered if their class is under retain/release, so that we have control over the object lifetime
-	// See also Eidos_ExecuteFunction_defineConstant() and Eidos_ExecuteFunction_defineGlobal(), which enforce the same rule
-	if (value_type == EidosValueType::kValueObject)
-	{
-		const EidosClass *value_class = ((EidosValue_Object *)value.get())->Class();
-		
-		if (!value_class->UsesRetainRelease())
-			EIDOS_TERMINATION << "ERROR (EidosDictionaryUnretained::SetKeyValue): Dictionary can only accept object classes that are under retain/release memory management internally; class " << value_class->ClassName() << " is not.  This restriction is necessary in order to guarantee that the kept object elements remain valid." << EidosTerminate(nullptr);
-	}
+	// BCH 2/12/2023: We now allow objects to be put into dictionaries whether they use retain-release or not,
+	// so we no longer check for that here.  See EidosDictionaryUnretained::ContentsChanged() and search for
+	// contains_non_retain_release_objects_ and gEidos_DictionaryNonRetainReleaseReferenceCounter.
 	
 	if (value_type == EidosValueType::kValueNULL)
 	{
 		// Setting a key to NULL removes it from the map; if we have no state, that is a no-op
-		if (state_ptr_)
+		if (state_ptr)
 		{
-			state_ptr_->dictionary_symbols_.erase(key);
-			
-			// Remove it from our sorted keys
-			auto iter = std::find(state_ptr_->sorted_keys_.begin(), state_ptr_->sorted_keys_.end(), key);
-			
-			if (iter != state_ptr_->sorted_keys_.end())
-				state_ptr_->sorted_keys_.erase(iter);
+			state_ptr->dictionary_symbols_.erase(key);
+			KeyRemovedFromDictionary_StringKeys(key);
 		}
 	}
 	else
 	{
-		if (!state_ptr_)
-			state_ptr_ = new EidosDictionaryState();
+		if (!state_ptr)
+		{
+			state_ptr = new EidosDictionaryState_StringKeys();
+			state_ptr->keys_are_integers_ = false;
+			state_ptr_ = state_ptr;
+		}
 		
 		// Copy if necessary; see ExecuteMethod_Accelerated_setValue() for comments
 		if ((value->UseCount() != 1) || value->Invisible())
 			value = value->CopyValues();
 		
-		state_ptr_->dictionary_symbols_[key] = value;
+		state_ptr->dictionary_symbols_[key] = value;
 		
 		// Add it to our sorted keys
-		KeyAddedToDictionary(key);
+		KeyAddedToDictionary_StringKeys(key);
+	}
+}
+
+void EidosDictionaryUnretained::SetKeyValue_IntegerKeys(int64_t key, EidosValue_SP value)
+{
+	AssertKeysAreIntegers();
+	
+	EidosDictionaryState_IntegerKeys *state_ptr = (EidosDictionaryState_IntegerKeys *)state_ptr_;
+	EidosValueType value_type = value->Type();
+	
+	// BCH 2/12/2023: We now allow objects to be put into dictionaries whether they use retain-release or not,
+	// so we no longer check for that here.  See EidosDictionaryUnretained::ContentsChanged() and search for
+	// contains_non_retain_release_objects_ and gEidos_DictionaryNonRetainReleaseReferenceCounter.
+	
+	if (value_type == EidosValueType::kValueNULL)
+	{
+		// Setting a key to NULL removes it from the map; if we have no state, that is a no-op
+		if (state_ptr)
+		{
+			state_ptr->dictionary_symbols_.erase(key);
+			KeyRemovedFromDictionary_IntegerKeys(key);
+		}
+	}
+	else
+	{
+		if (!state_ptr)
+		{
+			state_ptr = new EidosDictionaryState_IntegerKeys();
+			state_ptr->keys_are_integers_ = true;
+			state_ptr_ = state_ptr;
+		}
+		
+		// Copy if necessary; see ExecuteMethod_Accelerated_setValue() for comments
+		if ((value->UseCount() != 1) || value->Invisible())
+			value = value->CopyValues();
+		
+		state_ptr->dictionary_symbols_[key] = value;
+		
+		// Add it to our sorted keys
+		KeyAddedToDictionary_IntegerKeys(key);
+	}
+}
+
+EidosValue_SP EidosDictionaryUnretained::GetValueForKey_StringKeys(const std::string &key)
+{
+	// see also EidosDictionaryUnretained::ExecuteMethod_getValue()
+	AssertKeysAreStrings();
+	
+	const EidosDictionaryHashTable_StringKeys *symbols = DictionarySymbols_StringKeys();
+	
+	if (!symbols)
+		return gStaticEidosValueNULL;
+	
+	auto found_iter = symbols->find(key);
+	
+	if (found_iter == symbols->end())
+	{
+		return gStaticEidosValueNULL;
+	}
+	else
+	{
+		return found_iter->second;
+	}
+}
+
+EidosValue_SP EidosDictionaryUnretained::GetValueForKey_IntegerKeys(int64_t key)
+{
+	// see also EidosDictionaryUnretained::ExecuteMethod_getValue()
+	AssertKeysAreIntegers();
+	
+	const EidosDictionaryHashTable_IntegerKeys *symbols = DictionarySymbols_IntegerKeys();
+	
+	if (!symbols)
+		return gStaticEidosValueNULL;
+	
+	auto found_iter = symbols->find(key);
+	
+	if (found_iter == symbols->end())
+	{
+		return gStaticEidosValueNULL;
+	}
+	else
+	{
+		return found_iter->second;
 	}
 }
 
 EidosValue_SP EidosDictionaryUnretained::AllKeys(void) const
 {
-	const std::vector<std::string> *keys = SortedKeys();
-	int key_count = keys ? (int)keys->size() : 0;
-	
-	if (key_count == 0)
-		return gStaticEidosValue_String_ZeroVec;
-	
-	EidosValue_String_vector *string_result = (new (gEidosValuePool->AllocateChunk()) EidosValue_String_vector())->Reserve(key_count);
-	
-	for (const std::string &key : *keys)
-		string_result->PushString(key);
-	
-	return EidosValue_SP(string_result);
+	if (KeysAreStrings())
+	{
+		const std::vector<std::string> keys = SortedKeys_StringKeys();
+		int key_count = (int)keys.size();
+		
+		if (key_count == 0)
+			return gStaticEidosValue_String_ZeroVec;
+		
+		EidosValue_String_vector *string_result = (new (gEidosValuePool->AllocateChunk()) EidosValue_String_vector())->Reserve(key_count);
+		
+		for (const std::string &key : keys)
+			string_result->PushString(key);
+		
+		return EidosValue_SP(string_result);
+	}
+	else
+	{
+		const std::vector<int64_t> keys = SortedKeys_IntegerKeys();
+		int key_count = (int)keys.size();
+		
+		if (key_count == 0)
+			return gStaticEidosValue_Integer_ZeroVec;
+		
+		EidosValue_Int_vector *integer_result = (new (gEidosValuePool->AllocateChunk()) EidosValue_Int_vector())->reserve(key_count);
+		
+		for (int64_t key : keys)
+			integer_result->push_int_no_check(key);
+		
+		return EidosValue_SP(integer_result);
+	}
 }
 
 void EidosDictionaryUnretained::AddKeysAndValuesFrom(EidosDictionaryUnretained *p_source, bool p_allow_replace /* = true */)
 {
 	// Loop through the key-value pairs of source and add them
-	const EidosDictionaryHashTable *source_symbols = p_source->DictionarySymbols();
-	const std::vector<std::string> *source_keys = p_source->SortedKeys();
+	if (!p_source->state_ptr_)
+		return;
 	
-	if (source_symbols && source_symbols->size())
+	if (p_source->KeysAreStrings())
 	{
-		if (!state_ptr_)
-			state_ptr_ = new EidosDictionaryState();
+		AssertKeysAreStrings();
 		
-		for (const std::string &key : *source_keys)
+		const EidosDictionaryHashTable_StringKeys *source_symbols = p_source->DictionarySymbols_StringKeys();
+		const std::vector<std::string> source_keys = p_source->SortedKeys_StringKeys();
+		
+		if (source_symbols && source_symbols->size())
 		{
-			auto kv_pair = source_symbols->find(key);
-			const EidosValue_SP &value = kv_pair->second;
+			EidosDictionaryState_StringKeys *state_ptr = (EidosDictionaryState_StringKeys *)state_ptr_;
 			
-			if (!p_allow_replace)
+			if (!state_ptr)
 			{
-				// This is for DataFrame's -cbind(), which does not want to replace existing columns
-				auto check_iter = state_ptr_->dictionary_symbols_.find(key);
-				
-				if (check_iter != state_ptr_->dictionary_symbols_.end())
-					EIDOS_TERMINATION << "ERROR (EidosDictionaryUnretained::AddKeysAndValuesFrom): a column named '" << key << "' already exists." << EidosTerminate(nullptr);
+				state_ptr = new EidosDictionaryState_StringKeys();
+				state_ptr->keys_are_integers_ = false;
+				state_ptr_ = state_ptr;
 			}
 			
-			// always copy values here; unlike setValue(), we know the value is in use elsewhere
-			state_ptr_->dictionary_symbols_[key] = value->CopyValues();
+			for (const std::string &key : source_keys)
+			{
+				auto kv_pair = source_symbols->find(key);
+				const EidosValue_SP &value = kv_pair->second;
+				
+				if (!p_allow_replace)
+				{
+					// This is for DataFrame's -cbind(), which does not want to replace existing columns
+					auto check_iter = state_ptr->dictionary_symbols_.find(key);
+					
+					if (check_iter != state_ptr->dictionary_symbols_.end())
+						EIDOS_TERMINATION << "ERROR (EidosDictionaryUnretained::AddKeysAndValuesFrom): a column named '" << key << "' already exists." << EidosTerminate(nullptr);
+				}
+				
+				// always copy values here; unlike setValue(), we know the value is in use elsewhere
+				state_ptr->dictionary_symbols_[key] = value->CopyValues();
+				
+				KeyAddedToDictionary_StringKeys(key);
+			}
+		}
+	}
+	else	// p_source->KeysAreIntegers()
+	{
+		AssertKeysAreIntegers();
+		
+		const EidosDictionaryHashTable_IntegerKeys *source_symbols = p_source->DictionarySymbols_IntegerKeys();
+		const std::vector<int64_t> source_keys = p_source->SortedKeys_IntegerKeys();
+		
+		if (source_symbols && source_symbols->size())
+		{
+			EidosDictionaryState_IntegerKeys *state_ptr = (EidosDictionaryState_IntegerKeys *)state_ptr_;
 			
-			KeyAddedToDictionary(key);
+			if (!state_ptr)
+			{
+				state_ptr = new EidosDictionaryState_IntegerKeys();
+				state_ptr->keys_are_integers_ = true;
+				state_ptr_ = state_ptr;
+			}
+			
+			for (int64_t key : source_keys)
+			{
+				auto kv_pair = source_symbols->find(key);
+				const EidosValue_SP &value = kv_pair->second;
+				
+				if (!p_allow_replace)
+				{
+					// This is for DataFrame's -cbind(), which does not want to replace existing columns
+					auto check_iter = state_ptr->dictionary_symbols_.find(key);
+					
+					if (check_iter != state_ptr->dictionary_symbols_.end())
+						EIDOS_TERMINATION << "ERROR (EidosDictionaryUnretained::AddKeysAndValuesFrom): a column named " << key << " already exists." << EidosTerminate(nullptr);
+				}
+				
+				// always copy values here; unlike setValue(), we know the value is in use elsewhere
+				state_ptr->dictionary_symbols_[key] = value->CopyValues();
+				
+				KeyAddedToDictionary_IntegerKeys(key);
+			}
 		}
 	}
 }
@@ -347,44 +725,110 @@ void EidosDictionaryUnretained::AppendKeysAndValuesFrom(EidosDictionaryUnretaine
 	if (p_source == this)
 		EIDOS_TERMINATION << "ERROR (EidosDictionaryUnretained::AppendKeysAndValuesFrom): cannot append a Dictionary to itself." << EidosTerminate(nullptr);
 	
-	// Loop through the key-value pairs of source and add them
-	const EidosDictionaryHashTable *source_symbols = p_source->DictionarySymbols();
+	if (!p_source->state_ptr_)
+		return;
 	
-	if (source_symbols && source_symbols->size())
+	if (p_source->KeysAreStrings())
 	{
-		if (!state_ptr_)
-			state_ptr_ = new EidosDictionaryState();
+		AssertKeysAreStrings();
 		
-		const std::vector<std::string> *source_keys = p_source->SortedKeys();
-		const std::vector<std::string> *keys = SortedKeys();
+		// Loop through the key-value pairs of source and add them
+		const EidosDictionaryHashTable_StringKeys *source_symbols = p_source->DictionarySymbols_StringKeys();
 		
-		// This is for DataFrame's rbind(), which wants columns to match exactly (if any columns are already there)
-		if (p_require_column_match && keys->size() && (*keys != *source_keys))
-			EIDOS_TERMINATION << "ERROR (EidosDictionaryUnretained::AddKeysAndValuesFrom): the columns of the target do not match the columns of the dictionary being appended." << EidosTerminate(nullptr);
-		
-		for (const std::string &key : *source_keys)
+		if (source_symbols && source_symbols->size())
 		{
-			auto kv_pair = source_symbols->find(key);
-			const EidosValue_SP &keyvalue = kv_pair->second;
+			EidosDictionaryState_StringKeys *state_ptr = (EidosDictionaryState_StringKeys *)state_ptr_;
 			
-			auto found_iter = state_ptr_->dictionary_symbols_.find(key);
-			
-			if (found_iter == state_ptr_->dictionary_symbols_.end())
+			if (!state_ptr_)
 			{
-				// always copy values here; unlike setValue(), we know the value is in use elsewhere
-				state_ptr_->dictionary_symbols_[key] = keyvalue->CopyValues();
-				
-				KeyAddedToDictionary(key);
+				state_ptr = new EidosDictionaryState_StringKeys();
+				state_ptr->keys_are_integers_ = false;
+				state_ptr_ = state_ptr;
 			}
-			else
+			
+			const std::vector<std::string> source_keys = p_source->SortedKeys_StringKeys();
+			const std::vector<std::string> keys = SortedKeys_StringKeys();
+			
+			// This is for DataFrame's rbind(), which wants columns to match exactly (if any columns are already there)
+			if (p_require_column_match && keys.size() && (keys != source_keys))
+				EIDOS_TERMINATION << "ERROR (EidosDictionaryUnretained::AddKeysAndValuesFrom): the columns of the target do not match the columns of the dictionary being appended." << EidosTerminate(nullptr);
+			
+			for (const std::string &key : source_keys)
 			{
-				// we already have a value; append (which could be done in place, since we have sole ownership of our values,
-				// but at present we're not that smart, and it's complicated since our existing value might be a singleton)
-				EidosValue_SP existing_value = found_iter->second;
-				std::vector<EidosValue_SP> cat_args = {existing_value, keyvalue};
-				EidosValue_SP appended_value = ConcatenateEidosValues(cat_args, false, false);
+				auto kv_pair = source_symbols->find(key);
+				const EidosValue_SP &keyvalue = kv_pair->second;
 				
-				state_ptr_->dictionary_symbols_[key] = appended_value;
+				auto found_iter = state_ptr->dictionary_symbols_.find(key);
+				
+				if (found_iter == state_ptr->dictionary_symbols_.end())
+				{
+					// always copy values here; unlike setValue(), we know the value is in use elsewhere
+					state_ptr->dictionary_symbols_[key] = keyvalue->CopyValues();
+					
+					KeyAddedToDictionary_StringKeys(key);
+				}
+				else
+				{
+					// we already have a value; append (which could be done in place, since we have sole ownership of our values,
+					// but at present we're not that smart, and it's complicated since our existing value might be a singleton)
+					EidosValue_SP existing_value = found_iter->second;
+					std::vector<EidosValue_SP> cat_args = {existing_value, keyvalue};
+					EidosValue_SP appended_value = ConcatenateEidosValues(cat_args, false, false);
+					
+					state_ptr->dictionary_symbols_[key] = appended_value;
+				}
+			}
+		}
+	}
+	else
+	{
+		AssertKeysAreIntegers();
+		
+		// Loop through the key-value pairs of source and add them
+		const EidosDictionaryHashTable_IntegerKeys *source_symbols = p_source->DictionarySymbols_IntegerKeys();
+		
+		if (source_symbols && source_symbols->size())
+		{
+			EidosDictionaryState_IntegerKeys *state_ptr = (EidosDictionaryState_IntegerKeys *)state_ptr_;
+			
+			if (!state_ptr_)
+			{
+				state_ptr = new EidosDictionaryState_IntegerKeys();
+				state_ptr->keys_are_integers_ = true;
+				state_ptr_ = state_ptr;
+			}
+			
+			const std::vector<int64_t> source_keys = p_source->SortedKeys_IntegerKeys();
+			const std::vector<int64_t> keys = SortedKeys_IntegerKeys();
+			
+			// This is for DataFrame's rbind(), which wants columns to match exactly (if any columns are already there)
+			if (p_require_column_match && keys.size() && (keys != source_keys))
+				EIDOS_TERMINATION << "ERROR (EidosDictionaryUnretained::AddKeysAndValuesFrom): the columns of the target do not match the columns of the dictionary being appended." << EidosTerminate(nullptr);
+			
+			for (int64_t key : source_keys)
+			{
+				auto kv_pair = source_symbols->find(key);
+				const EidosValue_SP &keyvalue = kv_pair->second;
+				
+				auto found_iter = state_ptr->dictionary_symbols_.find(key);
+				
+				if (found_iter == state_ptr->dictionary_symbols_.end())
+				{
+					// always copy values here; unlike setValue(), we know the value is in use elsewhere
+					state_ptr->dictionary_symbols_[key] = keyvalue->CopyValues();
+					
+					KeyAddedToDictionary_IntegerKeys(key);
+				}
+				else
+				{
+					// we already have a value; append (which could be done in place, since we have sole ownership of our values,
+					// but at present we're not that smart, and it's complicated since our existing value might be a singleton)
+					EidosValue_SP existing_value = found_iter->second;
+					std::vector<EidosValue_SP> cat_args = {existing_value, keyvalue};
+					EidosValue_SP appended_value = ConcatenateEidosValues(cat_args, false, false);
+					
+					state_ptr->dictionary_symbols_[key] = appended_value;
+				}
 			}
 		}
 	}
@@ -392,6 +836,11 @@ void EidosDictionaryUnretained::AppendKeysAndValuesFrom(EidosDictionaryUnretaine
 
 void EidosDictionaryUnretained::AddJSONFrom(nlohmann::json &json)
 {
+	if (!KeysAreStrings())
+		EIDOS_TERMINATION << "ERROR (EidosDictionaryUnretained::AddJSONFrom): JSON objects can only be added to a dictionary that uses string keys, since JSON uses string keys." << EidosTerminate(nullptr);
+	
+	EidosDictionaryState_StringKeys *state_ptr = (EidosDictionaryState_StringKeys *)state_ptr_;
+	
 	// null at the top level indicates an empty dictionary, so we just return
 	if (!json.is_null())
 	{
@@ -401,8 +850,12 @@ void EidosDictionaryUnretained::AddJSONFrom(nlohmann::json &json)
 			// iterate over the key-value pairs in the "object"
 			for (auto &element : json.items())
 			{
-				if (!state_ptr_)
-					state_ptr_ = new EidosDictionaryState();
+				if (!state_ptr)
+				{
+					state_ptr = new EidosDictionaryState_StringKeys();
+					state_ptr->keys_are_integers_ = false;
+					state_ptr_ = state_ptr;
+				}
 				
 				std::string key = element.key();
 				auto &value = element.value();
@@ -413,33 +866,33 @@ void EidosDictionaryUnretained::AddJSONFrom(nlohmann::json &json)
 				if (value.is_null())
 				{
 					EidosDictionaryRetained *dictionary = new EidosDictionaryRetained();
-					state_ptr_->dictionary_symbols_[key] = EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Object_singleton(dictionary, gEidosDictionaryRetained_Class));
+					state_ptr->dictionary_symbols_[key] = EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Object_singleton(dictionary, gEidosDictionaryRetained_Class));
 				}
 				else if (value.is_boolean())
 				{
 					bool boolean_value = value;
-					state_ptr_->dictionary_symbols_[key] = (boolean_value ? gStaticEidosValue_LogicalT : gStaticEidosValue_LogicalF);
+					state_ptr->dictionary_symbols_[key] = (boolean_value ? gStaticEidosValue_LogicalT : gStaticEidosValue_LogicalF);
 				}
 				else if (value.is_string())
 				{
 					const std::string &string_value = value;
-					state_ptr_->dictionary_symbols_[key] = EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String_singleton(string_value));
+					state_ptr->dictionary_symbols_[key] = EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String_singleton(string_value));
 				}
 				else if (value.is_number_integer() || value.is_number_unsigned())
 				{
 					int64_t int_value = value;
-					state_ptr_->dictionary_symbols_[key] = EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Int_singleton(int_value));
+					state_ptr->dictionary_symbols_[key] = EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Int_singleton(int_value));
 				}
 				else if (value.is_number_float())
 				{
 					double float_value = value;
-					state_ptr_->dictionary_symbols_[key] = EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float_singleton(float_value));
+					state_ptr->dictionary_symbols_[key] = EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float_singleton(float_value));
 				}
 				else if (value.is_object())
 				{
 					EidosDictionaryRetained *dictionary = new EidosDictionaryRetained();
 					dictionary->AddJSONFrom(value);
-					state_ptr_->dictionary_symbols_[key] = EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Object_singleton(dictionary, gEidosDictionaryRetained_Class));
+					state_ptr->dictionary_symbols_[key] = EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Object_singleton(dictionary, gEidosDictionaryRetained_Class));
 				}
 				else if (value.is_array())
 				{
@@ -449,7 +902,7 @@ void EidosDictionaryUnretained::AddJSONFrom(nlohmann::json &json)
 					{
 						// We don't what type the empty vector is; we assume integer
 						// This means that empty vectors don't persist accurately through JSON; I see no solution
-						state_ptr_->dictionary_symbols_[key] = gStaticEidosValue_Integer_ZeroVec;
+						state_ptr->dictionary_symbols_[key] = gStaticEidosValue_Integer_ZeroVec;
 					}
 					else
 					{
@@ -484,7 +937,7 @@ void EidosDictionaryUnretained::AddJSONFrom(nlohmann::json &json)
 								int_value->set_int_no_check(int_element, element_index);
 							}
 							
-							state_ptr_->dictionary_symbols_[key] = EidosValue_SP(int_value);
+							state_ptr->dictionary_symbols_[key] = EidosValue_SP(int_value);
 						}
 						else if (array_type == nlohmann::json::value_t::number_float)
 						{
@@ -496,7 +949,7 @@ void EidosDictionaryUnretained::AddJSONFrom(nlohmann::json &json)
 								float_value->set_float_no_check(float_element, element_index);
 							}
 							
-							state_ptr_->dictionary_symbols_[key] = EidosValue_SP(float_value);
+							state_ptr->dictionary_symbols_[key] = EidosValue_SP(float_value);
 						}
 						else if (array_type == nlohmann::json::value_t::boolean)
 						{
@@ -508,7 +961,7 @@ void EidosDictionaryUnretained::AddJSONFrom(nlohmann::json &json)
 								logical_value->set_logical_no_check(boolean_element, element_index);
 							}
 							
-							state_ptr_->dictionary_symbols_[key] = EidosValue_SP(logical_value);
+							state_ptr->dictionary_symbols_[key] = EidosValue_SP(logical_value);
 						}
 						else if (array_type == nlohmann::json::value_t::string)
 						{
@@ -520,7 +973,7 @@ void EidosDictionaryUnretained::AddJSONFrom(nlohmann::json &json)
 								string_value->PushString(string_element);
 							}
 							
-							state_ptr_->dictionary_symbols_[key] = EidosValue_SP(string_value);
+							state_ptr->dictionary_symbols_[key] = EidosValue_SP(string_value);
 						}
 						else if (array_type == nlohmann::json::value_t::object)
 						{
@@ -531,10 +984,10 @@ void EidosDictionaryUnretained::AddJSONFrom(nlohmann::json &json)
 								EidosDictionaryRetained *element_dictionary = new EidosDictionaryRetained();
 								if (value[element_index].type() == nlohmann::json::value_t::object)
 									element_dictionary->AddJSONFrom(value[element_index]);
-								object_value->push_object_element_NORR(element_dictionary);
+								object_value->push_object_element_RR(element_dictionary);
 							}
 							
-							state_ptr_->dictionary_symbols_[key] = EidosValue_SP(object_value);
+							state_ptr->dictionary_symbols_[key] = EidosValue_SP(object_value);
 						}
 						else
 						{
@@ -547,7 +1000,7 @@ void EidosDictionaryUnretained::AddJSONFrom(nlohmann::json &json)
 					EIDOS_TERMINATION << "ERROR (EidosDictionaryUnretained::AddJSONFrom): unsupported value type \"" << value.type_name() << "\" in AddJSONFrom()." << EidosTerminate(nullptr);
 				}
 				
-				KeyAddedToDictionary(key);
+				KeyAddedToDictionary_StringKeys(key);
 			}
 		}
 		else
@@ -607,6 +1060,7 @@ EidosValue_SP EidosDictionaryUnretained::ExecuteInstanceMethod(EidosGlobalString
 		case gEidosID_addKeysAndValuesFrom:		return ExecuteMethod_addKeysAndValuesFrom(p_method_id, p_arguments, p_interpreter);
 		case gEidosID_appendKeysAndValuesFrom:	return ExecuteMethod_appendKeysAndValuesFrom(p_method_id, p_arguments, p_interpreter);
 		case gEidosID_clearKeysAndValues:		return ExecuteMethod_clearKeysAndValues(p_method_id, p_arguments, p_interpreter);
+		case gEidosID_compactIndices:			return ExecuteMethod_compactIndices(p_method_id, p_arguments, p_interpreter);
 		case gEidosID_getRowValues:				return ExecuteMethod_getRowValues(p_method_id, p_arguments, p_interpreter);
 		case gEidosID_getValue:					return ExecuteMethod_getValue(p_method_id, p_arguments, p_interpreter);
 		case gEidosID_identicalContents:		return ExecuteMethod_identicalContents(p_method_id, p_arguments, p_interpreter);
@@ -677,6 +1131,82 @@ EidosValue_SP EidosDictionaryUnretained::ExecuteMethod_clearKeysAndValues(EidosG
 	return gStaticEidosValueVOID;
 }
 
+//	*********************	- (integer)compactIndices([logical$ preserveOrder = F])
+//
+EidosValue_SP EidosDictionaryUnretained::ExecuteMethod_compactIndices(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter)
+{
+#pragma unused (p_method_id, p_interpreter)
+	EidosValue *preserveOrder_value = p_arguments[0].get();
+	bool preserveOrder = preserveOrder_value->LogicalAtIndex(0, nullptr);
+	
+	if (!KeysAreIntegers())
+		EIDOS_TERMINATION << "ERROR (EidosDictionaryUnretained::ExecuteMethod_compactIndices): compactIndices() can only be called on a dictionary that uses integer keys." << EidosTerminate(nullptr);
+	
+	if (KeyCount() == 0)
+		return gStaticEidosValue_Integer_ZeroVec;
+	
+	EidosDictionaryState_IntegerKeys *state_ptr = (EidosDictionaryState_IntegerKeys *)state_ptr_;
+	EidosDictionaryHashTable_IntegerKeys &symbols = state_ptr->dictionary_symbols_;
+	size_t key_count = symbols.size();
+	EidosValue_Int_vector *integer_result = (new (gEidosValuePool->AllocateChunk()) EidosValue_Int_vector())->reserve(key_count);
+	std::vector<EidosValue_SP> compacted_values;
+	
+	if (preserveOrder)
+	{
+		// to preserve the original order, we have to iterate through the 
+		// sorted keys; that makes the algorithm O(n log n)
+		const std::vector<int64_t> keys = SortedKeys_IntegerKeys();
+		
+		for (int64_t key : keys)
+		{
+			auto kv_pair = symbols.find(key);
+			
+			if (kv_pair == symbols.end())
+				EIDOS_TERMINATION << "ERROR (EidosDictionaryUnretained::ExecuteMethod_compactIndices): (internal error) key not found in symbols." << EidosTerminate(nullptr);
+			
+			EidosValue *value = kv_pair->second.get();
+			
+			if (value->Count() > 0)
+			{
+				integer_result->push_int_no_check(key);
+				compacted_values.push_back(kv_pair->second);
+			}
+		}
+	}
+	else
+	{
+		// if we don't need to preserve the order, we can do it in O(n)
+		for (auto &iter : symbols)
+		{
+			int64_t key = iter.first;
+			EidosValue *value = iter.second.get();
+			
+			if (value->Count() > 0)
+			{
+				integer_result->push_int_no_check(key);
+				compacted_values.push_back(iter.second);
+			}
+		}
+	}
+	
+	// clear our contents and then copy the compacted values back in
+	symbols.clear();
+	
+	int64_t value_count = (int64_t)compacted_values.size();
+	
+	for (int64_t index = 0; index < value_count; ++index)
+	{
+		symbols[index] = std::move(compacted_values[index]);
+		
+		// KeyAddedToDictionary_IntegerKeys() is not needed; for us it is a no-op,
+		// and DataFrame doesn't support integer keys
+	}
+	
+	ContentsChanged("compactIndices()");
+	
+	return EidosValue_SP(integer_result);
+}
+
 //	*********************	- (object<Dictionary>$)getRowValues(li index, [logical$ drop = F])
 //
 EidosValue_SP EidosDictionaryUnretained::ExecuteMethod_getRowValues(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter)
@@ -690,9 +1220,7 @@ EidosValue_SP EidosDictionaryUnretained::ExecuteMethod_getRowValues(EidosGlobalS
 	result_SP = EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Object_singleton(objectElement, gEidosDictionaryRetained_Class));
 	
 	// With no columns, the indices don't matter, and the result is a new empty dictionary
-	const EidosDictionaryHashTable *symbols = DictionarySymbols();
-	
-	if (!symbols || (symbols->size() == 0))
+	if (KeyCount() == 0)
 	{
 		// objectElement is now retained by result_SP, so we can release it
 		objectElement->Release();
@@ -702,20 +1230,43 @@ EidosValue_SP EidosDictionaryUnretained::ExecuteMethod_getRowValues(EidosGlobalS
 	
 	// Otherwise, we subset to get the result value for each key we contain
 	// We go through the keys in sorted order, which probably doesn't matter since we're making a Dictionary, but it follows EidosDataFrame::ExecuteMethod_subsetRows()
-	const std::vector<std::string> *keys = SortedKeys();
-	bool drop = drop_value->LogicalAtIndex(0, nullptr);
-	
-	for (const std::string &key : *keys)
+	if (KeysAreStrings())
 	{
-		auto kv_pair = symbols->find(key);
+		const EidosDictionaryHashTable_StringKeys *symbols = DictionarySymbols_StringKeys();
+		const std::vector<std::string> keys = SortedKeys_StringKeys();
+		bool drop = drop_value->LogicalAtIndex(0, nullptr);
 		
-		if (kv_pair == symbols->end())
-			EIDOS_TERMINATION << "ERROR (EidosDictionaryUnretained::ExecuteMethod_getRowValues): (internal error) key not found in symbols." << EidosTerminate(nullptr);
+		for (const std::string &key : keys)
+		{
+			auto kv_pair = symbols->find(key);
+			
+			if (kv_pair == symbols->end())
+				EIDOS_TERMINATION << "ERROR (EidosDictionaryUnretained::ExecuteMethod_getRowValues): (internal error) key not found in symbols." << EidosTerminate(nullptr);
+			
+			EidosValue_SP subset = SubsetEidosValue(kv_pair->second.get(), index_value, nullptr, /* p_raise_range_errors */ false);
+			
+			if (!drop || subset->Count())
+				objectElement->SetKeyValue_StringKeys(kv_pair->first, subset);
+		}
+	}
+	else	// KeysAreIntegers()
+	{
+		const EidosDictionaryHashTable_IntegerKeys *symbols = DictionarySymbols_IntegerKeys();
+		const std::vector<int64_t> keys = SortedKeys_IntegerKeys();
+		bool drop = drop_value->LogicalAtIndex(0, nullptr);
 		
-		EidosValue_SP subset = SubsetEidosValue(kv_pair->second.get(), index_value, nullptr, /* p_raise_range_errors */ false);
-		
-		if (!drop || subset->Count())
-			objectElement->SetKeyValue(kv_pair->first, subset);
+		for (int64_t key : keys)
+		{
+			auto kv_pair = symbols->find(key);
+			
+			if (kv_pair == symbols->end())
+				EIDOS_TERMINATION << "ERROR (EidosDictionaryUnretained::ExecuteMethod_getRowValues): (internal error) key not found in symbols." << EidosTerminate(nullptr);
+			
+			EidosValue_SP subset = SubsetEidosValue(kv_pair->second.get(), index_value, nullptr, /* p_raise_range_errors */ false);
+			
+			if (!drop || subset->Count())
+				objectElement->SetKeyValue_IntegerKeys(kv_pair->first, subset);
+		}
 	}
 	
 	objectElement->ContentsChanged("getRowValues()");
@@ -726,27 +1277,46 @@ EidosValue_SP EidosDictionaryUnretained::ExecuteMethod_getRowValues(EidosGlobalS
 	return result_SP;
 }
 
-//	*********************	- (*)getValue(string$ key)
+//	*********************	- (*)getValue(is$ key)
 //
 EidosValue_SP EidosDictionaryUnretained::ExecuteMethod_getValue(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter)
 {
 #pragma unused (p_method_id, p_arguments, p_interpreter)
-	EidosValue_String *key_value = (EidosValue_String *)p_arguments[0].get();
-	const std::string &key = key_value->StringRefAtIndex(0, nullptr);
-	const EidosDictionaryHashTable *symbols = DictionarySymbols();
+	EidosValue *key_value = p_arguments[0].get();
 	
-	if (!symbols)
+	// see also EidosDictionaryUnretained::GetValueForKey()
+	if (!state_ptr_)
 		return gStaticEidosValueNULL;
 	
-	auto found_iter = symbols->find(key);
-	
-	if (found_iter == symbols->end())
+	if (KeysAreStrings())
 	{
-		return gStaticEidosValueNULL;
+		if (key_value->Type() != EidosValueType::kValueString)
+			EIDOS_TERMINATION << "ERROR (EidosDictionaryUnretained::ExecuteMethod_getValue): an integer key was supplied to getValue(), but the target dictionary uses string keys." << EidosTerminate(nullptr);
+		
+		const std::string &key = ((EidosValue_String *)key_value)->StringRefAtIndex(0, nullptr);
+		const EidosDictionaryHashTable_StringKeys *symbols = DictionarySymbols_StringKeys();
+		
+		auto found_iter = symbols->find(key);
+		
+		if (found_iter == symbols->end())
+			return gStaticEidosValueNULL;
+		else
+			return found_iter->second;
 	}
-	else
+	else	// KeysAreIntegers()
 	{
-		return found_iter->second;
+		if (key_value->Type() != EidosValueType::kValueInt)
+			EIDOS_TERMINATION << "ERROR (EidosDictionaryUnretained::ExecuteMethod_getValue): a string key was supplied to getValue(), but the target dictionary uses integer keys." << EidosTerminate(nullptr);
+		
+		int64_t key = ((EidosValue_Int *)key_value)->IntAtIndex(0, nullptr);
+		const EidosDictionaryHashTable_IntegerKeys *symbols = DictionarySymbols_IntegerKeys();
+		
+		auto found_iter = symbols->find(key);
+		
+		if (found_iter == symbols->end())
+			return gStaticEidosValueNULL;
+		else
+			return found_iter->second;
 	}
 }
 
@@ -762,6 +1332,10 @@ EidosValue_SP EidosDictionaryUnretained::ExecuteMethod_identicalContents(EidosGl
 	if (!x_dict)
 		return gStaticEidosValue_LogicalF;
 	
+	if ((KeysAreStrings() && !x_dict->KeysAreStrings()) ||
+		(KeysAreIntegers() && !x_dict->KeysAreIntegers()))
+		return gStaticEidosValue_LogicalF;
+	
 	int keycount = KeyCount();
 	int x_keycount = x_dict->KeyCount();
 	
@@ -774,42 +1348,76 @@ EidosValue_SP EidosDictionaryUnretained::ExecuteMethod_identicalContents(EidosGl
 	// At this point we know that x is a dictionary, with the same (non-zero) number of keys as us
 	// For DataFrame we now ensure the columns are in the same order; for Dictionary, keys are
 	// in sorted order, so this just compares to check that the keys are equal.
-	const std::vector<std::string> *x_keys = x_dict->SortedKeys();
-	const std::vector<std::string> *keys = SortedKeys();
-	
-	if (*x_keys != *keys)
-		return gStaticEidosValue_LogicalF;
+	if (KeysAreStrings())
+	{
+		const std::vector<std::string> x_keys = x_dict->SortedKeys_StringKeys();
+		const std::vector<std::string> keys = SortedKeys_StringKeys();
+		
+		if (x_keys != keys)
+			return gStaticEidosValue_LogicalF;
+	}
+	else	// KeysAreIntegers()
+	{
+		const std::vector<int64_t> x_keys = x_dict->SortedKeys_IntegerKeys();
+		const std::vector<int64_t> keys = SortedKeys_IntegerKeys();
+		
+		if (x_keys != keys)
+			return gStaticEidosValue_LogicalF;
+	}
 	
 	// Now we know it has the same keys in the same order
-	const EidosDictionaryHashTable *x_symbols = x_dict->DictionarySymbols();
-	const EidosDictionaryHashTable *symbols = DictionarySymbols();
-	
-	for (auto const &kv_pair : *symbols)
+	if (KeysAreStrings())
 	{
-		const std::string &key = kv_pair.first;
-		EidosValue *value = kv_pair.second.get();
+		const EidosDictionaryHashTable_StringKeys *x_symbols = x_dict->DictionarySymbols_StringKeys();
+		const EidosDictionaryHashTable_StringKeys *symbols = DictionarySymbols_StringKeys();
 		
-		auto found_iter = x_symbols->find(key);
+		for (auto const &kv_pair : *symbols)
+		{
+			const std::string &key = kv_pair.first;
+			EidosValue *value = kv_pair.second.get();
+			
+			auto found_iter = x_symbols->find(key);
+			
+			if (found_iter == x_symbols->end())
+				return gStaticEidosValue_LogicalF;
+			
+			EidosValue *found_value = found_iter->second.get();
+			
+			if (!IdenticalEidosValues(value, found_value))
+				return gStaticEidosValue_LogicalF;
+		}
+	}
+	else	// KeysAreIntegers()
+	{
+		const EidosDictionaryHashTable_IntegerKeys *x_symbols = x_dict->DictionarySymbols_IntegerKeys();
+		const EidosDictionaryHashTable_IntegerKeys *symbols = DictionarySymbols_IntegerKeys();
 		
-		if (found_iter == x_symbols->end())
-			return gStaticEidosValue_LogicalF;
-		
-		EidosValue *found_value = found_iter->second.get();
-		
-		if (!IdenticalEidosValues(value, found_value))
-			return gStaticEidosValue_LogicalF;
+		for (auto const &kv_pair : *symbols)
+		{
+			int64_t key = kv_pair.first;
+			EidosValue *value = kv_pair.second.get();
+			
+			auto found_iter = x_symbols->find(key);
+			
+			if (found_iter == x_symbols->end())
+				return gStaticEidosValue_LogicalF;
+			
+			EidosValue *found_value = found_iter->second.get();
+			
+			if (!IdenticalEidosValues(value, found_value))
+				return gStaticEidosValue_LogicalF;
+		}
 	}
 	
 	return gStaticEidosValue_LogicalT;
 }
 
-//	*********************	- (void)setValue(string$ key, * value)
+//	*********************	- (void)setValue(is$ key, * value)
 //
 EidosValue_SP EidosDictionaryUnretained::ExecuteMethod_Accelerated_setValue(EidosObject **p_elements, size_t p_elements_size, EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter)
 {
 #pragma unused (p_method_id, p_arguments, p_interpreter)
-	EidosValue_String *key_value = (EidosValue_String *)p_arguments[0].get();
-	const std::string &key = key_value->StringRefAtIndex(0, nullptr);
+	EidosValue *key_value = p_arguments[0].get();
 	EidosValue_SP value = p_arguments[1];
 	
 	for (size_t element_index = 0; element_index < p_elements_size; ++element_index)
@@ -818,7 +1426,19 @@ EidosValue_SP EidosDictionaryUnretained::ExecuteMethod_Accelerated_setValue(Eido
 		
 		// This method used to not call SetKeyValue(), in order to set the same value across multiple
 		// targets.  That made me nervous, and was hard to reconcile with DataFrame, so I removed it.
-		element->SetKeyValue(key, value);
+		if (key_value->Type() == EidosValueType::kValueString)
+		{
+			const std::string &key = ((EidosValue_String *)key_value)->StringRefAtIndex(0, nullptr);
+			
+			element->SetKeyValue_StringKeys(key, value);
+		}
+		else
+		{
+			int64_t key = ((EidosValue_Int *)key_value)->IntAtIndex(0, nullptr);
+			
+			element->SetKeyValue_IntegerKeys(key, value);
+		}
+		
 		element->ContentsChanged("setValue()");
 	}
 	
@@ -875,9 +1495,11 @@ const std::vector<EidosPropertySignature_CSP> *EidosDictionaryUnretained_Class::
 	
 	if (!properties)
 	{
+		THREAD_SAFETY_IN_ANY_PARALLEL("EidosDictionaryUnretained_Class::Properties(): not warmed up");
+		
 		properties = new std::vector<EidosPropertySignature_CSP>(*super::Properties());
 		
-		properties->emplace_back((EidosPropertySignature *)(new EidosPropertySignature(gEidosStr_allKeys,				true,	kEidosValueMaskString)));
+		properties->emplace_back((EidosPropertySignature *)(new EidosPropertySignature(gEidosStr_allKeys,				true,	kEidosValueMaskInt | kEidosValueMaskString)));
 		
 		std::sort(properties->begin(), properties->end(), CompareEidosPropertySignatures);
 	}
@@ -891,16 +1513,19 @@ const std::vector<EidosMethodSignature_CSP> *EidosDictionaryUnretained_Class::Me
 	
 	if (!methods)
 	{
+		THREAD_SAFETY_IN_ANY_PARALLEL("EidosDictionaryUnretained_Class::Methods(): not warmed up");
+		
 		methods = new std::vector<EidosMethodSignature_CSP>(*super::Methods());
 		
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gEidosStr_addKeysAndValuesFrom, kEidosValueMaskVOID))->AddObject_S(gEidosStr_source, nullptr));
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gEidosStr_appendKeysAndValuesFrom, kEidosValueMaskVOID))->AddObject(gEidosStr_source, nullptr));
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gEidosStr_clearKeysAndValues, kEidosValueMaskVOID)));
+		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gEidosStr_compactIndices, kEidosValueMaskInt, gEidosDictionaryRetained_Class))->AddLogical_OS("preserveOrder", gStaticEidosValue_LogicalF));
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gEidosStr_getRowValues, kEidosValueMaskObject | kEidosValueMaskSingleton, gEidosDictionaryRetained_Class))->AddArg(kEidosValueMaskLogical | kEidosValueMaskInt, "index", nullptr)->AddLogical_OS("drop", gStaticEidosValue_LogicalF));
-		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gEidosStr_getValue, kEidosValueMaskAny))->AddString_S("key"));
+		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gEidosStr_getValue, kEidosValueMaskAny))->AddArg(kEidosValueMaskInt | kEidosValueMaskString | kEidosValueMaskSingleton, "key", nullptr));
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gEidosStr_identicalContents, kEidosValueMaskLogical | kEidosValueMaskSingleton))->AddObject_S("x", nullptr));
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gEidosStr_serialize, kEidosValueMaskString))->AddString_OS("format", EidosValue_String_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String_singleton("slim"))));
-		methods->emplace_back(((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gEidosStr_setValue, kEidosValueMaskVOID))->AddString_S("key")->AddAny("value"))->DeclareAcceleratedImp(EidosDictionaryUnretained::ExecuteMethod_Accelerated_setValue));
+		methods->emplace_back(((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gEidosStr_setValue, kEidosValueMaskVOID))->AddArg(kEidosValueMaskInt | kEidosValueMaskString | kEidosValueMaskSingleton, "key", nullptr)->AddAny("value"))->DeclareAcceleratedImp(EidosDictionaryUnretained::ExecuteMethod_Accelerated_setValue));
 		
 		std::sort(methods->begin(), methods->end(), CompareEidosCallSignatures);
 	}
@@ -990,12 +1615,26 @@ void EidosDictionaryRetained::ConstructFromEidos(const std::vector<EidosValue_SP
 		{
 			EidosValue *key = p_arguments[kv_index * 2].get();
 			EidosValue_SP value = p_arguments[kv_index * 2 + 1];
-			EidosValue_String *key_string_value = dynamic_cast<EidosValue_String *>(key);
 			
-			if ((key->Count() != 1) || !key_string_value)
-				EIDOS_TERMINATION << "ERROR (" << p_caller_name << "): " << p_constructor_name << " requires that keys be singleton strings." << EidosTerminate(nullptr);
+			if (key->Count() != 1)
+				EIDOS_TERMINATION << "ERROR (" << p_caller_name << "): " << p_constructor_name << " requires that keys be singletons." << EidosTerminate(nullptr);
 			
-			SetKeyValue(key_string_value->StringRefAtIndex(0, nullptr), value);
+			if (key->Type() == EidosValueType::kValueString)
+			{
+				EidosValue_String *key_string_value = (EidosValue_String *)key;
+				
+				SetKeyValue_StringKeys(key_string_value->StringRefAtIndex(0, nullptr), value);
+			}
+			else if (key->Type() == EidosValueType::kValueInt)
+			{
+				EidosValue_Int *key_integer_value = (EidosValue_Int *)key;
+				
+				SetKeyValue_IntegerKeys(key_integer_value->IntAtIndex(0, nullptr), value);
+			}
+			else
+			{
+				EIDOS_TERMINATION << "ERROR (" << p_caller_name << "): " << p_constructor_name << " requires that keys be of type string or integer." << EidosTerminate(nullptr);
+			}
 		}
 	}
 	
@@ -1049,6 +1688,8 @@ const std::vector<EidosFunctionSignature_CSP> *EidosDictionaryRetained_Class::Fu
 	
 	if (!functions)
 	{
+		THREAD_SAFETY_IN_ANY_PARALLEL("EidosDictionaryRetained_Class::Functions(): not warmed up");
+		
 		// Note there is no call to super, the way there is for methods and properties; functions are not inherited!
 		functions = new std::vector<EidosFunctionSignature_CSP>;
 		

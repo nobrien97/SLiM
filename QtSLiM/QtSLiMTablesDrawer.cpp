@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 2/22/2020.
-//  Copyright (c) 2020-2022 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2020-2023 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -38,6 +38,8 @@
 #include "mutation_type.h"
 #include "interaction_type.h"
 #include "eidos_rng.h"
+
+#include <ctime>
 
 
 // a helper function for making the tooltip images in the mutation and interaction type tables
@@ -77,16 +79,21 @@ static QImage imageForMutationOrInteractionType(MutationType *mut_type, Interact
 		// Draw all the values we will plot; we need our own private RNG so we don't screw up the simulation's.
 		// Drawing selection coefficients could raise, if they are type "s" and there is an error in the script,
 		// so we run the sampling inside a try/catch block; if we get a raise, we just show a "?" in the plot.
+		static bool rng_initialized = false;
 		static Eidos_RNG_State local_rng;
 		
 		sample_size = (mut_type->dfe_type_ == DFEType::kScript) ? 100000 : 1000000;	// large enough to make curves pretty smooth, small enough to be reasonably fast
 		draws.reserve(sample_size);
 		
-		std::swap(local_rng, gEidos_RNG);	// swap in our local RNG
+		if (!rng_initialized)
+		{
+			_Eidos_InitializeOneRNG(local_rng);
+			rng_initialized = true;
+		}
 		
-		if (!EIDOS_GSL_RNG)
-			Eidos_InitializeRNG();
-		Eidos_SetRNGSeed(10);		// arbitrary seed, but the same seed every time
+		_Eidos_SetOneRNGSeed(local_rng, 10);		// arbitrary seed, but the same seed every time
+		
+		std::swap(local_rng, gEidos_RNG_SINGLE);	// swap in our local RNG for DrawSelectionCoefficient()
 		
 		//std::clock_t start = std::clock();
 		
@@ -111,7 +118,7 @@ static QImage imageForMutationOrInteractionType(MutationType *mut_type, Interact
 		
 		//NSLog(@"Draws took %f seconds", (std::clock() - start) / (double)CLOCKS_PER_SEC);
 		
-		std::swap(local_rng, gEidos_RNG);	// swap out our local RNG; restore the standard RNG
+		std::swap(local_rng, gEidos_RNG_SINGLE);	// swap out our local RNG; restore the standard RNG
 		
 		// figure out axis limits
 		if (draw_negative && !draw_positive)
@@ -408,7 +415,7 @@ void QtSLiMTablesDrawer::initializeUI(void)
     {
         QHeaderView *mutTypeTableHHeader = configureTableView(ui->mutationTypeTable);
         
-        mutTypeTableHHeader->resizeSection(0, 43);
+        mutTypeTableHHeader->resizeSection(0, 53);
         mutTypeTableHHeader->resizeSection(1, 43);
         mutTypeTableHHeader->resizeSection(2, 53);
         //mutTypeTableHHeader->resizeSection(3, ?);
@@ -423,7 +430,7 @@ void QtSLiMTablesDrawer::initializeUI(void)
     {
         QHeaderView *geTypeTableHHeader = configureTableView(ui->genomicElementTypeTable);
         
-        geTypeTableHHeader->resizeSection(0, 43);
+        geTypeTableHHeader->resizeSection(0, 53);
         geTypeTableHHeader->resizeSection(1, 43);
         //geTypeTableHHeader->resizeSection(2, ?);
         geTypeTableHHeader->setSectionResizeMode(0, QHeaderView::Fixed);
@@ -436,7 +443,7 @@ void QtSLiMTablesDrawer::initializeUI(void)
     {
         QHeaderView *interactionTypeTableHHeader = configureTableView(ui->interactionTypeTable);
         
-        interactionTypeTableHHeader->resizeSection(0, 43);
+        interactionTypeTableHHeader->resizeSection(0, 53);
         interactionTypeTableHHeader->resizeSection(1, 43);
         interactionTypeTableHHeader->resizeSection(2, 53);
         //interactionTypeTableHHeader->resizeSection(3, ?);
@@ -451,7 +458,7 @@ void QtSLiMTablesDrawer::initializeUI(void)
     {
         QHeaderView *eidosBlockTableHHeader = configureTableView(ui->eidosBlockTable);
         
-        eidosBlockTableHHeader->resizeSection(0, 43);
+        eidosBlockTableHHeader->resizeSection(0, 53);
         eidosBlockTableHHeader->resizeSection(1, 63);
         eidosBlockTableHHeader->resizeSection(2, 63);
         //eidosBlockTableHHeader->resizeSection(3, ?);
@@ -493,9 +500,10 @@ QtSLiMMutTypeTableModel::~QtSLiMMutTypeTableModel()
 int QtSLiMMutTypeTableModel::rowCount(const QModelIndex & /* p_parent */) const
 {
     QtSLiMWindow *controller = static_cast<QtSLiMWindow *>(parent());
+    Community *community = controller->community;
     
-    if (controller && !controller->invalidSimulation())
-        return static_cast<int>(controller->sim->mutation_types_.size());
+    if (community)
+        return static_cast<int>(community->AllMutationTypes().size());
     
     return 0;
 }
@@ -511,14 +519,14 @@ QVariant QtSLiMMutTypeTableModel::data(const QModelIndex &p_index, int role) con
         return QVariant();
     
     QtSLiMWindow *controller = static_cast<QtSLiMWindow *>(parent());
+    Community *community = controller->community;
     
-    if (!controller || controller->invalidSimulation())
+    if (!community)
         return QVariant();
     
     if (role == Qt::DisplayRole)
     {
-        SLiMSim *sim = controller->sim;
-        std::map<slim_objectid_t,MutationType*> &mutationTypes = sim->mutation_types_;
+        const std::map<slim_objectid_t,MutationType*> &mutationTypes = community->AllMutationTypes();
         int mutationTypeCount = static_cast<int>(mutationTypes.size());
         
         if (p_index.row() < mutationTypeCount)
@@ -531,7 +539,12 @@ QVariant QtSLiMMutTypeTableModel::data(const QModelIndex &p_index, int role) con
             
             if (p_index.column() == 0)
             {
-                return QVariant(QString("m%1").arg(mutTypeID));
+                QString idString = QString("m%1").arg(mutTypeID);
+                
+                if (community->all_species_.size() > 1)
+                    idString.append(" ").append(QString::fromStdString(mutationType->species_.avatar_));
+                
+                return QVariant(idString);
             }
             else if (p_index.column() == 1)
             {
@@ -581,7 +594,7 @@ QVariant QtSLiMMutTypeTableModel::data(const QModelIndex &p_index, int role) con
                             case DFEType::kExponential:		paramSymbol = "s̄"; break;
                             case DFEType::kNormal:			paramSymbol = (paramIndex == 0 ? "s̄" : "σ"); break;
                             case DFEType::kWeibull:			paramSymbol = (paramIndex == 0 ? "λ" : "k"); break;
-                            case DFEType::kLaplace:         paramSymbol = (paramIndex == 0 ? "s̄" : "b" ); break;
+                            case DFEType::kLaplace:         paramSymbol = (paramIndex == 0 ? "s̄" : "b"); break;
                             case DFEType::kScript:			break;
                         }
                         
@@ -598,8 +611,7 @@ QVariant QtSLiMMutTypeTableModel::data(const QModelIndex &p_index, int role) con
     }
     else if (role == Qt::ToolTipRole)
     {
-        SLiMSim *sim = controller->sim;
-        std::map<slim_objectid_t,MutationType*> &mutationTypes = sim->mutation_types_;
+        const std::map<slim_objectid_t,MutationType*> &mutationTypes = community->AllMutationTypes();
         int mutationTypeCount = static_cast<int>(mutationTypes.size());
         
         if (p_index.row() < mutationTypeCount)
@@ -699,9 +711,10 @@ QtSLiMGETypeTypeTableModel::~QtSLiMGETypeTypeTableModel()
 int QtSLiMGETypeTypeTableModel::rowCount(const QModelIndex & /* p_parent */) const
 {
     QtSLiMWindow *controller = static_cast<QtSLiMWindow *>(parent());
+    Community *community = controller->community;
     
-    if (controller && !controller->invalidSimulation())
-        return static_cast<int>(controller->sim->genomic_element_types_.size());
+    if (community)
+        return static_cast<int>(community->AllGenomicElementTypes().size());
     
     return 0;
 }
@@ -717,14 +730,14 @@ QVariant QtSLiMGETypeTypeTableModel::data(const QModelIndex &p_index, int role) 
         return QVariant();
     
     QtSLiMWindow *controller = static_cast<QtSLiMWindow *>(parent());
+    Community *community = controller->community;
     
-    if (!controller || controller->invalidSimulation())
+    if (!community)
         return QVariant();
     
     if (role == Qt::DisplayRole)
     {
-        SLiMSim *sim = controller->sim;
-        std::map<slim_objectid_t,GenomicElementType*> &genomicElementTypes = sim->genomic_element_types_;
+        const std::map<slim_objectid_t,GenomicElementType*> &genomicElementTypes = community->AllGenomicElementTypes();
         int genomicElementTypeCount = static_cast<int>(genomicElementTypes.size());
         
         if (p_index.row() < genomicElementTypeCount)
@@ -737,7 +750,12 @@ QVariant QtSLiMGETypeTypeTableModel::data(const QModelIndex &p_index, int role) 
             
             if (p_index.column() == 0)
             {
-                return QVariant(QString("g%1").arg(genomicElementTypeID));
+                QString idString = QString("g%1").arg(genomicElementTypeID);
+                
+                if (community->all_species_.size() > 1)
+                    idString.append(" ").append(QString::fromStdString(genomicElementType->species_.avatar_));
+                
+                return QVariant(idString);
             }
             else if (p_index.column() == 1)
             {
@@ -839,9 +857,10 @@ QtSLiMInteractionTypeTableModel::~QtSLiMInteractionTypeTableModel()
 int QtSLiMInteractionTypeTableModel::rowCount(const QModelIndex & /* p_parent */) const
 {
     QtSLiMWindow *controller = static_cast<QtSLiMWindow *>(parent());
+    Community *community = controller->community;
     
-    if (controller && !controller->invalidSimulation())
-        return static_cast<int>(controller->sim->interaction_types_.size());
+    if (community)
+        return static_cast<int>(community->AllInteractionTypes().size());
     
     return 0;
 }
@@ -857,14 +876,14 @@ QVariant QtSLiMInteractionTypeTableModel::data(const QModelIndex &p_index, int r
         return QVariant();
     
     QtSLiMWindow *controller = static_cast<QtSLiMWindow *>(parent());
+    Community *community = controller->community;
     
-    if (!controller || controller->invalidSimulation())
+    if (!community)
         return QVariant();
     
     if (role == Qt::DisplayRole)
     {
-        SLiMSim *sim = controller->sim;
-        std::map<slim_objectid_t,InteractionType*> &interactionTypes = sim->interaction_types_;
+        const std::map<slim_objectid_t,InteractionType*> &interactionTypes = community->AllInteractionTypes();
         int interactionTypeCount = static_cast<int>(interactionTypes.size());
         
         if (p_index.row() < interactionTypeCount)
@@ -877,7 +896,9 @@ QVariant QtSLiMInteractionTypeTableModel::data(const QModelIndex &p_index, int r
             
             if (p_index.column() == 0)
             {
-                return QVariant(QString("i%1").arg(interactionTypeID));
+                QString idString = QString("i%1").arg(interactionTypeID);
+                
+                return QVariant(idString);
             }
             else if (p_index.column() == 1)
             {
@@ -887,11 +908,12 @@ QVariant QtSLiMInteractionTypeTableModel::data(const QModelIndex &p_index, int r
             {
                 switch (interactionType->if_type_)
                 {
-                    case IFType::kFixed:			return QVariant(QString("fixed"));
-                    case IFType::kLinear:			return QVariant(QString("linear"));
-                    case IFType::kExponential:		return QVariant(QString("exp"));
-                    case IFType::kNormal:			return QVariant(QString("normal"));
-                    case IFType::kCauchy:			return QVariant(QString("Cauchy"));
+                    case SpatialKernelType::kFixed:				return QVariant(QString("fixed"));
+                    case SpatialKernelType::kLinear:			return QVariant(QString("linear"));
+                    case SpatialKernelType::kExponential:		return QVariant(QString("exp"));
+                    case SpatialKernelType::kNormal:			return QVariant(QString("normal"));
+                    case SpatialKernelType::kCauchy:			return QVariant(QString("Cauchy"));
+                    case SpatialKernelType::kStudentsT:			return QVariant(QString("Student's t"));
                 }
             }
             else if (p_index.column() == 3)
@@ -904,17 +926,20 @@ QVariant QtSLiMInteractionTypeTableModel::data(const QModelIndex &p_index, int r
                 // append second parameters where applicable
                 switch (interactionType->if_type_)
                 {
-                    case IFType::kFixed:
-                    case IFType::kLinear:
+                    case SpatialKernelType::kFixed:
+                    case SpatialKernelType::kLinear:
                         break;
-                    case IFType::kExponential:
+                    case SpatialKernelType::kExponential:
                         paramString += QString(", β=%1").arg(interactionType->if_param2_, 0, 'f', 3);
                         break;
-                    case IFType::kNormal:
+                    case SpatialKernelType::kNormal:
                         paramString += QString(", σ=%1").arg(interactionType->if_param2_, 0, 'f', 3);
                         break;
-                    case IFType::kCauchy:
+                    case SpatialKernelType::kCauchy:
                         paramString += QString(", γ=%1").arg(interactionType->if_param2_, 0, 'f', 3);
+                        break;
+                    case SpatialKernelType::kStudentsT:
+                        paramString += QString(", ν=%1, σ=%2").arg(interactionType->if_param2_, 0, 'f', 3).arg(interactionType->if_param3_, 0, 'f', 3);
                         break;
                 }
                 
@@ -924,8 +949,7 @@ QVariant QtSLiMInteractionTypeTableModel::data(const QModelIndex &p_index, int r
     }
     else if (role == Qt::ToolTipRole)
     {
-        SLiMSim *sim = controller->sim;
-        std::map<slim_objectid_t,InteractionType*> &interactionTypes = sim->interaction_types_;
+        const std::map<slim_objectid_t,InteractionType*> &interactionTypes = community->AllInteractionTypes();
         int interactionTypeCount = static_cast<int>(interactionTypes.size());
         
         if (p_index.row() < interactionTypeCount)
@@ -1026,7 +1050,7 @@ int QtSLiMEidosBlockTableModel::rowCount(const QModelIndex & /* p_parent */) con
     QtSLiMWindow *controller = static_cast<QtSLiMWindow *>(parent());
     
     if (controller && !controller->invalidSimulation())
-        return static_cast<int>(controller->sim->AllScriptBlocks().size());
+        return static_cast<int>(controller->community->AllScriptBlocks().size());
     
     return 0;
 }
@@ -1048,8 +1072,8 @@ QVariant QtSLiMEidosBlockTableModel::data(const QModelIndex &p_index, int role) 
     
     if (role == Qt::DisplayRole)
     {
-        SLiMSim *sim = controller->sim;
-        std::vector<SLiMEidosBlock*> &scriptBlocks = sim->AllScriptBlocks();
+        Community *community = controller->community;
+        std::vector<SLiMEidosBlock*> &scriptBlocks = community->AllScriptBlocks();
         int scriptBlockCount = static_cast<int>(scriptBlocks.size());
         
         if (p_index.row() < scriptBlockCount)
@@ -1059,31 +1083,39 @@ QVariant QtSLiMEidosBlockTableModel::data(const QModelIndex &p_index, int role) 
             if (p_index.column() == 0)
             {
                 slim_objectid_t block_id = scriptBlock->block_id_;
+                QString idString;
                 
                 if (scriptBlock->type_ == SLiMEidosBlockType::SLiMEidosUserDefinedFunction)
-                    return QVariant("—");
+                    idString = "—";
                 else if (block_id == -1)
-                    return QVariant("—");
+                    idString = "—";
                 else
-                    return QVariant(QString("s%1").arg(block_id));
+                    idString = QString("s%1").arg(block_id);
+                
+                if ((community->all_species_.size() > 1) && scriptBlock->species_spec_)
+                    idString.append(" ").append(QString::fromStdString(scriptBlock->species_spec_->avatar_));
+                else if ((community->all_species_.size() > 1) && scriptBlock->ticks_spec_)
+                    idString.append(" ").append(QString::fromStdString(scriptBlock->ticks_spec_->avatar_));
+                
+                return QVariant(idString);
             }
             else if (p_index.column() == 1)
             {
                 if (scriptBlock->type_ == SLiMEidosBlockType::SLiMEidosUserDefinedFunction)
                     return QVariant("—");
-                else if (scriptBlock->start_generation_ == -1)
+                else if (scriptBlock->start_tick_ == -1)
                     return QVariant("MIN");
                 else
-                    return QVariant(QString("%1").arg(scriptBlock->start_generation_));
+                    return QVariant(QString("%1").arg(scriptBlock->start_tick_));
             }
             else if (p_index.column() == 2)
             {
                 if (scriptBlock->type_ == SLiMEidosBlockType::SLiMEidosUserDefinedFunction)
                     return QVariant("—");
-                else if (scriptBlock->end_generation_ == SLIM_MAX_GENERATION + 1)
+                else if (scriptBlock->end_tick_ == SLIM_MAX_TICK + 1)
                     return QVariant("MAX");
                 else
-                    return QVariant(QString("%1").arg(scriptBlock->end_generation_));
+                    return QVariant(QString("%1").arg(scriptBlock->end_tick_));
             }
             else if (p_index.column() == 3)
             {
@@ -1093,8 +1125,8 @@ QVariant QtSLiMEidosBlockTableModel::data(const QModelIndex &p_index, int role) 
                     case SLiMEidosBlockType::SLiMEidosEventEarly:				return QVariant("early()");
                     case SLiMEidosBlockType::SLiMEidosEventLate:				return QVariant("late()");
                     case SLiMEidosBlockType::SLiMEidosInitializeCallback:		return QVariant("initialize()");
-                    case SLiMEidosBlockType::SLiMEidosFitnessCallback:			return QVariant("fitness()");
-                    case SLiMEidosBlockType::SLiMEidosFitnessGlobalCallback:	return QVariant("fitness()");
+                    case SLiMEidosBlockType::SLiMEidosMutationEffectCallback:	return QVariant("mutationEffect()");
+                    case SLiMEidosBlockType::SLiMEidosFitnessEffectCallback:	return QVariant("fitnessEffect()");
                     case SLiMEidosBlockType::SLiMEidosInteractionCallback:		return QVariant("interaction()");
                     case SLiMEidosBlockType::SLiMEidosMateChoiceCallback:		return QVariant("mateChoice()");
                     case SLiMEidosBlockType::SLiMEidosModifyChildCallback:		return QVariant("modifyChild()");
@@ -1117,8 +1149,8 @@ QVariant QtSLiMEidosBlockTableModel::data(const QModelIndex &p_index, int role) 
     }
     else if (role == Qt::ToolTipRole)
     {
-        SLiMSim *sim = controller->sim;
-        std::vector<SLiMEidosBlock*> &scriptBlocks = sim->AllScriptBlocks();
+        Community *community = controller->community;
+        std::vector<SLiMEidosBlock*> &scriptBlocks = community->AllScriptBlocks();
         int scriptBlockCount = static_cast<int>(scriptBlocks.size());
         
         if (p_index.row() < scriptBlockCount)
@@ -1166,8 +1198,8 @@ QVariant QtSLiMEidosBlockTableModel::headerData(int section,
         switch (section)
         {
         case 0: return QVariant("the ID for the script block");
-        case 1: return QVariant("the start generation");
-        case 2: return QVariant("the end generation");
+        case 1: return QVariant("the start tick");
+        case 2: return QVariant("the end tick");
         case 3: return QVariant("the script block type");
         default: return QVariant("");
         }

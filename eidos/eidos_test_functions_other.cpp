@@ -3,7 +3,7 @@
 //  Eidos
 //
 //  Created by Ben Haller on 7/11/20.
-//  Copyright (c) 2020-2022 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2020-2023 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -802,9 +802,7 @@ void _RunFunctionMiscTests(std::string temp_path)
 	EidosAssertScriptRaise("rm(E);", 0, "cannot be type");
 	EidosAssertScriptRaise("rm(PI);", 0, "cannot be type");
 	EidosAssertScriptRaise("rm('PI');", 0, "intrinsic Eidos constant");
-	EidosAssertScriptRaise("rm('PI', T);", 0, "intrinsic Eidos constant");
 	EidosAssertScriptRaise("defineConstant('foo', 1:10); rm('foo'); foo;", 29, "is a constant");
-	EidosAssertScriptRaise("defineConstant('foo', 1:10); rm('foo', T); foo;", 43, "undefined identifier");
 	
 	// setSeed()
 	EidosAssertScriptSuccess_L("setSeed(5); x=runif(10); setSeed(5); y=runif(10); all(x==y);", true);
@@ -837,7 +835,7 @@ void _RunFunctionMiscTests(std::string temp_path)
 	
 	// stop()
 	EidosAssertScriptRaise("stop();", 0, "stop() called");
-	EidosAssertScriptRaise("stop('Error');", 0, "stop(\"Error\") called");
+	EidosAssertScriptRaise("stop('Error');", 0, "stop() called with error message:");
 	EidosAssertScriptRaise("stop(NULL);", 0, "stop() called");		// same as omitting the parameter
 	EidosAssertScriptRaise("stop(T);", 0, "cannot be type");
 	EidosAssertScriptRaise("stop(3);", 0, "cannot be type");
@@ -941,6 +939,12 @@ void _RunClassTests(std::string temp_path)
 	EidosAssertScriptSuccess_VOID("matrix(_Test(7)).str();");
 	EidosAssertScriptSuccess_VOID("matrix(c(_Test(7), _Test(8), _Test(9))).str();");
 	
+	// stringRepresentation()
+	EidosAssertScriptSuccess_SV("matrix(rep(_Test(7), 3)).stringRepresentation();", {"_TestElement", "_TestElement", "_TestElement"});
+	EidosAssertScriptSuccess_S("Dictionary('a', 1:3, 'b', 5:6).stringRepresentation();", "{\"a\"=1 2 3;\"b\"=5 6;}");
+	EidosAssertScriptSuccess_S("Dictionary('b', 5:6, 'a', 1:3).stringRepresentation();", "{\"a\"=1 2 3;\"b\"=5 6;}");
+	EidosAssertScriptSuccess_S("Dictionary(10, 1:3, 15, 5:6).stringRepresentation();", "{10=1 2 3;15=5 6;}");
+	EidosAssertScriptSuccess_S("Dictionary(15, 5:6, 10, 1:3).stringRepresentation();", "{10=1 2 3;15=5 6;}");
 	
 	// Test EidosDictionaryUnretained properties and methods, using EidosDictionaryRetained
 	// since there's no way to instantiate an EidosDictionaryUnretained directly
@@ -954,11 +958,27 @@ void _RunClassTests(std::string temp_path)
 	EidosAssertScriptSuccess_S("x = Dictionary(); y = Dictionary(); y.setValue('foo', 'bar'); x.setValue('a', y); x.getValue('a').getValue('foo');", "bar");
 	EidosAssertScriptSuccess_NULL("x = Dictionary(); x.setValue('a', 7:9); x.setValue('a', NULL); x.getValue('a');");
 	EidosAssertScriptSuccess_NULL("x = Dictionary(); y = Dictionary(); y.setValue('foo', 'bar'); x.setValue('a', y); x.getValue('a').setValue('foo', NULL); x.getValue('a').getValue('foo');");
+	EidosAssertScriptRaise("x = Dictionary(); x.setValue('a', 7:9); x.setValue(5, 5:8);", 42, "integer key");
+	EidosAssertScriptRaise("x = Dictionary(); x.setValue('a', 7:9); x.getValue(5);", 42, "integer key");
+	
+	EidosAssertScriptSuccess_NULL("x = Dictionary(); x.getValue(5);");
+	EidosAssertScriptSuccess_LV("x = Dictionary(); x.setValue(5, c(T,F,T)); x.getValue(5);", {true,false,true});
+	EidosAssertScriptSuccess_IV("x = Dictionary(); x.setValue(5, 7:9); x.getValue(5);", {7,8,9});
+	EidosAssertScriptSuccess_FV("x = Dictionary(); x.setValue(5, 7.0:9); x.getValue(5);", {7,8,9});
+	EidosAssertScriptSuccess_SV("x = Dictionary(); x.setValue(5, c('foo', 'bar')); x.getValue(5);", {"foo", "bar"});
+	EidosAssertScriptSuccess_S("x = Dictionary(); y = Dictionary(); y.setValue(5, 'bar'); x.setValue(7, y); x.getValue(7).getValue(5);", "bar");
+	EidosAssertScriptSuccess_NULL("x = Dictionary(); x.setValue(5, 7:9); x.setValue(5, NULL); x.getValue(5);");
+	EidosAssertScriptSuccess_NULL("x = Dictionary(); y = Dictionary(); y.setValue(5, 'bar'); x.setValue(7, y); x.getValue(7).setValue(5, NULL); x.getValue(7).getValue(5);");
+	EidosAssertScriptRaise("x = Dictionary(); x.setValue(5, 7:9); x.setValue('a', 5:8);", 40, "string key");
+	EidosAssertScriptRaise("x = Dictionary(); x.setValue(5, 7:9); x.getValue('a');", 40, "string key");
 	
 	// allKeys
 	EidosAssertScriptSuccess("x = Dictionary(); x.allKeys;", gStaticEidosValue_String_ZeroVec);
 	EidosAssertScriptSuccess_S("x = Dictionary(); x.setValue('bar', c(T,F,T)); x.allKeys;", "bar");
 	EidosAssertScriptSuccess_SV("x = Dictionary(); x.setValue('bar', c(T,F,T)); x.setValue('foo', 7:9); x.setValue('baz', 7.0:9); x.allKeys;", {"bar", "baz", "foo"});
+	
+	EidosAssertScriptSuccess_I("x = Dictionary(); x.setValue(5, c(T,F,T)); x.allKeys;", 5);
+	EidosAssertScriptSuccess_IV("x = Dictionary(); x.setValue(1, c(T,F,T)); x.setValue(5, 7:9); x.setValue(3, 7.0:9); x.allKeys;", {1, 3, 5});
 	
 	// addKeysAndValuesFrom()
 	EidosAssertScriptSuccess("x = Dictionary(); y = x; x.setValue('bar', 2); y.getValue('bar');", gStaticEidosValue_Integer2);
@@ -967,6 +987,15 @@ void _RunClassTests(std::string temp_path)
 	EidosAssertScriptSuccess("x = Dictionary(); x.setValue('bar', 2); y = Dictionary(); y.addKeysAndValuesFrom(x); x.setValue('bar', 1); x.getValue('bar');", gStaticEidosValue_Integer1);
 	EidosAssertScriptSuccess_SV("x = Dictionary(); x.setValue('bar', 2); x.setValue('baz', 'foo'); y = Dictionary(); y.addKeysAndValuesFrom(x); y.setValue('xyzzy', 17); sort(y.allKeys);", {"bar", "baz", "xyzzy"});
 	EidosAssertScriptSuccess_S("x = Dictionary(); x.setValue('bar', 2); x.setValue('baz', 'foo'); y = Dictionary(); y.addKeysAndValuesFrom(x); y.setValue('baz', NULL); y.allKeys;", "bar");
+	
+	EidosAssertScriptSuccess("x = Dictionary(); y = x; x.setValue(5, 2); y.getValue(5);", gStaticEidosValue_Integer2);
+	EidosAssertScriptSuccess_NULL("x = Dictionary(); y = Dictionary(); y.addKeysAndValuesFrom(x); x.setValue(5, 2); y.getValue(5);");
+	EidosAssertScriptSuccess("x = Dictionary(); x.setValue(5, 2); y = Dictionary(); y.addKeysAndValuesFrom(x); x.setValue(5, 1); y.getValue(5);", gStaticEidosValue_Integer2);
+	EidosAssertScriptSuccess("x = Dictionary(); x.setValue(5, 2); y = Dictionary(); y.addKeysAndValuesFrom(x); x.setValue(5, 1); x.getValue(5);", gStaticEidosValue_Integer1);
+	EidosAssertScriptSuccess_IV("x = Dictionary(); x.setValue(5, 2); x.setValue(7, 'foo'); y = Dictionary(); y.addKeysAndValuesFrom(x); y.setValue(9, 17); sort(y.allKeys);", {5, 7, 9});
+	EidosAssertScriptSuccess_I("x = Dictionary(); x.setValue(5, 2); x.setValue(7, 'foo'); y = Dictionary(); y.addKeysAndValuesFrom(x); y.setValue(7, NULL); y.allKeys;", 5);
+	
+	EidosAssertScriptRaise("x = Dictionary(); x.setValue(5, 2); y = Dictionary(); y.setValue('a', 'foo'); y.addKeysAndValuesFrom(x);", 80, "integer key");
 	
 	// Dictionary(...)
 	// identicalContents()
@@ -979,7 +1008,22 @@ void _RunClassTests(std::string temp_path)
 	EidosAssertScriptSuccess_L("x = Dictionary(); x.setValue('a', 0:2); x.setValue('b', c('foo', 'bar', 'baz')); x.setValue('c', c(T, F, T)); x.setValue('d', c(1.1, 2.2, 3.3)); y = Dictionary(x); y.identicalContents(x);", true);
 	EidosAssertScriptRaise("Dictionary(5);", 0, "be a singleton Dictionary");
 	EidosAssertScriptRaise("y = Dictionary('a', 0:2, 'b', c('foo', 'bar', 'baz'), 'c', c(T, F, T), 'd', c(1.1, 2.2, 3.3, 4.4)); Dictionary(c(y,y));", 100, "be a singleton");
-	EidosAssertScriptRaise("y = Dictionary('a', 0:2, 'b', c('foo', 'bar', 'baz'), 'c', c(T, F, T), 'd', c(1.1, 2.2, 3.3, 4.4)); Dictionary(y, y);", 100, "keys be singleton strings");
+	EidosAssertScriptRaise("y = Dictionary('a', 0:2, 'b', c('foo', 'bar', 'baz'), 'c', c(T, F, T), 'd', c(1.1, 2.2, 3.3, 4.4)); Dictionary(y, y);", 100, "keys be of type string or integer");
+	
+	EidosAssertScriptSuccess_L("x = Dictionary(); x.setValue(5, 0:2); x.setValue(7, c('foo', 'bar', 'baz')); x.setValue(9, c(T, F, T)); x.setValue(11, c(1.1, 2.2, 3.3)); y = Dictionary(5, 0:2, 7, c('foo', 'bar', 'baz'), 9, c(T, F, T), 11, c(1.1, 2.2, 3.3)); x.identicalContents(y);", true);
+	EidosAssertScriptSuccess_L("x = Dictionary(); x.setValue(5, 0:2); x.setValue(7, c('foo', 'bar', 'baz')); x.setValue(9, c(T, F, T)); x.setValue(11, c(1.1, 2.2, 3.3)); y = Dictionary(5, 0:2, 7, c('foo', 'bar', 'baz'), 9, c(T, F, T), 13, c(1.1, 2.2, 3.3)); x.identicalContents(y);", false);
+	EidosAssertScriptSuccess_L("x = Dictionary(); x.setValue(5, 0:2); x.setValue(7, c('foo', 'bar', 'baz')); x.setValue(9, c(T, F, T)); x.setValue(11, c(1.1, 2.2, 3.3)); y = Dictionary(5, 0:2, 7, c('foo', 'bar', 'baz'), 9, c(T, F, T), 11, c(1.15, 2.2, 3.3)); x.identicalContents(y);", false);
+	EidosAssertScriptSuccess_L("x = Dictionary(); x.setValue(5, 0:2); x.setValue(7, c('foo', 'bar', 'baz')); x.setValue(9, c(T, F, T)); x.setValue(11, c(1.1, 2.2, 3.3, 4.4)); y = Dictionary(5, 0:2, 7, c('foo', 'bar', 'baz'), 9, c(T, F, T), 11, c(1.1, 2.2, 3.3)); x.identicalContents(y);", false);
+	EidosAssertScriptSuccess_L("x = Dictionary(); x.setValue(5, 0:2); x.setValue(7, c('foo', 'bar', 'baz')); x.setValue(9, c(T, F, T)); x.setValue(11, c(1.1, 2.2, 3.3)); y = Dictionary(5, 0:2, 7, c('foo', 'bar', 'baz'), 9, c(T, F, T), 11, c(1.1, 2.2, 3.3, 4.4)); x.identicalContents(y);", false);
+	EidosAssertScriptSuccess_L("x = Dictionary(); x.setValue(5, 0:2); x.setValue(7, c('foo', 'bar', 'baz')); x.setValue(9, c(T, F, T)); x.setValue(11, c(1.1, 2.2, 3.3)); y = Dictionary(x); x.identicalContents(y);", true);
+	EidosAssertScriptSuccess_L("x = Dictionary(); x.setValue(5, 0:2); x.setValue(7, c('foo', 'bar', 'baz')); x.setValue(9, c(T, F, T)); x.setValue(11, c(1.1, 2.2, 3.3)); y = Dictionary(x); y.identicalContents(x);", true);
+	EidosAssertScriptRaise("Dictionary(5);", 0, "be a singleton Dictionary");
+	EidosAssertScriptRaise("y = Dictionary(5, 0:2, 7, c('foo', 'bar', 'baz'), 9, c(T, F, T), 11, c(1.1, 2.2, 3.3, 4.4)); Dictionary(c(y,y));", 93, "be a singleton");
+	EidosAssertScriptRaise("y = Dictionary(5, 0:2, 7, c('foo', 'bar', 'baz'), 9, c(T, F, T), 11, c(1.1, 2.2, 3.3, 4.4)); Dictionary(y, y);", 93, "keys be of type string or integer");
+	
+	EidosAssertScriptSuccess_L("x = Dictionary(); x.setValue(5, 2); y = Dictionary(); y.setValue('a', 'foo'); x.identicalContents(y);", false);
+	EidosAssertScriptRaise("x = Dictionary(5, 1:10, 'a', 1:10);", 4, "string key");
+	EidosAssertScriptRaise("x = Dictionary('a', 1:10, 5, 1:10);", 4, "integer key");
 	
 	// appendKeysAndValuesFrom()
 	EidosAssertScriptSuccess_L("x = Dictionary('a', 0:3, 'b', 2:8); y = Dictionary('a', 4, 'b', 9:10); x.appendKeysAndValuesFrom(y); x.identicalContents(Dictionary('a', 0:4, 'b', 2:10));", true);
@@ -989,6 +1033,16 @@ void _RunClassTests(std::string temp_path)
 	EidosAssertScriptSuccess_L("x = Dictionary('a', 0:3, 'b', 2:8); y = Dictionary('a', 4, 'b', 9:10); x.appendKeysAndValuesFrom(c(y, y)); x.identicalContents(Dictionary('a', c(0:4, 4), 'b', c(2:10, 9:10)));", true);
 	EidosAssertScriptSuccess_L("x = Dictionary('a', 0:3, 'b', 2:8); y = Dictionary('a', 4, 'c', 9:10); x.appendKeysAndValuesFrom(c(y, y)); x.identicalContents(Dictionary('a', c(0:4, 4), 'b', 2:8, 'c', c(9:10, 9:10)));", true);
 	EidosAssertScriptRaise("x = Dictionary('a', 0:3, 'b', 2:8); y = Dictionary('a', 4, 'c', 9:10); x.appendKeysAndValuesFrom(x);", 73, "cannot append a Dictionary to itself");
+	
+	EidosAssertScriptSuccess_L("x = Dictionary(5, 0:3, 7, 2:8); y = Dictionary(5, 4, 7, 9:10); x.appendKeysAndValuesFrom(y); x.identicalContents(Dictionary(5, 0:4, 7, 2:10));", true);
+	EidosAssertScriptSuccess_L("x = Dictionary(5, 0:3, 7, 2:8); y = Dictionary(5, 4, 9, 9:10); x.appendKeysAndValuesFrom(y); x.identicalContents(Dictionary(5, 0:4, 7, 2:8, 9, 9:10));", true);
+	EidosAssertScriptSuccess_L("x = Dictionary(5, 0:3, 7, 2:8); y = Dictionary(5, 4, 7, 9.0:10); x.appendKeysAndValuesFrom(y); x.identicalContents(Dictionary(5, 0:4, 7, 2:10));", false);
+	EidosAssertScriptSuccess_L("x = Dictionary(5, 0:3, 7, 2:8); y = Dictionary(5, 4, 7, 9.0:10); x.appendKeysAndValuesFrom(y); x.identicalContents(Dictionary(5, 0:4, 7, 2.0:10));", true);
+	EidosAssertScriptSuccess_L("x = Dictionary(5, 0:3, 7, 2:8); y = Dictionary(5, 4, 7, 9:10); x.appendKeysAndValuesFrom(c(y, y)); x.identicalContents(Dictionary(5, c(0:4, 4), 7, c(2:10, 9:10)));", true);
+	EidosAssertScriptSuccess_L("x = Dictionary(5, 0:3, 7, 2:8); y = Dictionary(5, 4, 9, 9:10); x.appendKeysAndValuesFrom(c(y, y)); x.identicalContents(Dictionary(5, c(0:4, 4), 7, 2:8, 9, c(9:10, 9:10)));", true);
+	EidosAssertScriptRaise("x = Dictionary(5, 0:3, 7, 2:8); y = Dictionary(5, 4, 9, 9:10); x.appendKeysAndValuesFrom(x);", 65, "cannot append a Dictionary to itself");
+	
+	EidosAssertScriptRaise("x = Dictionary(5, 0:3, 7, 2:8); y = Dictionary('a', 4, 'b', 9:10); x.appendKeysAndValuesFrom(y);", 69, "string key");
 	
 	// getRowValues()
 	EidosAssertScriptSuccess_L("x = Dictionary('a', 0:3, 'b', 2:8); y = x.getRowValues(0); y.identicalContents(Dictionary('a', 0, 'b', 2));", true);
@@ -1019,25 +1073,78 @@ void _RunClassTests(std::string temp_path)
 	EidosAssertScriptSuccess_L("y = Dictionary('a', 0:2, 'b', c('foo', 'bar', 'baz'), 'c', c(T, F, T), 'd', c(1.1, 2.2, 3.3)); y.getRowValues(c(F, F)).identicalContents(Dictionary('a', integer(0), 'b', string(0), 'c', logical(0), 'd', float(0)));", true);
 	EidosAssertScriptSuccess_L("y = Dictionary('a', 0:2, 'b', c('foo', 'bar', 'baz'), 'c', c(T, F, T), 'd', c(1.1, 2.2, 3.3)); y.getRowValues(c(F, F), drop=T).identicalContents(Dictionary());", true);
 	
+	EidosAssertScriptSuccess_L("x = Dictionary(5, 0:3, 7, 2:8); y = x.getRowValues(0); y.identicalContents(Dictionary(5, 0, 7, 2));", true);
+	EidosAssertScriptSuccess_L("x = Dictionary(5, 0:3, 7, 2:8); y = x.getRowValues(1); y.identicalContents(Dictionary(5, 1, 7, 3));", true);
+	EidosAssertScriptSuccess_L("x = Dictionary(5, 0:3, 7, 2:8); y = x.getRowValues(4); y.identicalContents(Dictionary(5, integer(0), 7, 6));", true);
+	EidosAssertScriptSuccess_L("x = Dictionary(5, 0:3, 7, 2:8); y = x.getRowValues(4, drop=T); y.identicalContents(Dictionary(7, 6));", true);
+	EidosAssertScriptSuccess_L("x = Dictionary(5, 0:3, 7, 2:8); y = x.getRowValues(c(T, F, T, T)); y.identicalContents(Dictionary(5, c(0, 2, 3), 7, c(2, 4, 5)));", true);
+	EidosAssertScriptSuccess_L("x = Dictionary(5, 0:3, 7, 2:8); y = x.getRowValues(F); y.identicalContents(Dictionary(5, integer(0), 7, integer(0)));", true);
+	EidosAssertScriptSuccess_L("x = Dictionary(5, 0:3, 7, 2:8); y = x.getRowValues(c(F, F)); y.identicalContents(Dictionary(5, integer(0), 7, integer(0)));", true);
+	EidosAssertScriptSuccess_L("x = Dictionary(5, 0:3, 7, 2:8); y = x.getRowValues(F, drop=T); y.identicalContents(Dictionary());", true);
+	EidosAssertScriptSuccess_L("x = Dictionary(5, 0:3, 7, 2:8); y = x.getRowValues(c(F, F), drop=T); y.identicalContents(Dictionary());", true);
+	EidosAssertScriptSuccess_L("y = Dictionary(5, 0:2, 7, c('foo', 'bar', 'baz'), 9, c(T, F, T), 11, c(1.1, 2.2, 3.3)); y.getRowValues(0).identicalContents(Dictionary(5, 0, 7, 'foo', 9, T, 11, 1.1));", true);
+	EidosAssertScriptSuccess_L("y = Dictionary(5, 0:2, 7, c('foo', 'bar', 'baz'), 9, c(T, F, T), 11, c(1.1, 2.2, 3.3)); y.getRowValues(1).identicalContents(Dictionary(5, 1, 7, 'bar', 9, F, 11, 2.2));", true);
+	EidosAssertScriptSuccess_L("y = Dictionary(5, 0:2, 7, c('foo', 'bar', 'baz'), 9, c(T, F, T), 11, c(1.1, 2.2, 3.3)); y.getRowValues(2).identicalContents(Dictionary(5, 2, 7, 'baz', 9, T, 11, 3.3));", true);
+	EidosAssertScriptSuccess_L("y = Dictionary(5, 0:2, 7, c('foo', 'bar', 'baz'), 9, c(T, F, T), 11, c(1.1, 2.2, 3.3)); y.getRowValues(3).identicalContents(Dictionary(5, integer(0), 7, string(0), 9, logical(0), 11, float(0)));", true);
+	EidosAssertScriptSuccess_L("y = Dictionary(5, 0:2, 7, c('foo', 'bar', 'baz'), 9, c(T, F, T), 11, c(1.1, 2.2, 3.3)); y.getRowValues(3, drop=T).identicalContents(Dictionary());", true);
+	EidosAssertScriptSuccess_L("y = Dictionary(5, 0:2, 7, c('foo', 'bar', 'baz'), 9, c(T, F, T), 11, c(1.1, 2.2, 3.3)); y.getRowValues(-1).identicalContents(Dictionary(5, integer(0), 7, string(0), 9, logical(0), 11, float(0)));", true);
+	EidosAssertScriptSuccess_L("y = Dictionary(5, 0:2, 7, c('foo', 'bar', 'baz'), 9, c(T, F, T), 11, c(1.1, 2.2, 3.3)); y.getRowValues(-1, drop=T).identicalContents(Dictionary());", true);
+	EidosAssertScriptSuccess_L("y = Dictionary(5, 0:2, 7, c('foo', 'bar', 'baz'), 9, c(T, F, T), 11, c(1.1, 2.2, 3.3)); y.getRowValues(0:1).identicalContents(Dictionary(5, 0:1, 7, c('foo', 'bar'), 9, c(T, F), 11, c(1.1, 2.2)));", true);
+	EidosAssertScriptSuccess_L("y = Dictionary(5, 0:2, 7, c('foo', 'bar', 'baz'), 9, c(T, F, T), 11, c(1.1, 2.2, 3.3)); y.getRowValues(1:0).identicalContents(Dictionary(5, 1:0, 7, c('bar', 'foo'), 9, c(F, T), 11, c(2.2, 1.1)));", true);
+	EidosAssertScriptSuccess_L("y = Dictionary(5, 0:2, 7, c('foo', 'bar', 'baz'), 9, c(T, F, T), 11, c(1.1, 2.2, 3.3)); y.getRowValues(c(F, F, F)).identicalContents(Dictionary(5, integer(0), 7, string(0), 9, logical(0), 11, float(0)));", true);
+	EidosAssertScriptSuccess_L("y = Dictionary(5, 0:2, 7, c('foo', 'bar', 'baz'), 9, c(T, F, T), 11, c(1.1, 2.2, 3.3)); y.getRowValues(c(T, F, F)).identicalContents(Dictionary(5, 0, 7, 'foo', 9, T, 11, 1.1));", true);
+	EidosAssertScriptSuccess_L("y = Dictionary(5, 0:2, 7, c('foo', 'bar', 'baz'), 9, c(T, F, T), 11, c(1.1, 2.2, 3.3)); y.getRowValues(c(F, T, F)).identicalContents(Dictionary(5, 1, 7, 'bar', 9, F, 11, 2.2));", true);
+	EidosAssertScriptSuccess_L("y = Dictionary(5, 0:2, 7, c('foo', 'bar', 'baz'), 9, c(T, F, T), 11, c(1.1, 2.2, 3.3)); y.getRowValues(c(F, F, T)).identicalContents(Dictionary(5, 2, 7, 'baz', 9, T, 11, 3.3));", true);
+	EidosAssertScriptSuccess_L("y = Dictionary(5, 0:2, 7, c('foo', 'bar', 'baz'), 9, c(T, F, T), 11, c(1.1, 2.2, 3.3)); y.getRowValues(c(T, T, F)).identicalContents(Dictionary(5, 0:1, 7, c('foo', 'bar'), 9, c(T, F), 11, c(1.1, 2.2)));", true);
+	EidosAssertScriptSuccess_L("y = Dictionary(5, 0:2, 7, c('foo', 'bar', 'baz'), 9, c(T, F, T), 11, c(1.1, 2.2, 3.3)); y.getRowValues(c(T, T, F, T)).identicalContents(Dictionary(5, 0:1, 7, c('foo', 'bar'), 9, c(T, F), 11, c(1.1, 2.2)));", true);
+	EidosAssertScriptSuccess_L("y = Dictionary(5, 0:2, 7, c('foo', 'bar', 'baz'), 9, c(T, F, T), 11, c(1.1, 2.2, 3.3)); y.getRowValues(c(T, T)).identicalContents(Dictionary(5, 0:1, 7, c('foo', 'bar'), 9, c(T, F), 11, c(1.1, 2.2)));", true);
+	EidosAssertScriptSuccess_L("y = Dictionary(5, 0:2, 7, c('foo', 'bar', 'baz'), 9, c(T, F, T), 11, c(1.1, 2.2, 3.3)); y.getRowValues(c(F, F)).identicalContents(Dictionary(5, integer(0), 7, string(0), 9, logical(0), 11, float(0)));", true);
+	EidosAssertScriptSuccess_L("y = Dictionary(5, 0:2, 7, c('foo', 'bar', 'baz'), 9, c(T, F, T), 11, c(1.1, 2.2, 3.3)); y.getRowValues(c(F, F), drop=T).identicalContents(Dictionary());", true);
+	
 	// clearKeysAndValues()
 	EidosAssertScriptSuccess("x = Dictionary(); x.setValue('bar', 2); x.setValue('baz', 'foo'); x.clearKeysAndValues(); x.allKeys;", gStaticEidosValue_String_ZeroVec);
 	EidosAssertScriptSuccess_S("x = Dictionary(); x.setValue('bar', 2); x.setValue('baz', 'foo'); x.clearKeysAndValues(); x.setValue('foo', 'baz'); x.allKeys;", "foo");
 	
+	EidosAssertScriptSuccess("x = Dictionary(); x.setValue(5, 2); x.setValue(7, 'foo'); x.clearKeysAndValues(); x.allKeys;", gStaticEidosValue_Integer_ZeroVec);
+	EidosAssertScriptSuccess_I("x = Dictionary(); x.setValue(5, 2); x.setValue(7, 'foo'); x.clearKeysAndValues(); x.setValue(9, 'baz'); x.allKeys;", 9);
+	
+	EidosAssertScriptRaise("x = Dictionary(); x.setValue(5, 2); x.setValue(7, 'foo'); x.clearKeysAndValues(); x.setValue('foo', 'baz'); x.allKeys;", 84, "string key");
+	
+	// compactIndices()
+	EidosAssertScriptSuccess_L("x = Dictionary(); x.compactIndices(); x.identicalContents(Dictionary());", true);
+	EidosAssertScriptRaise("x = Dictionary(); x.setValue('foo', 5:7); x.compactIndices();", 44, "integer keys");
+	EidosAssertScriptSuccess_L("x = Dictionary(53,'c', 17,'b', 80,'d', 5,'a', 85,'e'); x.compactIndices(preserveOrder=F); values=sapply(x.allKeys, 'x.getValue(applyValue);'); identical(x.allKeys, 0:4) & identical(sort(values), c('a','b','c','d','e'));", true);
+	EidosAssertScriptSuccess_L("x = Dictionary(53,'c', 17,'b', 80,'d', 5,'a', 85,'e'); x.compactIndices(preserveOrder=T); x.identicalContents(Dictionary(0,'a', 1,'b', 2,'c', 3,'d', 4,'e'));", true);
+	EidosAssertScriptSuccess_L("x = Dictionary(53,'c', 7,integer(0), 17,'b', 80,'d', 83,string(0), 5,'a', 35,object(), 85,'e'); x.compactIndices(preserveOrder=F); values=sapply(x.allKeys, 'x.getValue(applyValue);'); identical(x.allKeys, 0:4) & identical(sort(values), c('a','b','c','d','e'));", true);
+	EidosAssertScriptSuccess_L("x = Dictionary(53,'c', 7,integer(0), 17,'b', 80,'d', 83,string(0), 5,'a', 35,object(), 85,'e'); x.compactIndices(preserveOrder=T); x.identicalContents(Dictionary(0,'a', 1,'b', 2,'c', 3,'d', 4,'e'));", true);
+	
 	// serialize()
 	EidosAssertScriptSuccess_S("x = Dictionary(); x.serialize();", "");
-	EidosAssertScriptSuccess_S("x = Dictionary(); x.setValue('foo', 1:3); x.serialize();", "foo=1 2 3;");
-	EidosAssertScriptSuccess_S("x = Dictionary(); x.setValue('foo', 1:3); x.setValue('bar', 'baz'); x.serialize();", "bar=\"baz\";foo=1 2 3;");
-	EidosAssertScriptSuccess_S("x = Dictionary(); x.setValue('foo', 1:3); y = Dictionary(); y.setValue('a', 1.5); y.setValue('b', T); x.setValue('xyzzy', y); x.serialize();", "foo=1 2 3;xyzzy={a=1.5;b=T;};");
+	EidosAssertScriptSuccess_S("x = Dictionary(); x.setValue('foo', 1:3); x.serialize();", "\"foo\"=1 2 3;");
+	EidosAssertScriptSuccess_S("x = Dictionary(); x.setValue('foo', 1:3); x.setValue('bar', 'baz'); x.serialize();", "\"bar\"=\"baz\";\"foo\"=1 2 3;");
+	EidosAssertScriptSuccess_S("x = Dictionary(); x.setValue('foo', 1:3); y = Dictionary(); y.setValue('a', 1.5); y.setValue('b', T); x.setValue('xyzzy', y); x.serialize();", "\"foo\"=1 2 3;\"xyzzy\"={\"a\"=1.5;\"b\"=T;};");
+	
+	EidosAssertScriptSuccess_S("x = Dictionary(); x.serialize();", "");
+	EidosAssertScriptSuccess_S("x = Dictionary(); x.setValue(5, 1:3); x.serialize();", "5=1 2 3;");
+	EidosAssertScriptSuccess_S("x = Dictionary(); x.setValue(5, 1:3); x.setValue(3, 'baz'); x.serialize();", "3=\"baz\";5=1 2 3;");
+	EidosAssertScriptSuccess_S("x = Dictionary(); x.setValue(5, 1:3); y = Dictionary(); y.setValue(20, 1.5); y.setValue(30, T); x.setValue(11, y); x.serialize();", "5=1 2 3;11={20=1.5;30=T;};");
 	
 	EidosAssertScriptSuccess_S("x = Dictionary(); x.serialize('slim');", "");
-	EidosAssertScriptSuccess_S("x = Dictionary(); x.setValue('foo', 1:3); x.serialize('slim');", "foo=1 2 3;");
-	EidosAssertScriptSuccess_S("x = Dictionary(); x.setValue('foo', 1:3); x.setValue('bar', 'baz'); x.serialize('slim');", "bar=\"baz\";foo=1 2 3;");
-	EidosAssertScriptSuccess_S("x = Dictionary(); x.setValue('foo', 1:3); y = Dictionary(); y.setValue('a', 1.5); y.setValue('b', T); x.setValue('xyzzy', y); x.serialize('slim');", "foo=1 2 3;xyzzy={a=1.5;b=T;};");
+	EidosAssertScriptSuccess_S("x = Dictionary(); x.setValue('foo', 1:3); x.serialize('slim');", "\"foo\"=1 2 3;");
+	EidosAssertScriptSuccess_S("x = Dictionary(); x.setValue('foo', 1:3); x.setValue('bar', 'baz'); x.serialize('slim');", "\"bar\"=\"baz\";\"foo\"=1 2 3;");
+	EidosAssertScriptSuccess_S("x = Dictionary(); x.setValue('foo', 1:3); y = Dictionary(); y.setValue('a', 1.5); y.setValue('b', T); x.setValue('xyzzy', y); x.serialize('slim');", "\"foo\"=1 2 3;\"xyzzy\"={\"a\"=1.5;\"b\"=T;};");
+	
+	EidosAssertScriptSuccess_S("x = Dictionary(); x.serialize('slim');", "");
+	EidosAssertScriptSuccess_S("x = Dictionary(); x.setValue(5, 1:3); x.serialize('slim');", "5=1 2 3;");
+	EidosAssertScriptSuccess_S("x = Dictionary(); x.setValue(5, 1:3); x.setValue(3, 'baz'); x.serialize('slim');", "3=\"baz\";5=1 2 3;");
+	EidosAssertScriptSuccess_S("x = Dictionary(); x.setValue(5, 1:3); y = Dictionary(); y.setValue(20, 1.5); y.setValue(30, T); x.setValue(11, y); x.serialize('slim');", "5=1 2 3;11={20=1.5;30=T;};");
 	
 	EidosAssertScriptSuccess_S("x = Dictionary(); x.serialize('json');", "{}");
 	EidosAssertScriptSuccess_S("x = Dictionary(); x.setValue('foo', 1:3); x.serialize('json');", "{\"foo\":[1,2,3]}");
 	EidosAssertScriptSuccess_S("x = Dictionary(); x.setValue('foo', 1:3); x.setValue('bar', 'baz'); x.serialize('json');", "{\"bar\":[\"baz\"],\"foo\":[1,2,3]}");
 	EidosAssertScriptSuccess_S("x = Dictionary(); x.setValue('foo', 1:3); y = Dictionary(); y.setValue('a', 1.5); y.setValue('b', T); x.setValue('xyzzy', y); x.serialize('json');", "{\"foo\":[1,2,3],\"xyzzy\":[{\"a\":[1.5],\"b\":[true]}]}");
+	
+	EidosAssertScriptRaise("x = Dictionary(); x.setValue(5, 1:3); x.serialize('json');", 40, "integer keys");
 	
 	EidosAssertScriptSuccess_S("x = Dictionary(); x.serialize('csv');", "");
 	EidosAssertScriptSuccess_SV("x = Dictionary(); x.setValue('foo', 1:3); x.serialize('csv');", {"\"foo\"", "1", "2", "3"});
@@ -1048,6 +1155,14 @@ void _RunClassTests(std::string temp_path)
 	EidosAssertScriptSuccess_SV("x = Dictionary(); x.setValue('foo', c(INF, -INF, NAN)); x.serialize('csv');", {"\"foo\"", "INF", "-INF", "NAN"});
 	EidosAssertScriptRaise("x = Dictionary(); x.setValue('foo', 1:3); y = Dictionary(); x.setValue('xyzzy', y); x.serialize('csv');", 86, "object to CSV/TSV");
 	
+	EidosAssertScriptSuccess_SV("x = Dictionary(); x.setValue(5, 1:3); x.serialize('csv');", {"5", "1", "2", "3"});
+	EidosAssertScriptSuccess_SV("x = Dictionary(); x.setValue(5, 1:3); x.setValue(3, 'baz'); x.serialize('csv');", {"3,5", "\"baz\",1", ",2", ",3"});
+	EidosAssertScriptSuccess_SV("x = Dictionary(); x.setValue(3, 1:3); x.setValue(5, 'baz'); x.serialize('csv');", {"3,5", "1,\"baz\"", "2,", "3,"});
+	EidosAssertScriptSuccess_SV("x = Dictionary(); x.setValue(3, 1:3); x.setValue(5, c(T,F)); x.serialize('csv');", {"3,5", "1,TRUE", "2,FALSE", "3,"});
+	EidosAssertScriptSuccess_SV("x = Dictionary(); x.setValue(3, 1:3); x.setValue(5, c(1.0, 2.1, 3.2)); x.serialize('csv');", {"3,5", "1,1.0", "2,2.1", "3,3.2"});
+	EidosAssertScriptSuccess_SV("x = Dictionary(); x.setValue(5, c(INF, -INF, NAN)); x.serialize('csv');", {"5", "INF", "-INF", "NAN"});
+	EidosAssertScriptRaise("x = Dictionary(); x.setValue(5, 1:3); y = Dictionary(); x.setValue(11, y); x.serialize('csv');", 77, "object to CSV/TSV");
+	
 	EidosAssertScriptSuccess_S("x = Dictionary(); x.serialize('tsv');", "");
 	EidosAssertScriptSuccess_SV("x = Dictionary(); x.setValue('foo', 1:3); x.serialize('tsv');", {"\"foo\"", "1", "2", "3"});
 	EidosAssertScriptSuccess_SV("x = Dictionary(); x.setValue('foo', 1:3); x.setValue('bar', 'baz'); x.serialize('tsv');", {"\"bar\"\t\"foo\"", "\"baz\"\t1", "\t2", "\t3"});
@@ -1056,6 +1171,14 @@ void _RunClassTests(std::string temp_path)
 	EidosAssertScriptSuccess_SV("x = Dictionary(); x.setValue('bar', 1:3); x.setValue('foo', c(1.0, 2.1, 3.2)); x.serialize('tsv');", {"\"bar\"\t\"foo\"", "1\t1.0", "2\t2.1", "3\t3.2"});
 	EidosAssertScriptSuccess_SV("x = Dictionary(); x.setValue('foo', c(INF, -INF, NAN)); x.serialize('tsv');", {"\"foo\"", "INF", "-INF", "NAN"});
 	EidosAssertScriptRaise("x = Dictionary(); x.setValue('foo', 1:3); y = Dictionary(); x.setValue('xyzzy', y); x.serialize('tsv');", 86, "object to CSV/TSV");
+	
+	EidosAssertScriptSuccess_SV("x = Dictionary(); x.setValue(5, 1:3); x.serialize('tsv');", {"5", "1", "2", "3"});
+	EidosAssertScriptSuccess_SV("x = Dictionary(); x.setValue(5, 1:3); x.setValue(3, 'baz'); x.serialize('tsv');", {"3\t5", "\"baz\"\t1", "\t2", "\t3"});
+	EidosAssertScriptSuccess_SV("x = Dictionary(); x.setValue(3, 1:3); x.setValue(5, 'baz'); x.serialize('tsv');", {"3\t5", "1\t\"baz\"", "2\t", "3\t"});
+	EidosAssertScriptSuccess_SV("x = Dictionary(); x.setValue(3, 1:3); x.setValue(5, c(T,F)); x.serialize('tsv');", {"3\t5", "1\tTRUE", "2\tFALSE", "3\t"});
+	EidosAssertScriptSuccess_SV("x = Dictionary(); x.setValue(3, 1:3); x.setValue(5, c(1.0, 2.1, 3.2)); x.serialize('tsv');", {"3\t5", "1\t1.0", "2\t2.1", "3\t3.2"});
+	EidosAssertScriptSuccess_SV("x = Dictionary(); x.setValue(5, c(INF, -INF, NAN)); x.serialize('tsv');", {"5", "INF", "-INF", "NAN"});
+	EidosAssertScriptRaise("x = Dictionary(); x.setValue(5, 1:3); y = Dictionary(); x.setValue(11, y); x.serialize('tsv');", 77, "object to CSV/TSV");
 	
 	EidosAssertScriptRaise("x = Dictionary(); x.serialize('foo');", 20, "does not recognize the format");
 	
@@ -1101,6 +1224,7 @@ void _RunClassTests(std::string temp_path)
 	EidosAssertScriptSuccess_S("a = Dictionary('{\"a\": \"b\"}'); a.serialize('json');", "{\"a\":[\"b\"]}");
 	EidosAssertScriptSuccess_S("a = Dictionary('{\"a\": [\"b\"]}'); a.serialize('json');", "{\"a\":[\"b\"]}");
 	EidosAssertScriptSuccess_L("a = Dictionary(); a.setValue('logical_empty', logical(0)); a.setValue('logical_T', T); a.setValue('logical_F', F); a.setValue('logical_vector', c(T, F, T, F)); a.setValue('int_empty', integer(0)); a.setValue('int_singleton', 1); a.setValue('int_vector', 1:3); a.setValue('float_empty', float(0)); a.setValue('float_singleton', 1.0); a.setValue('float_vector', 1.0:3); a.setValue('string_empty', string(0)); a.setValue('string_singleton', 'foo'); a.setValue('string_vector', c('foo', 'bar', 'baz')); sa_json = a.serialize('json'); b = Dictionary(sa_json); sb_json = b.serialize('json'); identical(sa_json,sb_json);", true);
+	EidosAssertScriptSuccess_L("x = Dictionary('a', 5:7, 'b', 'foo'); x.setValue('c', Dictionary('d', 18)); y = x.serialize('json'); z = Dictionary(y); z = z.serialize('json'); identical(y, z);", true);
 	
 	// DataFrame(...)
 	// identicalContents()
@@ -1113,7 +1237,11 @@ void _RunClassTests(std::string temp_path)
 	EidosAssertScriptSuccess_L("x = DataFrame(); x.setValue('a', 0:2); x.setValue('b', c('foo', 'bar', 'baz')); x.setValue('c', c(T, F, T)); x.setValue('d', c(1.1, 2.2, 3.3)); y = DataFrame(x); y.identicalContents(x);", true);
 	EidosAssertScriptRaise("DataFrame(5);", 0, "be a singleton Dictionary");
 	EidosAssertScriptRaise("y = DataFrame('a', 0:2, 'b', c('foo', 'bar', 'baz'), 'c', c(T, F, T), 'd', c(1.1, 2.2, 3.3)); DataFrame(c(y,y));", 94, "be a singleton");
-	EidosAssertScriptRaise("y = DataFrame('a', 0:2, 'b', c('foo', 'bar', 'baz'), 'c', c(T, F, T), 'd', c(1.1, 2.2, 3.3)); DataFrame(y, y);", 94, "keys be singleton strings");
+	EidosAssertScriptRaise("y = DataFrame('a', 0:2, 'b', c('foo', 'bar', 'baz'), 'c', c(T, F, T), 'd', c(1.1, 2.2, 3.3)); DataFrame(y, y);", 94, "keys be of type string or integer");
+	EidosAssertScriptRaise("x = DataFrame(5, 1:10, 'a', 1:10);", 4, "always uses string keys");
+	EidosAssertScriptRaise("x = DataFrame('a', 1:10, 5, 1:10);", 4, "always uses string keys");
+	EidosAssertScriptSuccess_L("x = Dictionary('a', 1:10); y = DataFrame(x); z = DataFrame('a', 1:10); y.identicalContents(z);", true);
+	EidosAssertScriptRaise("x = Dictionary(5, 1:10); y = DataFrame(x);", 29, "always uses string keys");
 	
 	EidosAssertScriptSuccess_L("x = Dictionary(); x.setValue('a', 0:2); x.setValue('b', c('foo', 'bar', 'baz')); x.setValue('c', c(T, F, T)); x.setValue('d', c(1.1, 2.2, 3.3)); y = DataFrame(x); y.identicalContents(x);", true);
 	EidosAssertScriptSuccess_L("x = DataFrame(); x.setValue('a', 0:2); x.setValue('b', c('foo', 'bar', 'baz')); x.setValue('c', c(T, F, T)); x.setValue('d', c(1.1, 2.2, 3.3)); y = Dictionary(x); y.identicalContents(x);", true);
@@ -1147,6 +1275,18 @@ void _RunClassTests(std::string temp_path)
 	EidosAssertScriptSuccess_L("x = DataFrame('b', 1:3, 'a', c(T,F,T)); identical(x.ncol, 2);", true);
 	EidosAssertScriptSuccess_L("x = DataFrame('b', 1:3, 'a', c(T,F,T)); identical(x.nrow, 3);", true);
 	
+	// DataFrame asMatrix()
+	EidosAssertScriptRaise("x = DataFrame('a', 1:3, 'b', c(T,F,T)); x.asMatrix();", 42, "is the same type (logical != integer)");
+	EidosAssertScriptRaise("x = DataFrame('a', DataFrame(), 'b', Dictionary()); x.asMatrix();", 54, "is the same class (Dictionary != DataFrame)");
+	EidosAssertScriptSuccess_L("x = DataFrame('a', 1:5, 'b', 11:15); m1 = x.asMatrix(); m2 = matrix(c(1:5, 11:15), ncol=2, byrow=F); identical(m1, m2);", true);
+	EidosAssertScriptSuccess_L("x = DataFrame('b', 1:5, 'a', 11:15); m1 = x.asMatrix(); m2 = matrix(c(1:5, 11:15), ncol=2, byrow=F); identical(m1, m2);", true);
+	EidosAssertScriptSuccess_L("x = DataFrame('b', 11:15, 'a', 1:5); m1 = x.asMatrix(); m2 = matrix(c(11:15, 1:5), ncol=2, byrow=F); identical(m1, m2);", true);
+	EidosAssertScriptSuccess_L("x = DataFrame('a', 11:15, 'b', 1:5); m1 = x.asMatrix(); m2 = matrix(c(11:15, 1:5), ncol=2, byrow=F); identical(m1, m2);", true);
+	EidosAssertScriptSuccess_L("x = DataFrame('b', 11.0:15, 'a', 1.0:5); m1 = x.asMatrix(); m2 = matrix(c(11.0:15, 1.0:5), ncol=2, byrow=F); identical(m1, m2);", true);
+	EidosAssertScriptSuccess_L("x = DataFrame('b', c('foo','bar'), 'a', c('baz','barbaz')); m1 = x.asMatrix(); m2 = matrix(c('foo','bar','baz','barbaz'), ncol=2, byrow=F); identical(m1, m2);", true);
+	EidosAssertScriptSuccess_L("x = DataFrame('b', c(T,T,F), 'a', c(F,T,F)); m1 = x.asMatrix(); m2 = matrix(c(T,T,F,F,T,F), ncol=2, byrow=F); identical(m1, m2);", true);
+	EidosAssertScriptSuccess_L("d1 = Dictionary('foo', 1:8); d2 = Dictionary('baz', 11:18); x = DataFrame('b', d1, 'a', d2); m1 = x.asMatrix(); m2 = matrix(c(d1, d2), ncol=2, byrow=F); identical(m1, m2);", true);
+	
 	// DataFrame cbind()
 	EidosAssertScriptSuccess_L("x = DataFrame('b', 1:3, 'a', c(T,F,T)); y = DataFrame(); y.cbind(x); y.identicalContents(x);", true);
 	EidosAssertScriptSuccess_L("x = DataFrame('b', 1:3, 'a', c(T,F,T)); y = DataFrame('c', 2.0:4); y.cbind(x); DataFrame('c', 2.0:4, 'b', 1:3, 'a', c(T,F,T)).identicalContents(y);", true);
@@ -1171,6 +1311,13 @@ void _RunClassTests(std::string temp_path)
 	EidosAssertScriptRaise("x = DataFrame('b', 1:3, 'a', c(T,F,T)); y = DataFrame('b', Dictionary(), 'a', T); x.rbind(y);", 84, "cannot be mixed");
 	
 	// DataFrame subset()
+	EidosAssertScriptSuccess_L("x = DataFrame('b', 1:3, 'a', c(T,F,T)); x.subset().identicalContents(x);", true);
+	EidosAssertScriptSuccess_L("x = DataFrame('b', 1:3, 'a', c(T,F,T)); x.subset(rows=0).identicalContents(DataFrame('b', 1, 'a', T));", true);
+	EidosAssertScriptSuccess_L("x = DataFrame('b', 1:3, 'a', c(T,F,T)); x.subset(rows=1).identicalContents(DataFrame('b', 2, 'a', F));", true);
+	EidosAssertScriptSuccess_L("x = DataFrame('b', 1:3, 'a', c(T,F,T)); x.subset(rows=2).identicalContents(DataFrame('b', 3, 'a', T));", true);
+	EidosAssertScriptSuccess_IV("x = DataFrame('b', 1:3, 'a', c(T,F,T)); x.subset(cols=0);", {1, 2, 3});
+	EidosAssertScriptSuccess_LV("x = DataFrame('b', 1:3, 'a', c(T,F,T)); x.subset(cols=1);", {true, false, true});
+	
 	EidosAssertScriptSuccess_I("x = DataFrame('b', 1:3, 'a', c(T,F,T)); x.subset(0, 0);", 1);
 	EidosAssertScriptSuccess_I("x = DataFrame('b', 1:3, 'a', c(T,F,T)); x.subset(1, 0);", 2);
 	EidosAssertScriptSuccess_I("x = DataFrame('b', 1:3, 'a', c(T,F,T)); x.subset(0, 'b');", 1);
@@ -1294,8 +1441,35 @@ void _RunClassTests(std::string temp_path)
 			EidosAssertScriptSuccess_L("x = Dictionary('a', 3:6, 'b', c(121,131,141,141141)); file = writeTempFile('eidos_test_', '.csv', x.serialize('csv')); y = readCSV(file, quote='1'); Dictionary('\"a\"', 3:6, '\"b\"', c(2:4, 414)).identicalContents(y);", true);
 			EidosAssertScriptSuccess_L("x = Dictionary('b', c('10$25', '10$0', '10$')); file = writeTempFile('eidos_test_', '.csv', x.serialize('csv')); y = readCSV(file, dec='$'); Dictionary('b', c(10.25, 10, 10)).identicalContents(y);", true);
 			EidosAssertScriptSuccess_L("x = Dictionary('a', c('foo', 'bar'), 'b', c(10.5, 10.25)); file = writeTempFile('eidos_test_', '.csv', x.serialize('csv')); y = readCSV(file, dec='$', comment='.'); Dictionary('a', c('foo', 'bar'), 'b', c(10, 10)).identicalContents(y);", true);
+			
+			// test sep="" whitespace separator)
+			EidosAssertScriptSuccess_L("file = writeTempFile('eidos_test_', '.csv', c('  a   b   c   d   e', '   1   2   3   4   5   ', ' 10  20  30  40  50', '100 200 300 400 500')); y = readCSV(file, sep=''); Dictionary('a', c(1,10,100), 'b', c(2,20,200), 'c', c(3,30,300), 'd', c(4,40,400), 'e', c(5,50,500)).identicalContents(y);", true);
 		}
 	}
+	
+	// Test EidosDictionary's interaction with retain-released and non-retain-released objects using EidosTestElement and EidosTestElementNRR
+	// Note that these tests will leak instances of EidosTestElementNRR; since it is not under retain-release there is no way to know when to release it!
+	// They will also cause warning to be emitted to the console, so they are disabled by default; but they worked last time I checked
+#if 0
+	EidosAssertScriptSuccess_L("_Test(5000); T;", true);
+	EidosAssertScriptSuccess_L("_TestNRR(5001); T;", true);
+	EidosAssertScriptSuccess_L("x = _Test(5002); T;", true);
+	EidosAssertScriptSuccess_L("x = _TestNRR(5003); T;", true);
+	EidosAssertScriptSuccess_L("x = _Test(5004); x = 5; T;", true);
+	EidosAssertScriptSuccess_L("x = _TestNRR(5005); x = 5; T;", true);
+	EidosAssertScriptSuccess_L("x = _Test(5006); y = Dictionary('a', x); T;", true);
+	EidosAssertScriptSuccess_L("x = _TestNRR(5007); y = Dictionary('a', x); T;", true);											// logs - y references x
+	EidosAssertScriptSuccess_L("x = _Test(5008); y = Dictionary('a', x); y = 5; T;", true);
+	EidosAssertScriptSuccess_L("x = _TestNRR(5009); y = Dictionary('a', x); y = 5; T;", true);
+	EidosAssertScriptSuccess_L("x = _Test(5010); y = Dictionary('a', x); z = Dictionary(y); y = 5; T;", true);
+	EidosAssertScriptSuccess_L("x = _TestNRR(5011); y = Dictionary('a', x); z = Dictionary(y); y = 5; T;", true);				// logs - z references x (copied from y)
+	EidosAssertScriptSuccess_L("x = _Test(5011); y = Dictionary('a', x); z = Dictionary(y); y = 5; z = 5; T;", true);
+	EidosAssertScriptSuccess_L("x = _TestNRR(5012); y = Dictionary('a', x); z = Dictionary(y); y = 5; z = 5; T;", true);
+	EidosAssertScriptSuccess_L("x = _Test(5013); y = Dictionary('a', x); z = Dictionary('b', y); y = 5; T;", true);
+	EidosAssertScriptSuccess_L("x = _TestNRR(5014); y = Dictionary('a', x); z = Dictionary('b', y); y = 5; T;", true);			// logs - z retains y, which references x
+	EidosAssertScriptSuccess_L("x = _Test(5015); y = Dictionary('a', x); z = Dictionary('b', y); y = 5; z = 5; T;", true);
+	EidosAssertScriptSuccess_L("x = _TestNRR(5016); y = Dictionary('a', x); z = Dictionary('b', y); y = 5; z = 5; T;", true);
+#endif
 	
 	// Test EidosImage properties and methods – but how?  If it were possible to construct an Image from a matrix, that would provide an avenue for testing...
 	// That is what we do here now, but we can only test grayscale images since we can only generate grayscale images, at present... FIXME
@@ -1497,17 +1671,48 @@ void _RunUserDefinedFunctionTests(void)
 	const std::string &builtins_test_string =
 #include "eidos_test_builtins.h"
 	;
-	std::vector<std::string> test_strings = Eidos_string_split(builtins_test_string, "// ***********************************************************************************************");
-	
-	//for (int testidx = 0; testidx < 100; testidx++)	// uncomment this for a more thorough stress test
 	{
-		for (std::string &test_string : test_strings)
+		std::vector<std::string> test_strings = Eidos_string_split(builtins_test_string, "// ***********************************************************************************************");
+		
+		//for (int testidx = 0; testidx < 100; testidx++)	// uncomment this for a more thorough stress test
 		{
-			std::string test_string_fixed = test_string + "\nreturn T;\n";
-			
-			EidosAssertScriptSuccess_L(test_string_fixed, true);
+			for (std::string &test_string : test_strings)
+			{
+				std::string test_string_fixed = test_string + "\nreturn T;\n";
+				
+				EidosAssertScriptSuccess_L(test_string_fixed, true);
+			}
 		}
 	}
+	
+	// Tests of parallelization of Eidos functions; this is here just because the above test is here
+#ifdef _OPENMP
+	const std::string &parallelization_test_string =
+#include "eidos_test_parallel.h"
+	;
+	{
+		std::vector<std::string> test_strings = Eidos_string_split(parallelization_test_string, "// ***********************************************************************************************");
+		
+		//for (int testidx = 0; testidx < 100; testidx++)	// uncomment this for a more thorough stress test
+		{
+			for (std::string &test_string : test_strings)
+			{
+				std::string test_string_fixed = test_string + "\nreturn T;\n";
+				
+				// Note that we ensure that we are using the maximum number of threads at start & end
+				gEidosNumThreads = gEidosMaxThreads;
+				gEidosNumThreadsOverride = false;
+				omp_set_num_threads(gEidosMaxThreads);
+				
+				EidosAssertScriptSuccess_L(test_string_fixed, true);
+				
+				gEidosNumThreads = gEidosMaxThreads;
+				gEidosNumThreadsOverride = false;
+				omp_set_num_threads(gEidosMaxThreads);
+			}
+		}
+	}
+#endif
 }
 
 #pragma mark void EidosValue

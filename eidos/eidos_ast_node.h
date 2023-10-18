@@ -3,7 +3,7 @@
 //  Eidos
 //
 //  Created by Ben Haller on 7/27/15.
-//  Copyright (c) 2015-2022 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2015-2023 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -91,7 +91,7 @@ public:
 	
 	mutable EidosASTNode_ArgumentCache *argument_cache_ = nullptr;		// OWNED POINTER: an argument cache struct, allocated on demand for function/method call nodes
 	
-#if defined(SLIMGUI) && (SLIMPROFILING == 1)
+#if (SLIMPROFILING == 1)
 	// PROFILING
 	mutable eidos_profile_t profile_total_ = 0;							// profiling clock for this node and its children; only set for some nodes
 	EidosToken *full_range_end_token_ = nullptr;						// the ")" or "]" that ends the full range of tokens like "(", "[", for, if, and while
@@ -127,12 +127,13 @@ public:
 	void PrintToken(std::ostream &p_outstream) const;
 	void PrintTreeWithIndent(std::ostream &p_outstream, int p_indent) const;
 	
-#if defined(SLIMGUI) && (SLIMPROFILING == 1)
+#if (SLIMPROFILING == 1)
 	// PROFILING
 	void ZeroProfileTotals(void) const;
 	eidos_profile_t ConvertProfileTotalsToSelfCounts(void) const;
 	eidos_profile_t TotalOfSelfCounts(void) const;
 	
+	void FullUTF8Range(int32_t *p_start, int32_t *p_end) const;
 	void FullUTF16Range(int32_t *p_start, int32_t *p_end) const;
 #endif
 };

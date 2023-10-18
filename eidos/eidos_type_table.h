@@ -3,7 +3,7 @@
 //  Eidos
 //
 //  Created by Ben Haller on 5/8/16.
-//  Copyright (c) 2016-2022 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2016-2023 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -56,7 +56,7 @@ private:
 	
 public:
 	
-	EidosTypeTable(const EidosTypeTable&) = delete;										// no copying
+	EidosTypeTable(const EidosTypeTable &originalTable);								// copy all defined symbols from an original table to a derived table
 	EidosTypeTable& operator=(const EidosTypeTable&) = delete;							// no copying
 	explicit EidosTypeTable(void);														// standard constructor
 	virtual ~EidosTypeTable(void);

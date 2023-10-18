@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 02/06/2021.
-//  Copyright (c) 2021-2022 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2021-2023 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -46,6 +46,7 @@ public:
     // Our various output views, which each collect output independently
     void takeDebugOutput(QString str);
     void takeRunOutput(QString str);
+    void takeSchedulingOutput(QString str);
     void takeLogFileOutput(std::vector<std::string> &lineElements, const std::string &path);
     void takeFileOutput(std::vector<std::string> &lines, bool append, const std::string &path);
     
@@ -55,6 +56,7 @@ public slots:
     
     void showDebugOutput(void);
     void showRunOutput(void);
+    void showSchedulingOutput(void);
     void showLogFile(int logFileIndex);
     void showFile(int fileIndex);
     

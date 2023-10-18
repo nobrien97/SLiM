@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 12/13/14.
-//  Copyright (c) 2014-2022 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2014-2023 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -21,7 +21,7 @@
 #include "mutation.h"
 #include "eidos_call_signature.h"
 #include "eidos_property_signature.h"
-#include "slim_sim.h"	// we need to tell the simulation if a selection coefficient is set to non-neutral...
+#include "species.h"
 
 #include <algorithm>
 #include <string>
@@ -30,10 +30,15 @@
 
 
 // All Mutation objects get allocated out of a single shared block, for speed; see SLiM_WarmUp()
+// Note this is shared by all species; the mutations for every species come out of the same shared block.
 Mutation *gSLiM_Mutation_Block = nullptr;
 MutationIndex gSLiM_Mutation_Block_Capacity = 0;
 MutationIndex gSLiM_Mutation_FreeIndex = -1;
 MutationIndex gSLiM_Mutation_Block_LastUsedIndex = -1;
+
+#ifdef DEBUG_LOCKS_ENABLED
+EidosDebugLock gSLiM_Mutation_LOCK("gSLiM_Mutation_LOCK");
+#endif
 
 slim_refcount_t *gSLiM_Mutation_Refcounts = nullptr;
 
@@ -43,6 +48,8 @@ extern std::vector<EidosValue_Object *> gEidosValue_Object_Mutation_Registry;	//
 
 void SLiM_CreateMutationBlock(void)
 {
+	THREAD_SAFETY_IN_ANY_PARALLEL("SLiM_CreateMutationBlock(): gSLiM_Mutation_Block address change");
+	
 	// first allocate the block; no need to zero the memory
 	gSLiM_Mutation_Block_Capacity = SLIM_MUTATION_BLOCK_INITIAL_SIZE;
 	gSLiM_Mutation_Block = (Mutation *)malloc(gSLiM_Mutation_Block_Capacity * sizeof(Mutation));
@@ -65,6 +72,21 @@ void SLiM_CreateMutationBlock(void)
 
 void SLiM_IncreaseMutationBlockCapacity(void)
 {
+	// We do not use a THREAD_SAFETY macro here because this needs to be checked in release builds also;
+	// we are not able to completely protect against this occurring at runtime, and it corrupts the run.
+	// It's OK for this to be called when we're inside an inactive parallel region; there is then no
+	// race condition.  When a parallel region is active, even inside a critical region, reallocating
+	// the mutation block has the potential for a race with other threads.
+	if (omp_in_parallel())
+	{
+		std::cerr << "ERROR (SLiM_IncreaseMutationBlockCapacity): (internal error) SLiM_IncreaseMutationBlockCapacity() was called to reallocate gSLiM_Mutation_Block inside a parallel section.  If you see this message, you need to increase the pre-allocation margin for your simulation, because it is generating such an unexpectedly large number of new mutations.  Please contact the SLiM developers for guidance on how to do this." << std::endl;
+		raise(SIGTRAP);
+	}
+	
+#ifdef DEBUG_LOCKS_ENABLED
+	gSLiM_Mutation_LOCK.start_critical(1);
+#endif
+	
 	if (!gSLiM_Mutation_Block)
 		EIDOS_TERMINATION << "ERROR (SLiM_IncreaseMutationBlockCapacity): (internal error) called before SLiM_CreateMutationBlock()." << EidosTerminate();
 	
@@ -87,12 +109,24 @@ void SLiM_IncreaseMutationBlockCapacity(void)
 	std::uintptr_t old_mutation_block = reinterpret_cast<std::uintptr_t>(gSLiM_Mutation_Block);
 	MutationIndex old_block_capacity = gSLiM_Mutation_Block_Capacity;
 	
+	//std::cout << "old capacity: " << old_block_capacity << std::endl;
+	
+	// BCH 25 July 2023: check for increasing our block beyond the maximum size of 2^31 mutations.
+	// See https://github.com/MesserLab/SLiM/issues/361.  Note that the initial size should be
+	// a power of 2, so that we actually reach the maximum; see SLIM_MUTATION_BLOCK_INITIAL_SIZE.
+	// In other words, we expect to be at exactly 0x0000000040000000UL here, and thus to double
+	// to 0x0000000080000000UL, which is a capacity of 2^31, which is the limit of int32_t.
+	if ((size_t)old_block_capacity > 0x0000000040000000UL)	// >2^30 means >2^31 when doubled
+		EIDOS_TERMINATION << "ERROR (SLiM_IncreaseMutationBlockCapacity): too many mutations; there is a limit of 2^31 (2147483648) segregating mutations in SLiM." << EidosTerminate(nullptr);
+	
 	gSLiM_Mutation_Block_Capacity *= 2;
 	gSLiM_Mutation_Block = (Mutation *)realloc((void*)gSLiM_Mutation_Block, gSLiM_Mutation_Block_Capacity * sizeof(Mutation));
 	gSLiM_Mutation_Refcounts = (slim_refcount_t *)realloc(gSLiM_Mutation_Refcounts, gSLiM_Mutation_Block_Capacity * sizeof(slim_refcount_t));
 	
 	if (!gSLiM_Mutation_Block || !gSLiM_Mutation_Refcounts)
 		EIDOS_TERMINATION << "ERROR (SLiM_IncreaseMutationBlockCapacity): allocation failed; you may need to raise the memory limit for SLiM." << EidosTerminate(nullptr);
+	
+	//std::cout << "new capacity: " << gSLiM_Mutation_Block_Capacity << std::endl;
 	
 	std::uintptr_t new_mutation_block = reinterpret_cast<std::uintptr_t>(gSLiM_Mutation_Block);
 	
@@ -125,56 +159,63 @@ void SLiM_IncreaseMutationBlockCapacity(void)
 				mutation_value->PatchPointersByAdding(ptr_diff);
 		}
 	}
-}
-
-void SLiM_ZeroRefcountBlock(__attribute__((unused)) MutationRun &p_mutation_registry)
-{
-#ifdef SLIMGUI
-	// This version zeros out refcounts just for the mutations currently in use in the registry.
-	// It is thus minimal, but probably quite a bit slower than just zeroing out the whole thing.
-	// BCH 11/25/2017: This code path needs to be used in SLiMgui to avoid modifying the refcounts
-	// for mutations in other simulations sharing the mutation block.
-	slim_refcount_t *refcount_block_ptr = gSLiM_Mutation_Refcounts;
-	const MutationIndex *registry_iter = p_mutation_registry.begin_pointer_const();
-	const MutationIndex *registry_iter_end = p_mutation_registry.end_pointer_const();
 	
-	// Do 16 reps
-	while (registry_iter + 16 <= registry_iter_end)
-	{
-		*(refcount_block_ptr + (*registry_iter++)) = 0;
-		*(refcount_block_ptr + (*registry_iter++)) = 0;
-		*(refcount_block_ptr + (*registry_iter++)) = 0;
-		*(refcount_block_ptr + (*registry_iter++)) = 0;
-		*(refcount_block_ptr + (*registry_iter++)) = 0;
-		*(refcount_block_ptr + (*registry_iter++)) = 0;
-		*(refcount_block_ptr + (*registry_iter++)) = 0;
-		*(refcount_block_ptr + (*registry_iter++)) = 0;
-		*(refcount_block_ptr + (*registry_iter++)) = 0;
-		*(refcount_block_ptr + (*registry_iter++)) = 0;
-		*(refcount_block_ptr + (*registry_iter++)) = 0;
-		*(refcount_block_ptr + (*registry_iter++)) = 0;
-		*(refcount_block_ptr + (*registry_iter++)) = 0;
-		*(refcount_block_ptr + (*registry_iter++)) = 0;
-		*(refcount_block_ptr + (*registry_iter++)) = 0;
-		*(refcount_block_ptr + (*registry_iter++)) = 0;
-	}
-	
-	// Finish off
-	while (registry_iter != registry_iter_end)
-		*(refcount_block_ptr + (*registry_iter++)) = 0;
-#else
-	// Zero out the whole thing with EIDOS_BZERO(), without worrying about which bits are in use.
-	// This hits more memory, but avoids having to read the registry, and should write whole cache lines.
-	EIDOS_BZERO(gSLiM_Mutation_Refcounts, (gSLiM_Mutation_Block_LastUsedIndex + 1) * sizeof(slim_refcount_t));
+#ifdef DEBUG_LOCKS_ENABLED
+	gSLiM_Mutation_LOCK.end_critical();
 #endif
 }
 
-size_t SLiM_MemoryUsageForMutationBlock(void)
+void SLiM_ZeroRefcountBlock(MutationRun &p_mutation_registry, bool p_registry_only)
+{
+	THREAD_SAFETY_IN_ANY_PARALLEL("SLiM_ZeroRefcountBlock(): gSLiM_Mutation_Block change");
+	
+#ifdef SLIMGUI
+	// BCH 11/25/2017: This code path needs to be used in SLiMgui to avoid modifying the refcounts
+	// for mutations in other simulations sharing the mutation block.
+	p_registry_only = true;
+#endif
+	
+	if (p_registry_only)
+	{
+		// This code path zeros out refcounts just for the mutations currently in use in the registry.
+		// It is thus minimal, but probably quite a bit slower than just zeroing out the whole thing.
+		// BCH 6/8/2023: This is necessary in SLiMgui, as noted above, but also in multispecies sims
+		// so that one species does not step on the toes of another species.
+		slim_refcount_t *refcount_block_ptr = gSLiM_Mutation_Refcounts;
+		const MutationIndex *registry_iter = p_mutation_registry.begin_pointer_const();
+		const MutationIndex *registry_iter_end = p_mutation_registry.end_pointer_const();
+		
+		while (registry_iter != registry_iter_end)
+			*(refcount_block_ptr + (*registry_iter++)) = 0;
+	}
+	else
+	{
+		// Zero out the whole thing with EIDOS_BZERO(), without worrying about which bits are in use.
+		// This hits more memory, but avoids having to read the registry, and should write whole cache lines.
+		EIDOS_BZERO(gSLiM_Mutation_Refcounts, (gSLiM_Mutation_Block_LastUsedIndex + 1) * sizeof(slim_refcount_t));
+	}
+}
+
+size_t SLiMMemoryUsageForMutationBlock(void)
 {
 	return gSLiM_Mutation_Block_Capacity * sizeof(Mutation);
 }
 
-size_t SLiM_MemoryUsageForMutationRefcounts(void)
+size_t SLiMMemoryUsageForFreeMutations(void)
+{
+	size_t mut_count = 0;
+	MutationIndex nextFreeBlock = gSLiM_Mutation_FreeIndex;
+	
+	while (nextFreeBlock != -1)
+	{
+		mut_count++;
+		nextFreeBlock = *(MutationIndex *)(gSLiM_Mutation_Block + nextFreeBlock);
+	}
+	
+	return mut_count * sizeof(Mutation);
+}
+
+size_t SLiMMemoryUsageForMutationRefcounts(void)
 {
 	return gSLiM_Mutation_Block_Capacity * sizeof(slim_refcount_t);
 }
@@ -187,9 +228,13 @@ size_t SLiM_MemoryUsageForMutationRefcounts(void)
 // A global counter used to assign all Mutation objects a unique ID
 slim_mutationid_t gSLiM_next_mutation_id = 0;
 
-Mutation::Mutation(MutationType *p_mutation_type_ptr, slim_position_t p_position, double p_selection_coeff, slim_objectid_t p_subpop_index, slim_generation_t p_generation, int8_t p_nucleotide) :
-mutation_type_ptr_(p_mutation_type_ptr), position_(p_position), selection_coeff_(static_cast<slim_selcoeff_t>(p_selection_coeff)), subpop_index_(p_subpop_index), origin_generation_(p_generation), state_(MutationState::kNewMutation), nucleotide_(p_nucleotide), mutation_id_(gSLiM_next_mutation_id++)
+Mutation::Mutation(MutationType *p_mutation_type_ptr, slim_position_t p_position, double p_selection_coeff, slim_objectid_t p_subpop_index, slim_tick_t p_tick, int8_t p_nucleotide) :
+mutation_type_ptr_(p_mutation_type_ptr), position_(p_position), selection_coeff_(static_cast<slim_selcoeff_t>(p_selection_coeff)), subpop_index_(p_subpop_index), origin_tick_(p_tick), state_(MutationState::kNewMutation), nucleotide_(p_nucleotide), mutation_id_(gSLiM_next_mutation_id++)
 {
+#ifdef DEBUG_LOCKS_ENABLED
+	gSLiM_Mutation_LOCK.start_critical(2);
+#endif
+	
 	// initialize the tag to the "unset" value
 	tag_value_ = SLIM_TAG_UNSET_VALUE;
 	
@@ -205,50 +250,57 @@ mutation_type_ptr_(p_mutation_type_ptr), position_(p_position), selection_coeff_
 	std::cout << "Mutation constructed: " << this << std::endl;
 #endif
 	
+#ifdef DEBUG_LOCKS_ENABLED
+	gSLiM_Mutation_LOCK.end_critical();
+#endif
+	
 #if 0
 	// Dump the memory layout of a Mutation object.  Note this code needs to be synced tightly with the header, since C++ has no real introspection.
 	static bool been_here = false;
 	
-	if (!been_here)
+#pragma omp critical (Mutation_layout_dump)
 	{
-		char *ptr_base = (char *)this;
-		char *ptr_mutation_type_ptr_ = (char *)&(this->mutation_type_ptr_);
-		char *ptr_position_ = (char *)&(this->position_);
-		char *ptr_selection_coeff_ = (char *)&(this->selection_coeff_);
-		char *ptr_subpop_index_ = (char *)&(this->subpop_index_);
-		char *ptr_origin_generation_ = (char *)&(this->origin_generation_);
-		char *ptr_state_ = (char *)&(this->state_);
-		char *ptr_nucleotide_ = (char *)&(this->nucleotide_);
-		char *ptr_scratch_ = (char *)&(this->scratch_);
-		char *ptr_mutation_id_ = (char *)&(this->mutation_id_);
-		char *ptr_tag_value_ = (char *)&(this->tag_value_);
-		char *ptr_cached_one_plus_sel_ = (char *)&(this->cached_one_plus_sel_);
-		char *ptr_cached_one_plus_dom_sel_ = (char *)&(this->cached_one_plus_dom_sel_);
-		char *ptr_cached_one_plus_haploiddom_sel_ = (char *)&(this->cached_one_plus_haploiddom_sel_);
-		
-		std::cout << "Class Mutation memory layout (sizeof(Mutation) == " << sizeof(Mutation) << ") :" << std::endl << std::endl;
-		std::cout << "   " << (ptr_mutation_type_ptr_ - ptr_base) << " (" << sizeof(MutationType *) << " bytes): MutationType *mutation_type_ptr_" << std::endl;
-		std::cout << "   " << (ptr_position_ - ptr_base) << " (" << sizeof(slim_position_t) << " bytes): const slim_position_t position_" << std::endl;
-		std::cout << "   " << (ptr_selection_coeff_ - ptr_base) << " (" << sizeof(slim_selcoeff_t) << " bytes): slim_selcoeff_t selection_coeff_" << std::endl;
-		std::cout << "   " << (ptr_subpop_index_ - ptr_base) << " (" << sizeof(slim_objectid_t) << " bytes): slim_objectid_t subpop_index_" << std::endl;
-		std::cout << "   " << (ptr_origin_generation_ - ptr_base) << " (" << sizeof(slim_generation_t) << " bytes): const slim_generation_t origin_generation_" << std::endl;
-		std::cout << "   " << (ptr_state_ - ptr_base) << " (" << sizeof(int8_t) << " bytes): const int8_t state_" << std::endl;
-		std::cout << "   " << (ptr_nucleotide_ - ptr_base) << " (" << sizeof(int8_t) << " bytes): const int8_t nucleotide_" << std::endl;
-		std::cout << "   " << (ptr_scratch_ - ptr_base) << " (" << sizeof(int8_t) << " bytes): const int8_t scratch_" << std::endl;
-		std::cout << "   " << (ptr_mutation_id_ - ptr_base) << " (" << sizeof(slim_mutationid_t) << " bytes): const slim_mutationid_t mutation_id_" << std::endl;
-		std::cout << "   " << (ptr_tag_value_ - ptr_base) << " (" << sizeof(slim_usertag_t) << " bytes): slim_usertag_t tag_value_" << std::endl;
-		std::cout << "   " << (ptr_cached_one_plus_sel_ - ptr_base) << " (" << sizeof(slim_selcoeff_t) << " bytes): slim_selcoeff_t cached_one_plus_sel_" << std::endl;
-		std::cout << "   " << (ptr_cached_one_plus_dom_sel_ - ptr_base) << " (" << sizeof(slim_selcoeff_t) << " bytes): slim_selcoeff_t cached_one_plus_dom_sel_" << std::endl;
-		std::cout << "   " << (ptr_cached_one_plus_haploiddom_sel_ - ptr_base) << " (" << sizeof(slim_selcoeff_t) << " bytes): slim_selcoeff_t cached_one_plus_haploiddom_sel_" << std::endl;
-		std::cout << std::endl;
-		
-		been_here = true;
+		if (!been_here)
+		{
+			char *ptr_base = (char *)this;
+			char *ptr_mutation_type_ptr_ = (char *)&(this->mutation_type_ptr_);
+			char *ptr_position_ = (char *)&(this->position_);
+			char *ptr_selection_coeff_ = (char *)&(this->selection_coeff_);
+			char *ptr_subpop_index_ = (char *)&(this->subpop_index_);
+			char *ptr_origin_tick_ = (char *)&(this->origin_tick_);
+			char *ptr_state_ = (char *)&(this->state_);
+			char *ptr_nucleotide_ = (char *)&(this->nucleotide_);
+			char *ptr_scratch_ = (char *)&(this->scratch_);
+			char *ptr_mutation_id_ = (char *)&(this->mutation_id_);
+			char *ptr_tag_value_ = (char *)&(this->tag_value_);
+			char *ptr_cached_one_plus_sel_ = (char *)&(this->cached_one_plus_sel_);
+			char *ptr_cached_one_plus_dom_sel_ = (char *)&(this->cached_one_plus_dom_sel_);
+			char *ptr_cached_one_plus_haploiddom_sel_ = (char *)&(this->cached_one_plus_haploiddom_sel_);
+			
+			std::cout << "Class Mutation memory layout (sizeof(Mutation) == " << sizeof(Mutation) << ") :" << std::endl << std::endl;
+			std::cout << "   " << (ptr_mutation_type_ptr_ - ptr_base) << " (" << sizeof(MutationType *) << " bytes): MutationType *mutation_type_ptr_" << std::endl;
+			std::cout << "   " << (ptr_position_ - ptr_base) << " (" << sizeof(slim_position_t) << " bytes): const slim_position_t position_" << std::endl;
+			std::cout << "   " << (ptr_selection_coeff_ - ptr_base) << " (" << sizeof(slim_selcoeff_t) << " bytes): slim_selcoeff_t selection_coeff_" << std::endl;
+			std::cout << "   " << (ptr_subpop_index_ - ptr_base) << " (" << sizeof(slim_objectid_t) << " bytes): slim_objectid_t subpop_index_" << std::endl;
+			std::cout << "   " << (ptr_origin_tick_ - ptr_base) << " (" << sizeof(slim_tick_t) << " bytes): const slim_tick_t origin_tick_" << std::endl;
+			std::cout << "   " << (ptr_state_ - ptr_base) << " (" << sizeof(int8_t) << " bytes): const int8_t state_" << std::endl;
+			std::cout << "   " << (ptr_nucleotide_ - ptr_base) << " (" << sizeof(int8_t) << " bytes): const int8_t nucleotide_" << std::endl;
+			std::cout << "   " << (ptr_scratch_ - ptr_base) << " (" << sizeof(int8_t) << " bytes): const int8_t scratch_" << std::endl;
+			std::cout << "   " << (ptr_mutation_id_ - ptr_base) << " (" << sizeof(slim_mutationid_t) << " bytes): const slim_mutationid_t mutation_id_" << std::endl;
+			std::cout << "   " << (ptr_tag_value_ - ptr_base) << " (" << sizeof(slim_usertag_t) << " bytes): slim_usertag_t tag_value_" << std::endl;
+			std::cout << "   " << (ptr_cached_one_plus_sel_ - ptr_base) << " (" << sizeof(slim_selcoeff_t) << " bytes): slim_selcoeff_t cached_one_plus_sel_" << std::endl;
+			std::cout << "   " << (ptr_cached_one_plus_dom_sel_ - ptr_base) << " (" << sizeof(slim_selcoeff_t) << " bytes): slim_selcoeff_t cached_one_plus_dom_sel_" << std::endl;
+			std::cout << "   " << (ptr_cached_one_plus_haploiddom_sel_ - ptr_base) << " (" << sizeof(slim_selcoeff_t) << " bytes): slim_selcoeff_t cached_one_plus_haploiddom_sel_" << std::endl;
+			std::cout << std::endl;
+			
+			been_here = true;
+		}
 	}
 #endif
 }
 
-Mutation::Mutation(slim_mutationid_t p_mutation_id, MutationType *p_mutation_type_ptr, slim_position_t p_position, double p_selection_coeff, slim_objectid_t p_subpop_index, slim_generation_t p_generation, int8_t p_nucleotide) :
-mutation_type_ptr_(p_mutation_type_ptr), position_(p_position), selection_coeff_(static_cast<slim_selcoeff_t>(p_selection_coeff)), subpop_index_(p_subpop_index), origin_generation_(p_generation), state_(MutationState::kNewMutation), nucleotide_(p_nucleotide), mutation_id_(p_mutation_id)
+Mutation::Mutation(slim_mutationid_t p_mutation_id, MutationType *p_mutation_type_ptr, slim_position_t p_position, double p_selection_coeff, slim_objectid_t p_subpop_index, slim_tick_t p_tick, int8_t p_nucleotide) :
+mutation_type_ptr_(p_mutation_type_ptr), position_(p_position), selection_coeff_(static_cast<slim_selcoeff_t>(p_selection_coeff)), subpop_index_(p_subpop_index), origin_tick_(p_tick), state_(MutationState::kNewMutation), nucleotide_(p_nucleotide), mutation_id_(p_mutation_id)
 {
 	// initialize the tag to the "unset" value
 	tag_value_ = SLIM_TAG_UNSET_VALUE;
@@ -266,6 +318,10 @@ mutation_type_ptr_(p_mutation_type_ptr), position_(p_position), selection_coeff_
 #endif
 	
 	// Since a mutation id was supplied by the caller, we need to ensure that subsequent mutation ids generated do not collide
+	// This constructor (unline the other Mutation() constructor above) is presently never called multithreaded,
+	// so we just enforce that here.  If that changes, it should start using the debug lock to detect races, as above.
+	THREAD_SAFETY_IN_ACTIVE_PARALLEL("Mutation::Mutation(): gSLiM_next_mutation_id change");
+	
 	if (gSLiM_next_mutation_id <= mutation_id_)
 		gSLiM_next_mutation_id = mutation_id_ + 1;
 }
@@ -283,7 +339,7 @@ void Mutation::SelfDelete(void)
 // This is unused except by debugging code and in the debugger itself
 std::ostream &operator<<(std::ostream &p_outstream, const Mutation &p_mutation)
 {
-	p_outstream << "Mutation{mutation_type_ " << p_mutation.mutation_type_ptr_->mutation_type_id_ << ", position_ " << p_mutation.position_ << ", selection_coeff_ " << p_mutation.selection_coeff_ << ", subpop_index_ " << p_mutation.subpop_index_ << ", origin_generation_ " << p_mutation.origin_generation_;
+	p_outstream << "Mutation{mutation_type_ " << p_mutation.mutation_type_ptr_->mutation_type_id_ << ", position_ " << p_mutation.position_ << ", selection_coeff_ " << p_mutation.selection_coeff_ << ", subpop_index_ " << p_mutation.subpop_index_ << ", origin_tick_ " << p_mutation.origin_tick_;
 	
 	return p_outstream;
 }
@@ -320,8 +376,8 @@ EidosValue_SP Mutation::GetProperty(EidosGlobalStringID p_property_id)
 			return ((state_ == MutationState::kInRegistry) ? gStaticEidosValue_LogicalT : gStaticEidosValue_LogicalF);
 		case gID_mutationType:		// ACCELERATED
 			return mutation_type_ptr_->SymbolTableEntry().second;
-		case gID_originGeneration:	// ACCELERATED
-			return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Int_singleton(origin_generation_));
+		case gID_originTick:		// ACCELERATED
+			return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Int_singleton(origin_tick_));
 		case gID_position:			// ACCELERATED
 			return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Int_singleton(position_));
 		case gID_selectionCoeff:	// ACCELERATED
@@ -459,7 +515,7 @@ EidosValue *Mutation::GetProperty_Accelerated_nucleotideValue(EidosObject **p_va
 	return int_result;
 }
 
-EidosValue *Mutation::GetProperty_Accelerated_originGeneration(EidosObject **p_values, size_t p_values_size)
+EidosValue *Mutation::GetProperty_Accelerated_originTick(EidosObject **p_values, size_t p_values_size)
 {
 	EidosValue_Int_vector *int_result = (new (gEidosValuePool->AllocateChunk()) EidosValue_Int_vector())->resize_no_initialize(p_values_size);
 	
@@ -467,7 +523,7 @@ EidosValue *Mutation::GetProperty_Accelerated_originGeneration(EidosObject **p_v
 	{
 		Mutation *value = (Mutation *)(p_values[value_index]);
 		
-		int_result->set_int_no_check(value->origin_generation_, value_index);
+		int_result->set_int_no_check(value->origin_tick_, value_index);
 	}
 	
 	return int_result;
@@ -664,23 +720,23 @@ EidosValue_SP Mutation::ExecuteMethod_setSelectionCoeff(EidosGlobalStringID p_me
 	// since this selection coefficient came from the user, check and set pure_neutral_ and all_pure_neutral_DFE_
 	if (selection_coeff_ != 0.0)
 	{
-		SLiMSim &sim = mutation_type_ptr_->sim_;
+		Species &species = mutation_type_ptr_->species_;
 		
-		sim.pure_neutral_ = false;							// let the sim know that it is no longer a pure-neutral simulation
+		species.pure_neutral_ = false;							// let the sim know that it is no longer a pure-neutral simulation
 		mutation_type_ptr_->all_pure_neutral_DFE_ = false;	// let the mutation type for this mutation know that it is no longer pure neutral
 		
 		// If a selection coefficient has changed from zero to non-zero, or vice versa, MutationRun's nonneutral mutation caches need revalidation
 		if (old_coeff == 0.0)
 		{
-			sim.nonneutral_change_counter_++;
+			species.nonneutral_change_counter_++;
 		}
 	}
 	else if (old_coeff != 0.0)	// && (selection_coeff_ == 0.0) implied by the "else"
 	{
-		SLiMSim &sim = mutation_type_ptr_->sim_;
+		Species &species = mutation_type_ptr_->species_;
 		
 		// If a selection coefficient has changed from zero to non-zero, or vice versa, MutationRun's nonneutral mutation caches need revalidation
-		sim.nonneutral_change_counter_++;
+		species.nonneutral_change_counter_++;
 	}
 	
 	// cache values used by the fitness calculation code for speed; see header
@@ -697,9 +753,9 @@ EidosValue_SP Mutation::ExecuteMethod_setMutationType(EidosGlobalStringID p_meth
 {
 #pragma unused (p_method_id, p_arguments, p_interpreter)
 	EidosValue *mutType_value = p_arguments[0].get();
-	SLiMSim &sim = mutation_type_ptr_->sim_;
+	Species &species = mutation_type_ptr_->species_;
 	
-	MutationType *mutation_type_ptr = SLiM_ExtractMutationTypeFromEidosValue_io(mutType_value, 0, sim, "setMutationType()");
+	MutationType *mutation_type_ptr = SLiM_ExtractMutationTypeFromEidosValue_io(mutType_value, 0, &species.community_, &species, "setMutationType()");		// SPECIES CONSISTENCY CHECK
 	
 	if (mutation_type_ptr->nucleotide_based_ != mutation_type_ptr_->nucleotide_based_)
 		EIDOS_TERMINATION << "ERROR (Mutation::ExecuteMethod_setMutationType): setMutationType() does not allow a mutation to be changed from nucleotide-based to non-nucleotide-based or vice versa." << EidosTerminate();
@@ -736,6 +792,8 @@ const std::vector<EidosPropertySignature_CSP> *Mutation_Class::Properties(void) 
 	
 	if (!properties)
 	{
+		THREAD_SAFETY_IN_ANY_PARALLEL("Mutation_Class::Properties(): not warmed up");
+		
 		properties = new std::vector<EidosPropertySignature_CSP>(*super::Properties());
 		
 		properties->emplace_back((EidosPropertySignature *)(new EidosPropertySignature(gStr_id,						true,	kEidosValueMaskInt | kEidosValueMaskSingleton))->DeclareAcceleratedGet(Mutation::GetProperty_Accelerated_id));
@@ -744,7 +802,7 @@ const std::vector<EidosPropertySignature_CSP> *Mutation_Class::Properties(void) 
 		properties->emplace_back((EidosPropertySignature *)(new EidosPropertySignature(gStr_mutationType,			true,	kEidosValueMaskObject | kEidosValueMaskSingleton, gSLiM_MutationType_Class))->DeclareAcceleratedGet(Mutation::GetProperty_Accelerated_mutationType));
 		properties->emplace_back((EidosPropertySignature *)(new EidosPropertySignature(gStr_nucleotide,				false,	kEidosValueMaskString | kEidosValueMaskSingleton))->DeclareAcceleratedGet(Mutation::GetProperty_Accelerated_nucleotide));
 		properties->emplace_back((EidosPropertySignature *)(new EidosPropertySignature(gStr_nucleotideValue,		false,	kEidosValueMaskInt | kEidosValueMaskSingleton))->DeclareAcceleratedGet(Mutation::GetProperty_Accelerated_nucleotideValue));
-		properties->emplace_back((EidosPropertySignature *)(new EidosPropertySignature(gStr_originGeneration,		true,	kEidosValueMaskInt | kEidosValueMaskSingleton))->DeclareAcceleratedGet(Mutation::GetProperty_Accelerated_originGeneration));
+		properties->emplace_back((EidosPropertySignature *)(new EidosPropertySignature(gStr_originTick,				true,	kEidosValueMaskInt | kEidosValueMaskSingleton))->DeclareAcceleratedGet(Mutation::GetProperty_Accelerated_originTick));
 		properties->emplace_back((EidosPropertySignature *)(new EidosPropertySignature(gStr_position,				true,	kEidosValueMaskInt | kEidosValueMaskSingleton))->DeclareAcceleratedGet(Mutation::GetProperty_Accelerated_position));
 		properties->emplace_back((EidosPropertySignature *)(new EidosPropertySignature(gStr_selectionCoeff,			true,	kEidosValueMaskFloat | kEidosValueMaskSingleton))->DeclareAcceleratedGet(Mutation::GetProperty_Accelerated_selectionCoeff));
 		properties->emplace_back((EidosPropertySignature *)(new EidosPropertySignature(gStr_subpopID,				false,	kEidosValueMaskInt | kEidosValueMaskSingleton))->DeclareAcceleratedGet(Mutation::GetProperty_Accelerated_subpopID)->DeclareAcceleratedSet(Mutation::SetProperty_Accelerated_subpopID));
@@ -762,6 +820,8 @@ const std::vector<EidosMethodSignature_CSP> *Mutation_Class::Methods(void) const
 	
 	if (!methods)
 	{
+		THREAD_SAFETY_IN_ANY_PARALLEL("Mutation_Class::Methods(): not warmed up");
+		
 		methods = new std::vector<EidosMethodSignature_CSP>(*super::Methods());
 		
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_setSelectionCoeff, kEidosValueMaskVOID))->AddFloat_S("selectionCoeff"));

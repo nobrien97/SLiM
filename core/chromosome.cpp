@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 12/13/14.
-//  Copyright (c) 2014-2022 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2014-2023 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -23,7 +23,8 @@
 #include "slim_globals.h"
 #include "eidos_call_signature.h"
 #include "eidos_property_signature.h"
-#include "slim_sim.h"					// for SLIM_MUTRUN_MAXIMUM_COUNT
+#include "community.h"
+#include "species.h"
 #include "individual.h"
 #include "subpopulation.h"
 
@@ -58,9 +59,8 @@ inline __attribute__((always_inline)) GESubrange::GESubrange(GenomicElement *p_g
 #pragma mark Chromosome
 #pragma mark -
 
-Chromosome::Chromosome(SLiMSim *p_sim) :
+Chromosome::Chromosome(Species &p_species) :
 
-	sim_(p_sim),
 	single_recombination_map_(true), 
 	single_mutation_map_(true),
 	lookup_mutation_H_(nullptr), lookup_mutation_M_(nullptr), lookup_mutation_F_(nullptr), 
@@ -74,6 +74,8 @@ Chromosome::Chromosome(SLiMSim *p_sim) :
 	probability_both_0_F_(0.0), probability_both_0_OR_mut_0_break_non0_F_(0.0), probability_both_0_OR_mut_0_break_non0_OR_mut_non0_break_0_F_(0.0), 
 #endif
 	
+	community_(p_species.community_),
+	species_(p_species),
 	last_position_(0),
 	overall_mutation_rate_H_(0.0), overall_mutation_rate_M_(0.0), overall_mutation_rate_F_(0.0),
 	overall_mutation_rate_H_userlevel_(0.0), overall_mutation_rate_M_userlevel_(0.0), overall_mutation_rate_F_userlevel_(0.0),
@@ -122,6 +124,53 @@ Chromosome::~Chromosome(void)
 // initialize the random lookup tables used by Chromosome to draw mutation and recombination events
 void Chromosome::InitializeDraws(void)
 {
+	// If we are in the special case of having no genetics, do some simple initialization and return.
+	// This leaves us in an unusual state, with nullptr for recombination/mutation rate maps and a
+	// last_position_ of -1; this state is not normally achievable, and might cause special problems.
+	if (!species_.HasGenetics())
+	{
+		single_recombination_map_ = true;
+		single_mutation_map_ = true;
+		
+		cached_value_lastpos_.reset();
+		last_position_ = -1;
+		
+		if (hotspot_multipliers_H_.size() == 0)
+			hotspot_multipliers_H_.emplace_back(1.0);
+		if (hotspot_end_positions_H_.size() == 0)
+			hotspot_end_positions_H_.emplace_back(-1);
+		
+		if (mutation_rates_H_.size() == 0)
+			mutation_rates_H_.emplace_back(1.0);
+		if (mutation_end_positions_H_.size() == 0)
+			mutation_end_positions_H_.emplace_back(-1);
+		
+		lookup_mutation_H_ = nullptr;
+		overall_mutation_rate_M_userlevel_ = overall_mutation_rate_F_userlevel_ = overall_mutation_rate_H_userlevel_ = 0.0;
+		overall_mutation_rate_M_ = overall_mutation_rate_F_ = overall_mutation_rate_H_ = 0.0;
+		exp_neg_overall_mutation_rate_M_ = exp_neg_overall_mutation_rate_F_ = exp_neg_overall_mutation_rate_H_ = 1.0;
+		
+		if (recombination_rates_H_.size() == 0)
+			recombination_rates_H_.emplace_back(1.0);
+		if (recombination_end_positions_H_.size() == 0)
+			recombination_end_positions_H_.emplace_back(-1);
+		
+		lookup_recombination_H_ = nullptr;
+		any_recombination_rates_05_ = false;
+		overall_recombination_rate_M_userlevel_ = overall_recombination_rate_F_userlevel_ = overall_recombination_rate_H_userlevel_ = 0.0;
+		overall_recombination_rate_M_ = overall_recombination_rate_F_ = overall_recombination_rate_H_ = 0.0;
+		exp_neg_overall_recombination_rate_M_ = exp_neg_overall_recombination_rate_F_ = exp_neg_overall_recombination_rate_H_ = 1.0;
+		
+#ifndef USE_GSL_POISSON
+		_InitializeJointProbabilities(overall_mutation_rate_H_, exp_neg_overall_mutation_rate_H_,
+									  overall_recombination_rate_H_, exp_neg_overall_recombination_rate_H_,
+									  probability_both_0_H_, probability_both_0_OR_mut_0_break_non0_H_, probability_both_0_OR_mut_0_break_non0_OR_mut_non0_break_0_H_);
+		
+#endif
+		
+		return;
+	}
+	
 	if (genomic_elements_.size() == 0)
 		EIDOS_TERMINATION << "ERROR (Chromosome::InitializeDraws): empty chromosome." << EidosTerminate();
 	
@@ -314,40 +363,105 @@ void Chromosome::ChooseMutationRunLayout(int p_preferred_count)
 {
 	// We now have a final last position, so we can calculate our mutation run layout
 	
-	if (p_preferred_count != 0)
+	if (species_.HasGenetics())
 	{
-		// The user has given us a mutation run count, so use that count and divide the chromosome evenly
-		if (p_preferred_count < 1)
-			EIDOS_TERMINATION << "ERROR (Chromosome::ChooseMutationRunLayout): there must be at least one mutation run per genome." << EidosTerminate();
+#ifdef _OPENMP
+		// When running multi-threaded, we prefer the base number of mutruns to equal the number of threads
+		// This allows us to subdivide responsibility along the genome equally among threads
+		mutrun_count_base_ = gEidosMaxThreads;
+		mutrun_count_multiplier_ = 1;
 		
-		mutrun_count_ = p_preferred_count;
-		mutrun_length_ = (slim_position_t)ceil((last_position_ + 1) / (double)mutrun_count_);
+		// However, the shortest any mutrun can be is one base position, so with a short chromosome, the
+		// number of mutruns gets clipped to the number of base positions (and not all threads will be used)
+		if (mutrun_count_base_ > (last_position_ + 1))
+			mutrun_count_base_ = (int32_t)(last_position_ + 1);
+#else
+		// When running single-threaded, the base number of mutruns is always 1
+		mutrun_count_base_ = 1;
+		mutrun_count_multiplier_ = 1;
+#endif
 		
-		if (SLiM_verbosity_level >= 2)
-			SLIM_OUTSTREAM << std::endl << "// Override mutation run count = " << mutrun_count_ << ", run length = " << mutrun_length_ << std::endl;
+		if (p_preferred_count != 0)
+		{
+			// The user has given us a mutation run count, so use that count and divide the chromosome evenly
+			if (p_preferred_count < 1)
+				EIDOS_TERMINATION << "ERROR (Chromosome::ChooseMutationRunLayout): there must be at least one mutation run per genome." << EidosTerminate();
+			
+			// If the preferred number of mutation runs is actually larger than the number of discrete positions,
+			// it gets clipped.  No warning is emitted; this is pretty obvious, and the verbose output line suffices
+			if (p_preferred_count > (last_position_ + 1))
+				p_preferred_count = (int32_t)(last_position_ + 1);
+			
+			// Similarly, we clip silently at SLIM_MUTRUN_MAXIMUM_COUNT; larger values are not presently allowed,
+			// although the code is general and does not actually have a hard limit on the number of mutruns
+			if (p_preferred_count > SLIM_MUTRUN_MAXIMUM_COUNT)
+				p_preferred_count = SLIM_MUTRUN_MAXIMUM_COUNT;
+			
+#ifdef _OPENMP
+			// When running multithreaded, we have some additional restrictions to try to keep the number of mutation runs
+			// aligned with the number of threads; but we also want to allow the user to use fewer mutruns/threads
+			if (((p_preferred_count % gEidosMaxThreads) == 0) ||	// if it is an exact multiple of the number of threads
+				(p_preferred_count < gEidosMaxThreads))				// or, less than the number of threads
+				;													// then it is fine
+			else
+				EIDOS_TERMINATION << "ERROR (Chromosome::ChooseMutationRunLayout): when multithreaded, if the number of mutation runs is specified it must be a multiple of the number of threads, or it must be less than the number of threads (clipped mutationRuns count is " << p_preferred_count << ", thread count is " << gEidosMaxThreads << ")." << EidosTerminate();
+#endif
+			
+			if (p_preferred_count == gEidosMaxThreads)
+			{
+				// We have p_preferred_count mutrun sections, each containing 1 mutation run; this is really the same as the next case
+				mutrun_count_base_ = p_preferred_count;
+				mutrun_count_multiplier_ = 1;
+			}
+			else if ((p_preferred_count % gEidosMaxThreads) == 0)
+			{
+				// We have gEidosMaxThreads mutrun sections, each containing (p_preferred_count / gEidosMaxThreads) mutation runs
+				mutrun_count_base_ = gEidosMaxThreads;
+				mutrun_count_multiplier_ = p_preferred_count / gEidosMaxThreads;
+			}
+			else
+			{
+				// The number of threads does not equal gEidosMaxThreads, so we have p_preferred_count mutruns sections, each containing 1 mutrun
+				mutrun_count_base_ = p_preferred_count;
+				mutrun_count_multiplier_ = 1;
+			}
+			
+			mutrun_count_ = mutrun_count_base_ * mutrun_count_multiplier_;
+			mutrun_length_ = (slim_position_t)ceil((last_position_ + 1) / (double)mutrun_count_);
+			
+			if (SLiM_verbosity_level >= 2)
+				SLIM_OUTSTREAM << std::endl << "// Override mutation run count = " << mutrun_count_ << ", run length = " << mutrun_length_ << std::endl;
+		}
+		else
+		{
+			// The user has not supplied a count, so we will conduct experiments to find the best count;
+			// for simplicity we will just always start with a single run, since that is often best anyway,
+			// unless we're running multithreaded; then we start with one run per thread, generally
+			mutrun_count_ = mutrun_count_base_ * mutrun_count_multiplier_;
+			mutrun_length_ = (slim_position_t)ceil((last_position_ + 1) / (double)mutrun_count_);
+			
+			// When we are running experiments, the mutation run length needs to be a power of two so that it can be divided evenly,
+			// potentially a fairly large number of times.  We impose a maximum mutrun count of SLIM_MUTRUN_MAXIMUM_COUNT, so
+			// actually it needs to just be an exact multiple of SLIM_MUTRUN_MAXIMUM_COUNT, not an exact power of two.
+			mutrun_length_ = (slim_position_t)round(ceil(mutrun_length_ / (double)SLIM_MUTRUN_MAXIMUM_COUNT) * SLIM_MUTRUN_MAXIMUM_COUNT);
+			
+			if (SLiM_verbosity_level >= 2)
+				SLIM_OUTSTREAM << std::endl << "// Initial mutation run count = " << mutrun_count_ << ", run length = " << mutrun_length_ << std::endl;
+		}
 	}
 	else
 	{
-		// The user has not supplied a count, so we will conduct experiments to find the best count;
-		// for simplicity we will just always start with a single run, since that is often best anyway
-		mutrun_count_ = 1;
-		mutrun_length_ = (slim_position_t)ceil((last_position_ + 1) / (double)mutrun_count_);
-		
-		// When we are running experiments, the mutation run length needs to be a power of two so that it can be divided evenly,
-		// potentially a fairly large number of times.  We impose a maximum mutrun count of SLIM_MUTRUN_MAXIMUM_COUNT, so
-		// actually it needs to just be an even multiple of SLIM_MUTRUN_MAXIMUM_COUNT, not an exact power of two.
-		mutrun_length_ = (slim_position_t)round(ceil(mutrun_length_ / (double)SLIM_MUTRUN_MAXIMUM_COUNT) * SLIM_MUTRUN_MAXIMUM_COUNT);
-		
-		if (SLiM_verbosity_level >= 2)
-			SLIM_OUTSTREAM << std::endl << "// Initial mutation run count = " << mutrun_count_ << ", run length = " << mutrun_length_ << std::endl;
+		// No-genetics species use null genomes, and have no mutruns
+		mutrun_count_base_ = 0;
+		mutrun_count_multiplier_ = 1;
+		mutrun_count_ = 0;
+		mutrun_length_ = 0;
 	}
 	
 	last_position_mutrun_ = mutrun_count_ * mutrun_length_ - 1;
 	
 	// Consistency check
-	if ((mutrun_length_ < 1) || (mutrun_count_ * mutrun_length_ <= last_position_))
-		EIDOS_TERMINATION << "ERROR (Chromosome::ChooseMutationRunLayout): (internal error) math error in mutation run calculations." << EidosTerminate();
-	if (last_position_mutrun_ < last_position_)
+	if (((mutrun_length_ < 1) && species_.HasGenetics()) || (mutrun_count_ * mutrun_length_ <= last_position_) || (last_position_mutrun_ < last_position_))
 		EIDOS_TERMINATION << "ERROR (Chromosome::ChooseMutationRunLayout): (internal error) math error in mutation run calculations." << EidosTerminate();
 }
 
@@ -425,7 +539,7 @@ void Chromosome::_InitializeOneRecombinationMap(gsl_ran_discrete_t *&p_lookup, s
 		   initializeGenomicElement(g1, 0, L);
 		   initializeRecombinationRate(0.5);
 		}
-		1 {
+		1 early() {
 		   sim.addSubpop("p1", N);
 		   sim.tag = 0;
 		}
@@ -636,16 +750,19 @@ int Chromosome::DrawSortedUniquedMutationPositions(int p_count, IndividualSex p_
 	}
 	
 	// draw all the positions, and keep track of the genomic element type for each
+	gsl_rng *rng = EIDOS_GSL_RNG(omp_get_thread_num());
+	Eidos_MT_State *mt = EIDOS_MT_RNG(omp_get_thread_num());
+	
 	for (int i = 0; i < p_count; ++i)
 	{
-		int mut_subrange_index = static_cast<int>(gsl_ran_discrete(EIDOS_GSL_RNG, lookup));
+		int mut_subrange_index = static_cast<int>(gsl_ran_discrete(rng, lookup));
 		const GESubrange &subrange = (*subranges)[mut_subrange_index];
 		GenomicElement *source_element = subrange.genomic_element_ptr_;
 		
 		// Draw the position along the chromosome for the mutation, within the genomic element
-		slim_position_t position = subrange.start_position_ + static_cast<slim_position_t>(Eidos_rng_uniform_int_MT64(subrange.end_position_ - subrange.start_position_ + 1));
+		slim_position_t position = subrange.start_position_ + static_cast<slim_position_t>(Eidos_rng_uniform_int_MT64(mt, subrange.end_position_ - subrange.start_position_ + 1));
 		// old 32-bit position not MT64 code:
-		//slim_position_t position = subrange.start_position_ + static_cast<slim_position_t>(Eidos_rng_uniform_int(EIDOS_GSL_RNG, (uint32_t)(subrange.end_position_ - subrange.start_position_ + 1)));
+		//slim_position_t position = subrange.start_position_ + static_cast<slim_position_t>(Eidos_rng_uniform_int(rng, (uint32_t)(subrange.end_position_ - subrange.start_position_ + 1)));
 		
 		p_positions.emplace_back(position, source_element);
 	}
@@ -672,7 +789,7 @@ int Chromosome::DrawSortedUniquedMutationPositions(int p_count, IndividualSex p_
 }
 
 // draw a new mutation, based on the genomic element types present and their mutational proclivities
-MutationIndex Chromosome::DrawNewMutation(std::pair<slim_position_t, GenomicElement *> &p_position, slim_objectid_t p_subpop_index, slim_generation_t p_generation) const
+MutationIndex Chromosome::DrawNewMutation(std::pair<slim_position_t, GenomicElement *> &p_position, slim_objectid_t p_subpop_index, slim_tick_t p_tick) const
 {
 	const GenomicElement &source_element = *(p_position.second);
 	const GenomicElementType &genomic_element_type = *(source_element.genomic_element_type_ptr_);
@@ -686,7 +803,7 @@ MutationIndex Chromosome::DrawNewMutation(std::pair<slim_position_t, GenomicElem
 	// A nucleotide value of -1 is always used here; in nucleotide-based models this gets patched later, but that is sequence-dependent and background-dependent
 	Mutation *mutation = gSLiM_Mutation_Block + new_mut_index;
 	
-	new (mutation) Mutation(mutation_type_ptr, p_position.first, selection_coeff, p_subpop_index, p_generation, -1);
+	new (mutation) Mutation(mutation_type_ptr, p_position.first, selection_coeff, p_subpop_index, p_tick, -1);
 	
 	// addition to the main registry and the muttype registries will happen if the new mutation clears the stacking policy
 	
@@ -696,7 +813,9 @@ MutationIndex Chromosome::DrawNewMutation(std::pair<slim_position_t, GenomicElem
 // apply mutation() to a generated mutation; we might return nullptr (proposed mutation rejected), the original proposed mutation (it was accepted), or a replacement Mutation *
 Mutation *Chromosome::ApplyMutationCallbacks(Mutation *p_mut, Genome *p_genome, GenomicElement *p_genomic_element, int8_t p_original_nucleotide, std::vector<SLiMEidosBlock*> &p_mutation_callbacks) const
 {
-#if defined(SLIMGUI) && (SLIMPROFILING == 1)
+	THREAD_SAFETY_IN_ANY_PARALLEL("Population::ApplyMutationCallbacks(): running Eidos callback");
+	
+#if (SLIMPROFILING == 1)
 	// PROFILING
 	SLIM_PROFILE_BLOCK_START();
 #endif
@@ -704,14 +823,14 @@ Mutation *Chromosome::ApplyMutationCallbacks(Mutation *p_mut, Genome *p_genome, 
 	slim_objectid_t mutation_type_id = p_mut->mutation_type_ptr_->mutation_type_id_;
 	
 	// note the focal child during the callback, so we can prevent illegal operations during the callback
-	SLiMEidosBlockType old_executing_block_type = sim_->executing_block_type_;
-	sim_->executing_block_type_ = SLiMEidosBlockType::SLiMEidosMutationCallback;
+	SLiMEidosBlockType old_executing_block_type = community_.executing_block_type_;
+	community_.executing_block_type_ = SLiMEidosBlockType::SLiMEidosMutationCallback;
 	
 	bool mutation_accepted = true, mutation_replaced = false;
 	
 	for (SLiMEidosBlock *mutation_callback : p_mutation_callbacks)
 	{
-		if (mutation_callback->active_)
+		if (mutation_callback->block_active_)
 		{
 			slim_objectid_t callback_mutation_type_id = mutation_callback->mutation_type_id_;
 			
@@ -725,7 +844,7 @@ Mutation *Chromosome::ApplyMutationCallbacks(Mutation *p_mut, Genome *p_genome, 
 				EidosDebugPointIndent indenter;
 				
 				{
-					EidosInterpreterDebugPointsSet *debug_points = sim_->DebugPoints();
+					EidosInterpreterDebugPointsSet *debug_points = community_.DebugPoints();
 					EidosToken *decl_token = mutation_callback->root_node_->token_;
 					
 					if (debug_points && debug_points->set.size() && (decl_token->token_line_ != -1) &&
@@ -743,7 +862,7 @@ Mutation *Chromosome::ApplyMutationCallbacks(Mutation *p_mut, Genome *p_genome, 
 						if (mutation_callback->block_id_ != -1)
 							SLIM_ERRSTREAM << " s" << mutation_callback->block_id_;
 						
-						SLIM_ERRSTREAM << " (line " << (decl_token->token_line_ + 1) << sim_->DebugPointInfo() << ")" << std::endl;
+						SLIM_ERRSTREAM << " (line " << (decl_token->token_line_ + 1) << community_.DebugPointInfo() << ")" << std::endl;
 						indenter.indent();
 					}
 				}
@@ -756,10 +875,10 @@ Mutation *Chromosome::ApplyMutationCallbacks(Mutation *p_mut, Genome *p_genome, 
 				
 				// We need to actually execute the script; we start a block here to manage the lifetime of the symbol table
 				{
-					EidosSymbolTable callback_symbols(EidosSymbolTableType::kContextConstantsTable, &sim_->SymbolTable());
+					EidosSymbolTable callback_symbols(EidosSymbolTableType::kContextConstantsTable, &community_.SymbolTable());
 					EidosSymbolTable client_symbols(EidosSymbolTableType::kLocalVariablesTable, &callback_symbols);
-					EidosFunctionMap &function_map = sim_->FunctionMap();
-					EidosInterpreter interpreter(mutation_callback->compound_statement_node_, client_symbols, function_map, sim_, SLIM_OUTSTREAM, SLIM_ERRSTREAM);
+					EidosFunctionMap &function_map = community_.FunctionMap();
+					EidosInterpreter interpreter(mutation_callback->compound_statement_node_, client_symbols, function_map, &community_, SLIM_OUTSTREAM, SLIM_ERRSTREAM);
 					
 					if (mutation_callback->contains_self_)
 						callback_symbols.InitializeConstantSymbolEntry(mutation_callback->SelfSymbolTableEntry());		// define "self"
@@ -860,18 +979,18 @@ Mutation *Chromosome::ApplyMutationCallbacks(Mutation *p_mut, Genome *p_genome, 
 			mutation_accepted = false;
 	}
 	
-	sim_->executing_block_type_ = old_executing_block_type;
+	community_.executing_block_type_ = old_executing_block_type;
 	
-#if defined(SLIMGUI) && (SLIMPROFILING == 1)
+#if (SLIMPROFILING == 1)
 	// PROFILING
-	SLIM_PROFILE_BLOCK_END(sim_->profile_callback_totals_[(int)(SLiMEidosBlockType::SLiMEidosMutationCallback)]);
+	SLIM_PROFILE_BLOCK_END(community_.profile_callback_totals_[(int)(SLiMEidosBlockType::SLiMEidosMutationCallback)]);
 #endif
 	
 	return (mutation_accepted ? p_mut : nullptr);
 }
 
 // draw a new mutation with reference to the genomic background upon which it is occurring, for nucleotide-based models and/or mutation() callbacks
-MutationIndex Chromosome::DrawNewMutationExtended(std::pair<slim_position_t, GenomicElement *> &p_position, slim_objectid_t p_subpop_index, slim_generation_t p_generation, Genome *parent_genome_1, Genome *parent_genome_2, std::vector<slim_position_t> *all_breakpoints, std::vector<SLiMEidosBlock*> *p_mutation_callbacks) const
+MutationIndex Chromosome::DrawNewMutationExtended(std::pair<slim_position_t, GenomicElement *> &p_position, slim_objectid_t p_subpop_index, slim_tick_t p_tick, Genome *parent_genome_1, Genome *parent_genome_2, std::vector<slim_position_t> *all_breakpoints, std::vector<SLiMEidosBlock*> *p_mutation_callbacks) const
 {
 	slim_position_t position = p_position.first;
 	GenomicElement &source_element = *(p_position.second);
@@ -935,7 +1054,8 @@ MutationIndex Chromosome::DrawNewMutationExtended(std::pair<slim_position_t, Gen
 			
 			// OK, now we know the background nucleotide; determine the mutation rates to derived nucleotides
 			double *nuc_thresholds = genomic_element_type.mm_thresholds + original_nucleotide * 4;
-			double draw = Eidos_rng_uniform(EIDOS_GSL_RNG);
+			gsl_rng *rng = EIDOS_GSL_RNG(omp_get_thread_num());
+			double draw = Eidos_rng_uniform(rng);
 			
 			if (draw < nuc_thresholds[0])		nucleotide = 0;
 			else if (draw < nuc_thresholds[1])	nucleotide = 1;
@@ -1008,7 +1128,8 @@ MutationIndex Chromosome::DrawNewMutationExtended(std::pair<slim_position_t, Gen
 			// OK, now we know the background nucleotide; determine the mutation rates to derived nucleotides
 			int trinuc = ((int)background_nuc1) * 16 + ((int)original_nucleotide) * 4 + (int)background_nuc3;
 			double *nuc_thresholds = genomic_element_type.mm_thresholds + trinuc * 4;
-			double draw = Eidos_rng_uniform(EIDOS_GSL_RNG);
+			gsl_rng *rng = EIDOS_GSL_RNG(omp_get_thread_num());
+			double draw = Eidos_rng_uniform(rng);
 			
 			if (draw < nuc_thresholds[0])		nucleotide = 0;
 			else if (draw < nuc_thresholds[1])	nucleotide = 1;
@@ -1034,7 +1155,7 @@ MutationIndex Chromosome::DrawNewMutationExtended(std::pair<slim_position_t, Gen
 	MutationIndex new_mut_index = SLiM_NewMutationFromBlock();
 	Mutation *mutation = gSLiM_Mutation_Block + new_mut_index;
 	
-	new (mutation) Mutation(mutation_type_ptr, position, selection_coeff, p_subpop_index, p_generation, nucleotide);
+	new (mutation) Mutation(mutation_type_ptr, position, selection_coeff, p_subpop_index, p_tick, nucleotide);
 	
 	// Call mutation() callbacks if there are any
 	if (p_mutation_callbacks)
@@ -1109,10 +1230,13 @@ void Chromosome::DrawCrossoverBreakpoints(IndividualSex p_parent_sex, const int 
 	}
 	
 	// draw recombination breakpoints
+	gsl_rng *rng = EIDOS_GSL_RNG(omp_get_thread_num());
+	Eidos_MT_State *mt = EIDOS_MT_RNG(omp_get_thread_num());
+	
 	for (int i = 0; i < p_num_breakpoints; i++)
 	{
 		slim_position_t breakpoint = 0;
-		int recombination_interval = static_cast<int>(gsl_ran_discrete(EIDOS_GSL_RNG, lookup));
+		int recombination_interval = static_cast<int>(gsl_ran_discrete(rng, lookup));
 		
 		// choose a breakpoint anywhere in the chosen recombination interval with equal probability
 		
@@ -1146,9 +1270,9 @@ void Chromosome::DrawCrossoverBreakpoints(IndividualSex p_parent_sex, const int 
 		// since we guarantee that recombination end positions are in strictly ascending order.  So we should never crash.  :->
 		
 		if (recombination_interval == 0)
-			breakpoint = static_cast<slim_position_t>(Eidos_rng_uniform_int_MT64((*end_positions)[recombination_interval]) + 1);
+			breakpoint = static_cast<slim_position_t>(Eidos_rng_uniform_int_MT64(mt, (*end_positions)[recombination_interval]) + 1);
 		else
-			breakpoint = (*end_positions)[recombination_interval - 1] + 1 + static_cast<slim_position_t>(Eidos_rng_uniform_int_MT64((*end_positions)[recombination_interval] - (*end_positions)[recombination_interval - 1]));
+			breakpoint = (*end_positions)[recombination_interval - 1] + 1 + static_cast<slim_position_t>(Eidos_rng_uniform_int_MT64(mt, (*end_positions)[recombination_interval] - (*end_positions)[recombination_interval - 1]));
 		
 		p_crossovers.emplace_back(breakpoint);
 	}
@@ -1179,6 +1303,8 @@ void Chromosome::DrawCrossoverBreakpoints(IndividualSex p_parent_sex, const int 
 // the information returned here also includes a list of heteroduplex regions where mismatches between the two parental strands will need to be resolved
 void Chromosome::DrawDSBBreakpoints(IndividualSex p_parent_sex, const int p_num_breakpoints, std::vector<slim_position_t> &p_crossovers, std::vector<slim_position_t> &p_heteroduplex) const
 {
+	THREAD_SAFETY_IN_ANY_PARALLEL("Chromosome::DrawDSBBreakpoints(): usage of statics, probably many other issues");
+	
 	// BEWARE! Chromosome::DrawCrossoverBreakpoints() above must be altered in parallel with this method!
 #if DEBUG
 	if (!using_DSB_model_)
@@ -1221,7 +1347,14 @@ void Chromosome::DrawDSBBreakpoints(IndividualSex p_parent_sex, const int p_num_
 	// of them, if the uniquing step reduces the set of DSBs, but we don't want to redraw these things if we have to loop back due
 	// to a collision, because such redrawing would be liable to produce bias towards shorter extents.  (Redrawing the crossover/
 	// noncrossover and simple/complex decisions would probably be harmless, but it is simpler to just make all decisions up front.)
+	int try_count = 0;
+	gsl_rng *rng = EIDOS_GSL_RNG(omp_get_thread_num());
 	static std::vector<std::tuple<slim_position_t, slim_position_t, bool, bool>> dsb_infos;	// using a static prevents reallocation
+	
+	// If the redrawLengthsOnFailure parameter to initializeGeneConversion() is T, we jump back here on layout failure
+	// Note that we also redraw noncrossover and simple, on this code path; that shouldn't matter since they are independent of layout
+generateDSBsRedrawingLengths:
+	
 	dsb_infos.clear();
 	
 	if (gene_conversion_avg_length_ < 2.0)
@@ -1229,8 +1362,8 @@ void Chromosome::DrawDSBBreakpoints(IndividualSex p_parent_sex, const int p_num_
 		for (int i = 0; i < p_num_breakpoints; i++)
 		{
 			// If the gene conversion tract mean length is < 2.0, gsl_ran_geometric() will blow up, and we should treat the tract length as zero
-			bool noncrossover = (Eidos_rng_uniform(EIDOS_GSL_RNG) <= non_crossover_fraction_);				// tuple position 2
-			bool simple = (Eidos_rng_uniform(EIDOS_GSL_RNG) <= simple_conversion_fraction_);				// tuple position 3
+			bool noncrossover = (Eidos_rng_uniform(rng) <= non_crossover_fraction_);				// tuple position 2
+			bool simple = (Eidos_rng_uniform(rng) <= simple_conversion_fraction_);					// tuple position 3
 			
 			dsb_infos.emplace_back(0, 0, noncrossover, simple);
 		}
@@ -1239,35 +1372,41 @@ void Chromosome::DrawDSBBreakpoints(IndividualSex p_parent_sex, const int p_num_
 	{
 		for (int i = 0; i < p_num_breakpoints; i++)
 		{
-			slim_position_t extent1 = gsl_ran_geometric(EIDOS_GSL_RNG, gene_conversion_inv_half_length_);	// tuple position 0
-			slim_position_t extent2 = gsl_ran_geometric(EIDOS_GSL_RNG, gene_conversion_inv_half_length_);	// tuple position 1
-			bool noncrossover = (Eidos_rng_uniform(EIDOS_GSL_RNG) <= non_crossover_fraction_);				// tuple position 2
-			bool simple = (Eidos_rng_uniform(EIDOS_GSL_RNG) <= simple_conversion_fraction_);				// tuple position 3
+			slim_position_t extent1 = gsl_ran_geometric(rng, gene_conversion_inv_half_length_);		// tuple position 0
+			slim_position_t extent2 = gsl_ran_geometric(rng, gene_conversion_inv_half_length_);		// tuple position 1
+			bool noncrossover = (Eidos_rng_uniform(rng) <= non_crossover_fraction_);				// tuple position 2
+			bool simple = (Eidos_rng_uniform(rng) <= simple_conversion_fraction_);					// tuple position 3
 			
 			dsb_infos.emplace_back(extent1, extent2, noncrossover, simple);
 		}
 	}
 	
-	int try_count = 0;
-	
-generateDSBs:
+	// If the redrawLengthsOnFailure parameter to initializeGeneConversion() is F, we jump back here on layout failure
+generateDSBsWithoutRedrawingLengths:
 	
 	if (++try_count > 100)
-		EIDOS_TERMINATION << "ERROR (Chromosome::DrawDSBBreakpoints): non-overlapping recombination regions could not be achieved in 100 tries; terminating.  The recombination rate and/or mean gene conversion tract length may be too high." << EidosTerminate();
+	{
+		// Note this block handles failure for both redraw_lengths_on_failure_ cases
+		EIDOS_TERMINATION << "ERROR (Chromosome::DrawDSBBreakpoints): non-overlapping recombination regions could not be achieved in 100 tries; terminating.  The recombination rate and/or mean gene conversion tract length may be too high.";
+		if (!redraw_lengths_on_failure_)
+			EIDOS_TERMINATION << "  You might wish to pass redrawLengthsOnFailure=T to initializeGeneConversion() to make gene conversion tract layout more robust.";
+		EIDOS_TERMINATION << EidosTerminate();
+	}
 	
 	// First draw DSB points; dsb_points contains positions and a flag for whether the breakpoint is at a rate=0.5 position
+	Eidos_MT_State *mt = EIDOS_MT_RNG(omp_get_thread_num());
 	static std::vector<std::pair<slim_position_t, bool>> dsb_points;	// using a static prevents reallocation
 	dsb_points.clear();
 	
 	for (int i = 0; i < p_num_breakpoints; i++)
 	{
 		slim_position_t breakpoint = 0;
-		int recombination_interval = static_cast<int>(gsl_ran_discrete(EIDOS_GSL_RNG, lookup));
+		int recombination_interval = static_cast<int>(gsl_ran_discrete(rng, lookup));
 		
 		if (recombination_interval == 0)
-			breakpoint = static_cast<slim_position_t>(Eidos_rng_uniform_int_MT64((*end_positions)[recombination_interval]) + 1);
+			breakpoint = static_cast<slim_position_t>(Eidos_rng_uniform_int_MT64(mt, (*end_positions)[recombination_interval]) + 1);
 		else
-			breakpoint = (*end_positions)[recombination_interval - 1] + 1 + static_cast<slim_position_t>(Eidos_rng_uniform_int_MT64((*end_positions)[recombination_interval] - (*end_positions)[recombination_interval - 1]));
+			breakpoint = (*end_positions)[recombination_interval - 1] + 1 + static_cast<slim_position_t>(Eidos_rng_uniform_int_MT64(mt, (*end_positions)[recombination_interval] - (*end_positions)[recombination_interval - 1]));
 		
 		if ((*rates)[recombination_interval] == 0.5)
 			dsb_points.emplace_back(breakpoint, true);
@@ -1300,7 +1439,12 @@ generateDSBs:
 			// This DSB is at a rate=0.5 point, so we do not generate a gene conversion tract; it just translates directly to a crossover breakpoint
 			// Note that we do NOT check non_crossover_fraction_ here; it does not apply to rate=0.5 positions, since they cannot undergo gene conversion
 			if (dsb_point <= last_position_used)
-				goto generateDSBs;
+			{
+				if (redraw_lengths_on_failure_)
+					goto generateDSBsRedrawingLengths;
+				else
+					goto generateDSBsWithoutRedrawingLengths;
+			}
 			
 			p_crossovers.emplace_back(dsb_point);
 			last_position_used = dsb_point;
@@ -1313,13 +1457,13 @@ generateDSBs:
 			
 			// We do not want to allow GC tracts to extend all the way to the chromosome beginning or end
 			// This is partly because biologically it seems weird, and partly because a breakpoint at position 0 breaks tree-seq recording
-			if (tract_start <= 0)
-				goto generateDSBs;
-			if (tract_end > last_position_)
-				goto generateDSBs;
-			
-			if (tract_start <= last_position_used)
-				goto generateDSBs;
+			if ((tract_start <= 0) || (tract_end > last_position_) || (tract_start <= last_position_used))
+			{
+				if (redraw_lengths_on_failure_)
+					goto generateDSBsRedrawingLengths;
+				else
+					goto generateDSBsWithoutRedrawingLengths;
+			}
 			
 			if (tract_start == tract_end)
 			{
@@ -1446,7 +1590,7 @@ EidosValue_SP Chromosome::GetProperty(EidosGlobalStringID p_property_id)
 			
 		case gID_hotspotEndPositions:
 		{
-			if (!sim_->IsNucleotideBased())
+			if (!species_.IsNucleotideBased())
 				EIDOS_TERMINATION << "ERROR (Chromosome::GetProperty): property hotspotEndPositions is only defined in nucleotide-based models." << EidosTerminate();
 			if (!single_mutation_map_)
 				EIDOS_TERMINATION << "ERROR (Chromosome::GetProperty): property hotspotEndPositions is not defined since sex-specific hotspot maps have been defined." << EidosTerminate();
@@ -1454,7 +1598,7 @@ EidosValue_SP Chromosome::GetProperty(EidosGlobalStringID p_property_id)
 		}
 		case gID_hotspotEndPositionsM:
 		{
-			if (!sim_->IsNucleotideBased())
+			if (!species_.IsNucleotideBased())
 				EIDOS_TERMINATION << "ERROR (Chromosome::GetProperty): property hotspotEndPositionsM is only defined in nucleotide-based models." << EidosTerminate();
 			if (single_mutation_map_)
 				EIDOS_TERMINATION << "ERROR (Chromosome::GetProperty): property hotspotEndPositionsM is not defined since sex-specific hotspot maps have not been defined." << EidosTerminate();
@@ -1462,7 +1606,7 @@ EidosValue_SP Chromosome::GetProperty(EidosGlobalStringID p_property_id)
 		}
 		case gID_hotspotEndPositionsF:
 		{
-			if (!sim_->IsNucleotideBased())
+			if (!species_.IsNucleotideBased())
 				EIDOS_TERMINATION << "ERROR (Chromosome::GetProperty): property hotspotEndPositionsF is only defined in nucleotide-based models." << EidosTerminate();
 			if (single_mutation_map_)
 				EIDOS_TERMINATION << "ERROR (Chromosome::GetProperty): property hotspotEndPositionsF is not defined since sex-specific hotspot maps have not been defined." << EidosTerminate();
@@ -1471,7 +1615,7 @@ EidosValue_SP Chromosome::GetProperty(EidosGlobalStringID p_property_id)
 			
 		case gID_hotspotMultipliers:
 		{
-			if (!sim_->IsNucleotideBased())
+			if (!species_.IsNucleotideBased())
 				EIDOS_TERMINATION << "ERROR (Chromosome::GetProperty): property hotspotMultipliers is only defined in nucleotide-based models." << EidosTerminate();
 			if (!single_mutation_map_)
 				EIDOS_TERMINATION << "ERROR (Chromosome::GetProperty): property hotspotMultipliers is not defined since sex-specific hotspot maps have been defined." << EidosTerminate();
@@ -1479,7 +1623,7 @@ EidosValue_SP Chromosome::GetProperty(EidosGlobalStringID p_property_id)
 		}
 		case gID_hotspotMultipliersM:
 		{
-			if (!sim_->IsNucleotideBased())
+			if (!species_.IsNucleotideBased())
 				EIDOS_TERMINATION << "ERROR (Chromosome::GetProperty): property hotspotMultipliersM is only defined in nucleotide-based models." << EidosTerminate();
 			if (single_mutation_map_)
 				EIDOS_TERMINATION << "ERROR (Chromosome::GetProperty): property hotspotMultipliersM is not defined since sex-specific hotspot maps have not been defined." << EidosTerminate();
@@ -1487,7 +1631,7 @@ EidosValue_SP Chromosome::GetProperty(EidosGlobalStringID p_property_id)
 		}
 		case gID_hotspotMultipliersF:
 		{
-			if (!sim_->IsNucleotideBased())
+			if (!species_.IsNucleotideBased())
 				EIDOS_TERMINATION << "ERROR (Chromosome::GetProperty): property hotspotMultipliersF is only defined in nucleotide-based models." << EidosTerminate();
 			if (single_mutation_map_)
 				EIDOS_TERMINATION << "ERROR (Chromosome::GetProperty): property hotspotMultipliersF is not defined since sex-specific hotspot maps have not been defined." << EidosTerminate();
@@ -1496,7 +1640,7 @@ EidosValue_SP Chromosome::GetProperty(EidosGlobalStringID p_property_id)
 			
 		case gID_mutationEndPositions:
 		{
-			if (sim_->IsNucleotideBased())
+			if (species_.IsNucleotideBased())
 				EIDOS_TERMINATION << "ERROR (Chromosome::GetProperty): property mutationEndPositions is not defined in nucleotide-based models." << EidosTerminate();
 			if (!single_mutation_map_)
 				EIDOS_TERMINATION << "ERROR (Chromosome::GetProperty): property mutationEndPositions is not defined since sex-specific mutation rate maps have been defined." << EidosTerminate();
@@ -1504,7 +1648,7 @@ EidosValue_SP Chromosome::GetProperty(EidosGlobalStringID p_property_id)
 		}
 		case gID_mutationEndPositionsM:
 		{
-			if (sim_->IsNucleotideBased())
+			if (species_.IsNucleotideBased())
 				EIDOS_TERMINATION << "ERROR (Chromosome::GetProperty): property mutationEndPositionsM is not defined in nucleotide-based models." << EidosTerminate();
 			if (single_mutation_map_)
 				EIDOS_TERMINATION << "ERROR (Chromosome::GetProperty): property mutationEndPositionsM is not defined since sex-specific mutation rate maps have not been defined." << EidosTerminate();
@@ -1512,7 +1656,7 @@ EidosValue_SP Chromosome::GetProperty(EidosGlobalStringID p_property_id)
 		}
 		case gID_mutationEndPositionsF:
 		{
-			if (sim_->IsNucleotideBased())
+			if (species_.IsNucleotideBased())
 				EIDOS_TERMINATION << "ERROR (Chromosome::GetProperty): property mutationEndPositionsF is not defined in nucleotide-based models." << EidosTerminate();
 			if (single_mutation_map_)
 				EIDOS_TERMINATION << "ERROR (Chromosome::GetProperty): property mutationEndPositionsF is not defined since sex-specific mutation rate maps have not been defined." << EidosTerminate();
@@ -1521,7 +1665,7 @@ EidosValue_SP Chromosome::GetProperty(EidosGlobalStringID p_property_id)
 			
 		case gID_mutationRates:
 		{
-			if (sim_->IsNucleotideBased())
+			if (species_.IsNucleotideBased())
 				EIDOS_TERMINATION << "ERROR (Chromosome::GetProperty): property mutationRates is not defined in nucleotide-based models." << EidosTerminate();
 			if (!single_mutation_map_)
 				EIDOS_TERMINATION << "ERROR (Chromosome::GetProperty): property mutationRates is not defined since sex-specific mutation rate maps have been defined." << EidosTerminate();
@@ -1529,7 +1673,7 @@ EidosValue_SP Chromosome::GetProperty(EidosGlobalStringID p_property_id)
 		}
 		case gID_mutationRatesM:
 		{
-			if (sim_->IsNucleotideBased())
+			if (species_.IsNucleotideBased())
 				EIDOS_TERMINATION << "ERROR (Chromosome::GetProperty): property mutationRatesM is not defined in nucleotide-based models." << EidosTerminate();
 			if (single_mutation_map_)
 				EIDOS_TERMINATION << "ERROR (Chromosome::GetProperty): property mutationRatesM is not defined since sex-specific mutation rate maps have not been defined." << EidosTerminate();
@@ -1537,7 +1681,7 @@ EidosValue_SP Chromosome::GetProperty(EidosGlobalStringID p_property_id)
 		}
 		case gID_mutationRatesF:
 		{
-			if (sim_->IsNucleotideBased())
+			if (species_.IsNucleotideBased())
 				EIDOS_TERMINATION << "ERROR (Chromosome::GetProperty): property mutationRatesF is not defined in nucleotide-based models." << EidosTerminate();
 			if (single_mutation_map_)
 				EIDOS_TERMINATION << "ERROR (Chromosome::GetProperty): property mutationRatesF is not defined since sex-specific mutation rate maps have not been defined." << EidosTerminate();
@@ -1546,7 +1690,7 @@ EidosValue_SP Chromosome::GetProperty(EidosGlobalStringID p_property_id)
 			
 		case gID_overallMutationRate:
 		{
-			if (sim_->IsNucleotideBased())
+			if (species_.IsNucleotideBased())
 				EIDOS_TERMINATION << "ERROR (Chromosome::GetProperty): property overallMutationRate is not defined in nucleotide-based models." << EidosTerminate();
 			if (!single_mutation_map_)
 				EIDOS_TERMINATION << "ERROR (Chromosome::GetProperty): property overallMutationRate is not defined since sex-specific mutation rate maps have been defined." << EidosTerminate();
@@ -1554,7 +1698,7 @@ EidosValue_SP Chromosome::GetProperty(EidosGlobalStringID p_property_id)
 		}
 		case gID_overallMutationRateM:
 		{
-			if (sim_->IsNucleotideBased())
+			if (species_.IsNucleotideBased())
 				EIDOS_TERMINATION << "ERROR (Chromosome::GetProperty): property overallMutationRateM is not defined in nucleotide-based models." << EidosTerminate();
 			if (single_mutation_map_)
 				EIDOS_TERMINATION << "ERROR (Chromosome::GetProperty): property overallMutationRateM is not defined since sex-specific mutation rate maps have not been defined." << EidosTerminate();
@@ -1562,7 +1706,7 @@ EidosValue_SP Chromosome::GetProperty(EidosGlobalStringID p_property_id)
 		}
 		case gID_overallMutationRateF:
 		{
-			if (sim_->IsNucleotideBased())
+			if (species_.IsNucleotideBased())
 				EIDOS_TERMINATION << "ERROR (Chromosome::GetProperty): property overallMutationRateF is not defined in nucleotide-based models." << EidosTerminate();
 			if (single_mutation_map_)
 				EIDOS_TERMINATION << "ERROR (Chromosome::GetProperty): property overallMutationRateF is not defined since sex-specific mutation rate maps have not been defined." << EidosTerminate();
@@ -1624,6 +1768,11 @@ EidosValue_SP Chromosome::GetProperty(EidosGlobalStringID p_property_id)
 			if (single_recombination_map_)
 				EIDOS_TERMINATION << "ERROR (Chromosome::GetProperty): property recombinationRatesF is not defined since sex-specific recombination rate maps have not been defined." << EidosTerminate();
 			return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float_vector(recombination_rates_F_));
+		}
+			
+		case gID_species:
+		{
+			return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Object_singleton(&species_, gSLiM_Species_Class));
 		}
 			
 			// variables
@@ -1717,11 +1866,11 @@ EidosValue_SP Chromosome::ExecuteInstanceMethod(EidosGlobalStringID p_method_id,
 EidosValue_SP Chromosome::ExecuteMethod_ancestralNucleotides(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter)
 {
 #pragma unused (p_method_id, p_arguments, p_interpreter)
-	// The ancestral sequence is actually kept by SLiMSim, so go get it
-	if (!sim_->IsNucleotideBased())
+	// The ancestral sequence is actually kept by Species, so go get it
+	if (!species_.IsNucleotideBased())
 		EIDOS_TERMINATION << "ERROR (Chromosome::ExecuteMethod_ancestralNucleotides): ancestralNucleotides() may only be called in nucleotide-based models." << EidosTerminate();
 	
-	NucleotideArray *sequence = sim_->TheChromosome().AncestralSequence();
+	NucleotideArray *sequence = AncestralSequence();
 	EidosValue *start_value = p_arguments[0].get();
 	EidosValue *end_value = p_arguments[1].get();
 	
@@ -1758,6 +1907,9 @@ EidosValue_SP Chromosome::ExecuteMethod_ancestralNucleotides(EidosGlobalStringID
 EidosValue_SP Chromosome::ExecuteMethod_drawBreakpoints(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter)
 {
 #pragma unused (p_method_id, p_arguments, p_interpreter)
+	if (!species_.HasGenetics())
+		EIDOS_TERMINATION << "ERROR (Chromosome::ExecuteMethod_drawBreakpoints): drawBreakpoints() may not be called for a species with no genetics." << EidosTerminate();
+	
 	EidosValue *parent_value = p_arguments[0].get();
 	EidosValue *n_value = p_arguments[1].get();
 	
@@ -1784,7 +1936,11 @@ EidosValue_SP Chromosome::ExecuteMethod_drawBreakpoints(EidosGlobalStringID p_me
 	{
 		parent_sex = parent->sex_;
 		parent_subpop = parent->subpopulation_;
-		recombination_callbacks = sim_->ScriptBlocksMatching(sim_->Generation(), SLiMEidosBlockType::SLiMEidosRecombinationCallback, -1, -1, parent_subpop->subpopulation_id_);
+		recombination_callbacks = species_.CallbackBlocksMatching(community_.Tick(), SLiMEidosBlockType::SLiMEidosRecombinationCallback, -1, -1, parent_subpop->subpopulation_id_);
+		
+		// SPECIES CONSISTENCY CHECK
+		if (&parent_subpop->species_ != &this->species_)
+			EIDOS_TERMINATION << "ERROR (Chromosome::ExecuteMethod_drawBreakpoints): drawBreakpoints() requires that parent, if non-NULL, belongs to the same species as the target chromosome." << EidosTerminate();
 	}
 	
 	// Much of the breakpoint-drawing code here is taken from Population::DoCrossoverMutation().
@@ -1808,6 +1964,9 @@ EidosValue_SP Chromosome::ExecuteMethod_drawBreakpoints(EidosGlobalStringID p_me
 	std::vector<slim_position_t> all_breakpoints;
 	std::vector<slim_position_t> heteroduplex;				// never actually used since simple_conversion_fraction_ must be 1.0
 	
+	// Note that for calling recombination() callbacks below, we always treat the parent's first genome as the initial copy strand.
+	// This is documented; it is perhaps a weakness of the API here, but if randomly chose an initial copy strand it would not be used downstream, so.
+	
 	// draw the breakpoints based on the recombination rate map, and sort and unique the result
 	if (num_breakpoints)
 	{
@@ -1819,7 +1978,7 @@ EidosValue_SP Chromosome::ExecuteMethod_drawBreakpoints(EidosGlobalStringID p_me
 		if (parent && recombination_callbacks.size())
 		{
 			// a non-zero number of breakpoints, with recombination callbacks
-			sim_->ThePopulation().ApplyRecombinationCallbacks(parent->index_, parent->genome1_, parent->genome2_, parent_subpop, all_breakpoints, recombination_callbacks);
+			species_.population_.ApplyRecombinationCallbacks(parent->index_, parent->genome1_, parent->genome2_, parent_subpop, all_breakpoints, recombination_callbacks);
 			
 			if (all_breakpoints.size() > 1)
 			{
@@ -1831,7 +1990,7 @@ EidosValue_SP Chromosome::ExecuteMethod_drawBreakpoints(EidosGlobalStringID p_me
 	else if (parent && recombination_callbacks.size())
 	{
 		// zero breakpoints from the SLiM core, but we have recombination() callbacks
-		sim_->ThePopulation().ApplyRecombinationCallbacks(parent->index_, parent->genome1_, parent->genome2_, parent_subpop, all_breakpoints, recombination_callbacks);
+		species_.population_.ApplyRecombinationCallbacks(parent->index_, parent->genome1_, parent->genome2_, parent_subpop, all_breakpoints, recombination_callbacks);
 		
 		if (all_breakpoints.size() > 1)
 		{
@@ -1857,7 +2016,7 @@ EidosValue_SP Chromosome::ExecuteMethod_setAncestralNucleotides(EidosGlobalStrin
 #pragma unused (p_method_id, p_arguments, p_interpreter)
 	EidosValue *sequence_value = p_arguments[0].get();
 	
-	if (!sim_->IsNucleotideBased())
+	if (!species_.IsNucleotideBased())
 		EIDOS_TERMINATION << "ERROR (Chromosome::ExecuteMethod_setAncestralNucleotides): initializeAncestralNucleotides() may be only be called in nucleotide-based models." << EidosTerminate();
 	
 	EidosValueType sequence_value_type = sequence_value->Type();
@@ -1913,7 +2072,7 @@ EidosValue_SP Chromosome::ExecuteMethod_setAncestralNucleotides(EidosGlobalStrin
 			// play around with the error-handling state to make it do what we want it to do.
 			// This is very naughty and should be redesigned, but right now I'm not seeing
 			// the right redesign strategy, so... hacking it for now.  Parallel code is at
-			// SLiMSim::ExecuteContextFunction_initializeAncestralNucleotides()
+			// Species::ExecuteContextFunction_initializeAncestralNucleotides()
 			bool save_gEidosTerminateThrows = gEidosTerminateThrows;
 			gEidosTerminateThrows = true;
 			
@@ -1990,6 +2149,9 @@ EidosValue_SP Chromosome::ExecuteMethod_setAncestralNucleotides(EidosGlobalStrin
 EidosValue_SP Chromosome::ExecuteMethod_setGeneConversion(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter)
 {
 #pragma unused (p_method_id, p_arguments, p_interpreter)
+	if (!species_.HasGenetics())
+		EIDOS_TERMINATION << "ERROR (Chromosome::ExecuteMethod_setGeneConversion): setGeneConversion() may not be called for a species with no genetics." << EidosTerminate();
+	
 	EidosValue *nonCrossoverFraction_value = p_arguments[0].get();
 	EidosValue *meanLength_value = p_arguments[1].get();
 	EidosValue *simpleConversionFraction_value = p_arguments[2].get();
@@ -2008,7 +2170,7 @@ EidosValue_SP Chromosome::ExecuteMethod_setGeneConversion(EidosGlobalStringID p_
 		EIDOS_TERMINATION << "ERROR (Chromosome::ExecuteMethod_setGeneConversion): setGeneConversion() simpleConversionFraction must be between 0.0 and 1.0 inclusive (" << EidosStringForFloat(simple_conversion_fraction) << " supplied)." << EidosTerminate();
 	if ((bias < -1.0) || (bias > 1.0) || std::isnan(bias))
 		EIDOS_TERMINATION << "ERROR (Chromosome::ExecuteMethod_setGeneConversion): setGeneConversion() bias must be between -1.0 and 1.0 inclusive (" << EidosStringForFloat(bias) << " supplied)." << EidosTerminate();
-	if ((bias != 0.0) && !sim_->IsNucleotideBased())
+	if ((bias != 0.0) && !species_.IsNucleotideBased())
 		EIDOS_TERMINATION << "ERROR (Chromosome::ExecuteMethod_setGeneConversion): setGeneConversion() bias must be 0.0 in non-nucleotide-based models." << EidosTerminate();
 	
 	using_DSB_model_ = true;
@@ -2026,7 +2188,9 @@ EidosValue_SP Chromosome::ExecuteMethod_setGeneConversion(EidosGlobalStringID p_
 EidosValue_SP Chromosome::ExecuteMethod_setHotspotMap(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter)
 {
 #pragma unused (p_method_id, p_arguments, p_interpreter)
-	if (!sim_->IsNucleotideBased())
+	if (!species_.HasGenetics())
+		EIDOS_TERMINATION << "ERROR (Chromosome::ExecuteMethod_setHotspotMap): setHotspotMap() may not be called for a species with no genetics." << EidosTerminate();
+	if (!species_.IsNucleotideBased())
 		EIDOS_TERMINATION << "ERROR (Chromosome::ExecuteMethod_setHotspotMap): setHotspotMap() may only be called in nucleotide-based models (use setMutationRate() to vary the mutation rate along the chromosome)." << EidosTerminate();
 	
 	EidosValue *multipliers_value = p_arguments[0].get();
@@ -2122,7 +2286,7 @@ EidosValue_SP Chromosome::ExecuteMethod_setHotspotMap(EidosGlobalStringID p_meth
 		}
 	}
 	
-	sim_->CreateNucleotideMutationRateMap();
+	species_.CreateNucleotideMutationRateMap();
 	InitializeDraws();
 	
 	return gStaticEidosValueVOID;
@@ -2133,7 +2297,9 @@ EidosValue_SP Chromosome::ExecuteMethod_setHotspotMap(EidosGlobalStringID p_meth
 EidosValue_SP Chromosome::ExecuteMethod_setMutationRate(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter)
 {
 #pragma unused (p_method_id, p_arguments, p_interpreter)
-	if (sim_->IsNucleotideBased())
+	if (!species_.HasGenetics())
+		EIDOS_TERMINATION << "ERROR (Chromosome::ExecuteMethod_setMutationRate): setMutationRate() may not be called for a species with no genetics." << EidosTerminate();
+	if (species_.IsNucleotideBased())
 		EIDOS_TERMINATION << "ERROR (Chromosome::ExecuteMethod_setMutationRate): setMutationRate() may not be called in nucleotide-based models (use setHotspotMap() to vary the mutation rate along the chromosome)." << EidosTerminate();
 	
 	EidosValue *rates_value = p_arguments[0].get();
@@ -2240,6 +2406,9 @@ EidosValue_SP Chromosome::ExecuteMethod_setMutationRate(EidosGlobalStringID p_me
 EidosValue_SP Chromosome::ExecuteMethod_setRecombinationRate(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter)
 {
 #pragma unused (p_method_id, p_arguments, p_interpreter)
+	if (!species_.HasGenetics())
+		EIDOS_TERMINATION << "ERROR (Chromosome::ExecuteMethod_setRecombinationRate): setRecombinationRate() may not be called for a species with no genetics." << EidosTerminate();
+	
 	EidosValue *rates_value = p_arguments[0].get();
 	EidosValue *ends_value = p_arguments[1].get();
 	EidosValue *sex_value = p_arguments[2].get();
@@ -2356,6 +2525,8 @@ const std::vector<EidosPropertySignature_CSP> *Chromosome_Class::Properties(void
 	
 	if (!properties)
 	{
+		THREAD_SAFETY_IN_ANY_PARALLEL("Chromosome_Class::Properties(): not warmed up");
+		
 		properties = new std::vector<EidosPropertySignature_CSP>(*super::Properties());
 		
 		properties->emplace_back((EidosPropertySignature *)(new EidosPropertySignature(gStr_genomicElements,						true,	kEidosValueMaskObject, gSLiM_GenomicElement_Class)));
@@ -2384,6 +2555,7 @@ const std::vector<EidosPropertySignature_CSP> *Chromosome_Class::Properties(void
 		properties->emplace_back((EidosPropertySignature *)(new EidosPropertySignature(gStr_recombinationRates,						true,	kEidosValueMaskFloat)));
 		properties->emplace_back((EidosPropertySignature *)(new EidosPropertySignature(gStr_recombinationRatesM,					true,	kEidosValueMaskFloat)));
 		properties->emplace_back((EidosPropertySignature *)(new EidosPropertySignature(gStr_recombinationRatesF,					true,	kEidosValueMaskFloat)));
+		properties->emplace_back((EidosPropertySignature *)(new EidosPropertySignature(gStr_species,								true,	kEidosValueMaskObject | kEidosValueMaskSingleton, gSLiM_Species_Class)));
 		properties->emplace_back((EidosPropertySignature *)(new EidosPropertySignature(gStr_geneConversionEnabled,					true,	kEidosValueMaskLogical | kEidosValueMaskSingleton)));
 		properties->emplace_back((EidosPropertySignature *)(new EidosPropertySignature(gStr_geneConversionGCBias,					true,	kEidosValueMaskFloat | kEidosValueMaskSingleton)));
 		properties->emplace_back((EidosPropertySignature *)(new EidosPropertySignature(gStr_geneConversionNonCrossoverFraction,		true,	kEidosValueMaskFloat | kEidosValueMaskSingleton)));
@@ -2404,6 +2576,8 @@ const std::vector<EidosMethodSignature_CSP> *Chromosome_Class::Methods(void) con
 	
 	if (!methods)
 	{
+		THREAD_SAFETY_IN_ANY_PARALLEL("Chromosome_Class::Methods(): not warmed up");
+		
 		methods = new std::vector<EidosMethodSignature_CSP>(*super::Methods());
 		
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_ancestralNucleotides, kEidosValueMaskInt | kEidosValueMaskString))->AddInt_OSN(gEidosStr_start, gStaticEidosValueNULL)->AddInt_OSN(gEidosStr_end, gStaticEidosValueNULL)->AddString_OS("format", EidosValue_String_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String_singleton("string"))));

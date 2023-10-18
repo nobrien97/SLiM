@@ -18,7 +18,7 @@ QMAKE_INFO_PLIST = QtSLiM_Info.plist
 ICON = QtSLiM_AppIcon.icns
 QMAKE_TARGET_BUNDLE_PREFIX = "org.messerlab"
 QMAKE_BUNDLE = "SLiMgui"		# This governs the location of our prefs, which we keep under org.messerlab.SLiMgui
-VERSION = 3.7.1
+VERSION = 4.0.1
 
 docIconFiles.files = $$PWD/QtSLiM_DocIcon.icns
 docIconFiles.path = Contents/Resources
@@ -31,6 +31,13 @@ QMAKE_BUNDLE_DATA += docIconFiles
 # strict_string_checks=1:detect_stack_use_after_return=1:check_initialization_order=1:strict_init_order=1
 # This also enables undefined behavior sanitizing, in conjunction with ASAN, because why not.
 #CONFIG += sanitizer sanitize_address sanitize_undefined
+
+
+# Get the current Git SHA-1 and put it into a define; see https://stackoverflow.com/questions/27041573/print-git-hash-in-qt-as-macro-created-at-compile-time
+# Note that this only runs when qmake runs!  It would be nice to have a solution more like the one we use under CMake.
+GIT_HASH="\\\"$$system(git -C \""$$_PRO_FILE_PWD_"\" rev-parse HEAD)\\\""
+DEFINES += GIT_SHA1=$$GIT_HASH
+#message(Git SHA-1 == $$GIT_HASH)
 
 
 # Warn and error on usage of deprecated Qt APIs; see also -Wno-deprecated-declarations below
@@ -113,7 +120,7 @@ win32:CONFIG(release, debug|release): LIBS += -L$$OUT_PWD/../gsl/release/ -lgsl
 else:win32:CONFIG(debug, debug|release): LIBS += -L$$OUT_PWD/../gsl/debug/ -lgsl
 else:unix: LIBS += -L$$OUT_PWD/../gsl/ -lgsl
 INCLUDEPATH += $$PWD/../gsl $$PWD/../gsl/blas $$PWD/../gsl/block $$PWD/../gsl/cblas $$PWD/../gsl/cdf
-INCLUDEPATH += $$PWD/../gsl/complex $$PWD/../gsl/err $$PWD/../gsl/linalg $$PWD/../gsl/matrix
+INCLUDEPATH += $$PWD/../gsl/complex $$PWD/../gsl/err $$PWD/../gsl/interpolation $$PWD/../gsl/linalg $$PWD/../gsl/matrix
 INCLUDEPATH += $$PWD/../gsl/randist $$PWD/../gsl/rng $$PWD/../gsl/specfunc $$PWD/../gsl/sys $$PWD/../gsl/vector
 DEPENDPATH += $$PWD/../gsl
 win32-g++:CONFIG(release, debug|release): PRE_TARGETDEPS += $$OUT_PWD/../gsl/release/libgsl.a
@@ -136,11 +143,9 @@ else:win32:!win32-g++:CONFIG(release, debug|release): PRE_TARGETDEPS += $$OUT_PW
 else:win32:!win32-g++:CONFIG(debug, debug|release): PRE_TARGETDEPS += $$OUT_PWD/../eidos_zlib/debug/eidos_zlib.lib
 else:unix: PRE_TARGETDEPS += $$OUT_PWD/../eidos_zlib/libeidos_zlib.a
 
-# Objective-C runtime library dependency (macOS only), for forcing light mode in main.cpp (see macos_ForceLightMode())
-macx: LIBS += -lobjc.A
-
 
 SOURCES += \
+    ../cmake/GitSHA1_qmake.cpp \
     QtSLiMDebugOutputWindow.cpp \
     QtSLiMGraphView_1DPopulationSFS.cpp \
     QtSLiMGraphView_1DSampleSFS.cpp \
@@ -148,6 +153,7 @@ SOURCES += \
     QtSLiMGraphView_2DSampleSFS.cpp \
     QtSLiMGraphView_AgeDistribution.cpp \
     QtSLiMGraphView_LifetimeReproduction.cpp \
+    QtSLiMGraphView_MultispeciesPopSizeOverTime.cpp \
     QtSLiMGraphView_PopFitnessDist.cpp \
     QtSLiMGraphView_PopSizeOverTime.cpp \
     QtSLiMGraphView_SubpopFitnessDists.cpp \
@@ -191,6 +197,7 @@ HEADERS += \
     QtSLiMGraphView_2DSampleSFS.h \
     QtSLiMGraphView_AgeDistribution.h \
     QtSLiMGraphView_LifetimeReproduction.h \
+    QtSLiMGraphView_MultispeciesPopSizeOverTime.h \
     QtSLiMGraphView_PopFitnessDist.h \
     QtSLiMGraphView_PopSizeOverTime.h \
     QtSLiMGraphView_SubpopFitnessDists.h \

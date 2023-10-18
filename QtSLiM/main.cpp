@@ -12,15 +12,6 @@
 #include <locale.h>
 
 #include "eidos_globals.h"
-#include "eidos_symbol_table.h"
-
-// Include objc headers if needed for macos_ForceLightMode()
-#ifdef __APPLE__
-#if (QT_VERSION < QT_VERSION_CHECK(5, 15, 2))
-#include <objc/runtime.h>
-#include <objc/message.h>
-#endif
-#endif
 
 #if SLIM_LEAK_CHECKING
 static void clean_up_leak_false_positives(void)
@@ -29,7 +20,6 @@ static void clean_up_leak_false_positives(void)
 	// I think perhaps unordered_map keeps values in an unaligned manner that Valgrind doesn't see as pointers.
 	Eidos_FreeGlobalStrings();
 	EidosTestElement::FreeThunks();
-	MutationRun::DeleteMutationRunFreeList();
     FreeSymbolTablePool();
 	Eidos_FreeRNG(gEidos_RNG);
 }
@@ -57,8 +47,16 @@ static void clean_up_leak_false_positives(void)
 // removed.  As per the above comment, this may mean that macOS builds against a Qt version
 // earlier than 5.15.2 will not succeed in forcing light mode.  For this reason and others,
 // we now require Qt 5.15.2 when building on macOS (see QtSLiMAppDelegate.cpp).
+// BCH 4/13/2022: Disabling this macos_ForceLightMode() function altogether.  Building against
+// Qt versions prior to 5.15.2 on macOS is no longer supported at all, and linking against
+// libobjc.dylib on macOS 12 has gotten complicated for security reasons (trampolines).
 #ifdef __APPLE__
 #if (QT_VERSION < QT_VERSION_CHECK(5, 15, 2))
+#if 0
+// Include objc headers
+#include <objc/runtime.h>
+#include <objc/message.h>
+
 static void macos_ForceLightMode(void)
 {
     // First we need to make an NSString with value @"NSAppearanceNameAqua"; 1 is NSASCIIStringEncoding
@@ -131,6 +129,7 @@ static void macos_ForceLightMode(void)
     if (class_respondsToSelector(nsapp_class, selector_setAppearance))
         ((void (*)(id, SEL, id))objc_msgSend)(sharedApplication, selector_setAppearance, aquaAppearance);
 }
+#endif
 #endif
 #endif
 
@@ -251,7 +250,8 @@ int main(int argc, char *argv[])
     // mean that most macOS users get dark mode support.
 #ifdef __APPLE__
 #if (QT_VERSION < QT_VERSION_CHECK(5, 15, 2))
-    macos_ForceLightMode();
+#warning Building on macOS with a Qt version less than 5.15.2; dark/light mode may not work correctly
+    //macos_ForceLightMode();
 #endif
 #endif
     
@@ -302,7 +302,7 @@ int main(int argc, char *argv[])
         if (prefs.appStartupPref() == 1)
         {
             // create a new window
-            mainWin = new QtSLiMWindow(QtSLiMWindow::ModelType::WF);
+            mainWin = new QtSLiMWindow(QtSLiMWindow::ModelType::WF, /* includeComments */ true);
         }
         else if (prefs.appStartupPref() == 2)
         {
@@ -311,7 +311,7 @@ int main(int argc, char *argv[])
             
             // if no file was opened, create a new window after all
             if (!mainWin)
-                mainWin = new QtSLiMWindow(QtSLiMWindow::ModelType::WF);
+                mainWin = new QtSLiMWindow(QtSLiMWindow::ModelType::WF, /* includeComments */ true);
         }
     }
     

@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 3/24/2020.
-//  Copyright (c) 2020-2022 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2020-2023 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -238,6 +238,7 @@ bool QtSLiMFindPanel::findForwardWrapBeep(QPlainTextEdit *target, bool forward, 
     if (findResult)
     {
         target->centerCursor();
+        QtSLiMFlashHighlightInTextEdit(target);
     }
     else if (wrap)
     {
@@ -252,7 +253,10 @@ bool QtSLiMFindPanel::findForwardWrapBeep(QPlainTextEdit *target, bool forward, 
         findResult = target->find(findString, findFlags);
         
         if (findResult)
+        {
             target->centerCursor();
+            QtSLiMFlashHighlightInTextEdit(target);
+        }
         else
             target->setTextCursor(originalCursor);
     }
@@ -400,6 +404,7 @@ void QtSLiMFindPanel::jumpToSelection(void)
     
     QPlainTextEdit *target = targetTextEditRequireModifiable(false);
     target->centerCursor();
+    QtSLiMFlashHighlightInTextEdit(target);
 }
 
 void QtSLiMFindPanel::jumpToLine(void)

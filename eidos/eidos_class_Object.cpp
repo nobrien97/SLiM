@@ -3,7 +3,7 @@
 //  Eidos
 //
 //  Created by Ben Haller on 10/12/20.
-//  Copyright (c) 2020-2022 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2020-2023 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -116,7 +116,8 @@ EidosValue_SP EidosObject::ExecuteInstanceMethod(EidosGlobalStringID p_method_id
 #pragma unused(p_arguments, p_interpreter)
 	switch (p_method_id)
 	{
-		case gEidosID_str:	return ExecuteMethod_str(p_method_id, p_arguments, p_interpreter);
+		case gEidosID_str:					return ExecuteMethod_str(p_method_id, p_arguments, p_interpreter);
+		case gEidosID_stringRepresentation:	return ExecuteMethod_stringRepresentation(p_method_id, p_arguments, p_interpreter);
 			
 		default:
 		{
@@ -234,6 +235,19 @@ EidosValue_SP EidosObject::ExecuteMethod_str(EidosGlobalStringID p_method_id, co
 	return gStaticEidosValueVOID;
 }
 
+//	*********************	– (string$)stringRepresentation(void)
+//
+EidosValue_SP EidosObject::ExecuteMethod_stringRepresentation(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter)
+{
+#pragma unused (p_method_id, p_arguments, p_interpreter)
+	
+	std::ostringstream oss;
+	
+	Print(oss);
+	
+	return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String_singleton(oss.str()));
+}
+
 EidosValue_SP EidosObject::ContextDefinedFunctionDispatch(const std::string &p_function_name, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter)
 {
 #pragma unused(p_function_name, p_arguments, p_interpreter)
@@ -262,7 +276,11 @@ std::vector<EidosClass *> &EidosClass::EidosClassRegistry(void)
 	static std::vector<EidosClass *> *classRegistry = nullptr;
 	
 	if (!classRegistry)
+	{
+		THREAD_SAFETY_IN_ANY_PARALLEL("EidosClass::EidosClassRegistry(): not warmed up");
+		
 		classRegistry = new std::vector<EidosClass *>;
+	}
 	
 	return *classRegistry;
 }
@@ -285,6 +303,7 @@ std::vector<EidosClass *> EidosClass::RegisteredClasses(bool p_builtin, bool p_c
 		// heuristic that wouldn't hard-code some detail about SLiM here...
 		if ((class_object == gEidosObject_Class) ||
 			(class_object == gEidosTestElement_Class) ||
+			(class_object == gEidosTestElementNRR_Class) ||
 			(class_object == gEidosDictionaryUnretained_Class) ||
 			(class_object == gEidosDictionaryRetained_Class) ||
 			(class_object == gEidosDataFrame_Class) ||
@@ -405,6 +424,8 @@ void EidosClass::CheckForDuplicateMethodsOrProperties(void)
 
 EidosClass::EidosClass(const std::string &p_class_name, EidosClass *p_superclass) : class_name_(p_class_name), superclass_(p_superclass)
 {
+	THREAD_SAFETY_IN_ANY_PARALLEL("EidosClass::EidosClass(): not warmed up");
+	
 	// Every EidosClass instance gets added to a shared registry, so that Eidos can find them all
 	EidosClassRegistry().emplace_back(this);
 }
@@ -499,6 +520,8 @@ const std::vector<EidosPropertySignature_CSP> *EidosClass::Properties(void) cons
 	
 	if (!properties)
 	{
+		THREAD_SAFETY_IN_ANY_PARALLEL("EidosClass::Properties(): not warmed up");
+		
 		properties = new std::vector<EidosPropertySignature_CSP>;
 		
 		std::sort(properties->begin(), properties->end(), CompareEidosPropertySignatures);
@@ -513,6 +536,8 @@ const std::vector<EidosMethodSignature_CSP> *EidosClass::Methods(void) const
 	
 	if (!methods)
 	{
+		THREAD_SAFETY_IN_ANY_PARALLEL("EidosClass::Methods(): not warmed up");
+		
 		methods = new std::vector<EidosMethodSignature_CSP>;
 		
 		methods->emplace_back((EidosClassMethodSignature *)(new EidosClassMethodSignature(gEidosStr_methodSignature, kEidosValueMaskVOID))->AddString_OSN("methodName", gStaticEidosValueNULL));
@@ -520,6 +545,7 @@ const std::vector<EidosMethodSignature_CSP> *EidosClass::Methods(void) const
 		methods->emplace_back((EidosClassMethodSignature *)(new EidosClassMethodSignature(gEidosStr_size, kEidosValueMaskInt | kEidosValueMaskSingleton)));
 		methods->emplace_back((EidosClassMethodSignature *)(new EidosClassMethodSignature(gEidosStr_length, kEidosValueMaskInt | kEidosValueMaskSingleton)));
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gEidosStr_str, kEidosValueMaskVOID)));
+		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gEidosStr_stringRepresentation, kEidosValueMaskString | kEidosValueMaskSingleton)));
 		
 		std::sort(methods->begin(), methods->end(), CompareEidosCallSignatures);
 	}
@@ -533,6 +559,8 @@ const std::vector<EidosFunctionSignature_CSP> *EidosClass::Functions(void) const
 	
 	if (!functions)
 	{
+		THREAD_SAFETY_IN_ANY_PARALLEL("EidosClass::Functions(): not warmed up");
+		
 		functions = new std::vector<EidosFunctionSignature_CSP>;
 		
 		std::sort(functions->begin(), functions->end(), CompareEidosCallSignatures);

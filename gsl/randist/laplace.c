@@ -23,9 +23,7 @@
 #include "gsl_randist.h"
 
 /* The two-sided exponential probability distribution is  
-
    p(x) dx = (1/(2 a)) * exp(-|x/a|) dx
-
    for -infty < x < infty. It is also known as the Laplace distribution.  */
 
 double
@@ -54,4 +52,3 @@ gsl_ran_laplace_pdf (const double x, const double a)
   double p = (1/(2*a)) * exp (-fabs (x)/a);
   return p;
 }
-
