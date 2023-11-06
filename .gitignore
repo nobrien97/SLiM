@@ -287,3 +287,4 @@ compile_commands.json
 # Boost library: you will need to include your own
 include/boost.zip
 include/boost/**
+SLiM.zip
