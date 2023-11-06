@@ -53,8 +53,8 @@ enum class DFEType : char {
 	kExponential,
 	kNormal,
 	kWeibull,
-	kScript,
-	kLaplace
+	kLaplace,
+	kScript
 };
 
 std::ostream& operator<<(std::ostream& p_out, DFEType p_dfe_type);

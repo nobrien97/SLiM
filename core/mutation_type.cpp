@@ -43,6 +43,7 @@ std::ostream& operator<<(std::ostream& p_out, DFEType p_dfe_type)
 		case DFEType::kNormal:			p_out << gEidosStr_n;	break;
 		case DFEType::kWeibull:			p_out << gStr_w;		break;
 		case DFEType::kLaplace:			p_out << gStr_p;		break;
+		case DFEType::kLaplace:			p_out << gStr_p;		break;
 		case DFEType::kScript:			p_out << gEidosStr_s;	break;
 	}
 	
@@ -207,9 +208,9 @@ void MutationType::ParseDFEParameters(std::string &p_dfe_type_string, const Eido
 				EIDOS_TERMINATION << "ERROR (MutationType::ParseDFEParameters): a DFE of type \"w\" must have a shape parameter > 0." << EidosTerminate();
 			break;
 		case DFEType::kLaplace:
-			// mean is unrestricted, sd parameter must be >= 0
-			if ((*p_dfe_parameters)[1] < 0.0)
-				EIDOS_TERMINATION << "ERROR (MutationType::ParseDFEParameters): a DFE of type \"p\" must have a scale parameter >= 0." << EidosTerminate();
+			// mean is unrestricted, scale parameter must be > 0
+			if ((*p_dfe_parameters)[1] <= 0.0)
+				EIDOS_TERMINATION << "ERROR (MutationType::ParseDFEParameters): a DFE of type \"p\" must have a scale parameter > 0." << EidosTerminate();
 			break;
 		case DFEType::kScript:
 			// no limits on script here; the script is checked when it gets tokenized/parsed/executed
@@ -250,6 +251,7 @@ double MutationType::DrawSelectionCoefficient(void) const
 			gsl_rng *rng = EIDOS_GSL_RNG(omp_get_thread_num());
 			return gsl_ran_weibull(rng, dfe_parameters_[0], dfe_parameters_[1]);
 		}
+			
 
 		case DFEType::kLaplace:
 		{
@@ -439,7 +441,7 @@ EidosValue_SP MutationType::GetProperty(EidosGlobalStringID p_property_id)
 					static_dfe_string_e = EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String_singleton(gStr_e));
 					static_dfe_string_n = EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String_singleton(gEidosStr_n));
 					static_dfe_string_w = EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String_singleton(gStr_w));
-					static_dfe_string_p = EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String_singleton(gStr_p));					
+					static_dfe_string_p = EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String_singleton(gStr_p));
 					static_dfe_string_s = EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String_singleton(gEidosStr_s));
 				}
 			}

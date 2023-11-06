@@ -4882,7 +4882,7 @@ EidosValue_SP Subpopulation::ExecuteMethod_addEmpty(EidosGlobalStringID p_method
 //	*********************	– (o<Individual>)addRecombinant(No<Genome>$ strand1, No<Genome>$ strand2, Ni breaks1,
 //															No<Genome>$ strand3, No<Genome>$ strand4, Ni breaks2,
 //															[Nfs$ sex = NULL], [No<Individual>$ parent1 = NULL], [No<Individual>$ parent2 = NULL],
-//															[integer$ count = 1], [logical$ defer = F])
+//															[l$ randomizeStrands = F], [integer$ count = 1], [logical$ defer = F])
 //
 EidosValue_SP Subpopulation::ExecuteMethod_addRecombinant(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter)
 {
@@ -4902,7 +4902,7 @@ EidosValue_SP Subpopulation::ExecuteMethod_addRecombinant(EidosGlobalStringID p_
 		EIDOS_TERMINATION << "ERROR (Subpopulation::ExecuteMethod_addRecombinant): method -addRecombinant() may not be called for a no-genetics species; recombination requires genetics." << EidosTerminate();
 	
 	// Check the count and short-circuit if it is zero
-	EidosValue *count_value = p_arguments[9].get();
+	EidosValue *count_value = p_arguments[10].get();
 	int64_t child_count = count_value->IntAtIndex(0, nullptr);
 	
 	if ((child_count < 0) || (child_count > SLIM_MAX_SUBPOP_SIZE))
@@ -5022,7 +5022,10 @@ EidosValue_SP Subpopulation::ExecuteMethod_addRecombinant(EidosGlobalStringID p_
 	if (!mutation_callbacks->size())
 		mutation_callbacks = nullptr;
 	
-	EidosValue *defer_value = p_arguments[10].get();
+	EidosValue *randomizeStrands_value = p_arguments[9].get();
+	bool randomizeStrands = randomizeStrands_value->LogicalAtIndex(0, nullptr);
+	
+	EidosValue *defer_value = p_arguments[11].get();
 	bool defer = defer_value->LogicalAtIndex(0, nullptr);
 	
 	if (defer && mutation_callbacks)
@@ -5033,6 +5036,25 @@ EidosValue_SP Subpopulation::ExecuteMethod_addRecombinant(EidosGlobalStringID p_
 		GenomeType genome1_type, genome2_type;
 		bool genome1_null, genome2_null;
 		IndividualSex child_sex = _GenomeConfigurationForSex(sex_value, genome1_type, genome2_type, genome1_null, genome2_null);
+		
+		// Randomly swap initial copy strands, if requested and applicable
+		if (randomizeStrands)
+		{
+			Eidos_RNG_State *rng_state = EIDOS_STATE_RNG(omp_get_thread_num());
+			
+			if (strand1 && strand2 && Eidos_RandomBool(rng_state))
+			{
+				std::swap(strand1, strand2);
+				std::swap(strand1_parent, strand2_parent);
+				//std::swap(strand1_value, strand2_value);		// not used henceforth
+			}
+			if (strand3 && strand4 && Eidos_RandomBool(rng_state))
+			{
+				std::swap(strand3, strand4);
+				std::swap(strand3_parent, strand4_parent);
+				//std::swap(strand3_value, strand4_value);		// not used henceforth
+			}
+		}
 		
 		// Check that the chosen sex makes sense with respect to the strands given
 		// BCH 9/20/2021: Improved the logic here because in sexual sex-chromosome models the null/nonnull state of the offspring genomes is dictated by the sex.
@@ -5108,7 +5130,7 @@ EidosValue_SP Subpopulation::ExecuteMethod_addRecombinant(EidosGlobalStringID p_
 				breakvec1.erase(breakvec1.begin());
 				std::swap(strand1, strand2);
 				std::swap(strand1_parent, strand2_parent);
-				std::swap(strand1_value, strand2_value);
+				//std::swap(strand1_value, strand2_value);		// not used henceforth
 			}
 		}
 		
@@ -5129,7 +5151,7 @@ EidosValue_SP Subpopulation::ExecuteMethod_addRecombinant(EidosGlobalStringID p_
 				breakvec2.erase(breakvec2.begin());
 				std::swap(strand3, strand4);
 				std::swap(strand3_parent, strand4_parent);
-				std::swap(strand3_value, strand4_value);
+				//std::swap(strand3_value, strand4_value);		// not used henceforth
 			}
 		}
 		
@@ -7010,7 +7032,7 @@ EidosValue_SP Subpopulation::ExecuteMethod_cachedFitness(EidosGlobalStringID p_m
 	}
 }
 
-//  *********************	– (No<Individual>)sampleIndividuals(integer$ size, [logical$ replace = F], [No<Individual>$ exclude = NULL], [Ns$ sex = NULL], [Ni$ tag = NULL], [Ni$ minAge = NULL], [Ni$ maxAge = NULL], [Nl$ migrant = NULL])
+//  *********************	– (No<Individual>)sampleIndividuals(integer$ size, [logical$ replace = F], [No<Individual>$ exclude = NULL], [Ns$ sex = NULL], [Ni$ tag = NULL], [Ni$ minAge = NULL], [Ni$ maxAge = NULL], [Nl$ migrant = NULL], [Nl$ tagL0 = NULL], [Nl$ tagL1 = NULL], [Nl$ tagL2 = NULL], [Nl$ tagL3 = NULL], [Nl$ tagL4 = NULL])
 //
 EidosValue_SP Subpopulation::ExecuteMethod_sampleIndividuals(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter)
 {
@@ -7064,7 +7086,7 @@ EidosValue_SP Subpopulation::ExecuteMethod_sampleIndividuals(EidosGlobalStringID
 			EIDOS_TERMINATION << "ERROR (Subpopulation::ExecuteMethod_sampleIndividuals): sex must be NULL in non-sexual models." << EidosTerminate(nullptr);
 	}
 	
-	// a tag value may be specified
+	// a tag value may be specified; if so, tag values must be defined for all individuals
 	EidosValue *tag_value = p_arguments[4].get();
 	bool tag_specified = (tag_value->Type() != EidosValueType::kValueNULL);
 	slim_usertag_t tag = (tag_specified ? tag_value->IntAtIndex(0, nullptr) : 0);
@@ -7085,7 +7107,25 @@ EidosValue_SP Subpopulation::ExecuteMethod_sampleIndividuals(EidosGlobalStringID
 	bool migrant_specified = (migrant_value->Type() != EidosValueType::kValueNULL);
 	eidos_logical_t migrant = (migrant_specified ? migrant_value->LogicalAtIndex(0, nullptr) : false);
 	
-	// determine the range the sample will be drawn from; this does not take into account tag or ageMin/ageMax
+	// logical tag values, tagL0 - tagL4, may be specified; if so, those tagL values must be defined for all individuals
+	EidosValue *tagL0_value = p_arguments[8].get();
+	bool tagL0_specified = (tagL0_value->Type() != EidosValueType::kValueNULL);
+	eidos_logical_t tagL0 = (tagL0_specified ? tagL0_value->LogicalAtIndex(0, nullptr) : false);
+	EidosValue *tagL1_value = p_arguments[9].get();
+	bool tagL1_specified = (tagL1_value->Type() != EidosValueType::kValueNULL);
+	eidos_logical_t tagL1 = (tagL1_specified ? tagL1_value->LogicalAtIndex(0, nullptr) : false);
+	EidosValue *tagL2_value = p_arguments[10].get();
+	bool tagL2_specified = (tagL2_value->Type() != EidosValueType::kValueNULL);
+	eidos_logical_t tagL2 = (tagL2_specified ? tagL2_value->LogicalAtIndex(0, nullptr) : false);
+	EidosValue *tagL3_value = p_arguments[11].get();
+	bool tagL3_specified = (tagL3_value->Type() != EidosValueType::kValueNULL);
+	eidos_logical_t tagL3 = (tagL3_specified ? tagL3_value->LogicalAtIndex(0, nullptr) : false);
+	EidosValue *tagL4_value = p_arguments[12].get();
+	bool tagL4_specified = (tagL4_value->Type() != EidosValueType::kValueNULL);
+	eidos_logical_t tagL4 = (tagL4_specified ? tagL4_value->LogicalAtIndex(0, nullptr) : false);
+	bool any_tagL_specified = (tagL0_specified || tagL1_specified || tagL2_specified || tagL3_specified || tagL4_specified);
+	
+	// determine the range the sample will be drawn from; this does not take into account tag, tagLX, or ageMin/ageMax
 	int first_candidate_index, last_candidate_index, candidate_count;
 	
 	if (sex == IndividualSex::kUnspecified)
@@ -7112,9 +7152,9 @@ EidosValue_SP Subpopulation::ExecuteMethod_sampleIndividuals(EidosGlobalStringID
 	else
 		excluded_index = -1;
 	
-	if (!tag_specified && !ageMin_specified && !ageMax_specified && !migrant_specified)
+	if (!tag_specified && !ageMin_specified && !ageMax_specified && !migrant_specified && !any_tagL_specified)
 	{
-		// we're in the simple case of no specifed tag/ageMin/ageMax/migrant, so maybe we can handle it quickly
+		// we're in the simple case of no specifed tag/ageMin/ageMax/migrant/tagL, so maybe we can handle it quickly
 		if (candidate_count == 0)
 			return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Object_vector(gSLiM_Individual_Class));
 		else if (!replace && (candidate_count < sample_size))
@@ -7171,6 +7211,7 @@ EidosValue_SP Subpopulation::ExecuteMethod_sampleIndividuals(EidosGlobalStringID
 		else if (sample_size == 2)
 		{
 			// a sample size of two without replacement is expected to be common (interacting pairs) so optimize for it
+			// note that the code above guarantees that here there are at least two candidates to draw
 			result_SP = EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Object_vector(gSLiM_Individual_Class));
 			EidosValue_Object_vector *result = ((EidosValue_Object_vector *)result_SP.get())->resize_no_initialize(sample_size);
 			gsl_rng *rng = EIDOS_GSL_RNG(omp_get_thread_num());
@@ -7197,6 +7238,8 @@ EidosValue_SP Subpopulation::ExecuteMethod_sampleIndividuals(EidosGlobalStringID
 			
 			return result_SP;
 		}
+		
+		// note that we drop through here if none of the three special cases above is hit
 	}
 	
 	// BCH 12/17/2019: Adding an optimization here.  It is common to call sampleIndividuals() on a large subpopulation
@@ -7219,14 +7262,60 @@ EidosValue_SP Subpopulation::ExecuteMethod_sampleIndividuals(EidosGlobalStringID
 			
 			Individual *candidate = parent_individuals_[sample_index];
 			
-			if (tag_specified && (candidate->tag_value_ != tag))
-				continue;
+			if (tag_specified)
+			{
+				slim_usertag_t candidate_tag = candidate->tag_value_;
+				
+				if (candidate_tag == SLIM_TAG_UNSET_VALUE)
+					EIDOS_TERMINATION << "ERROR (Subpopulation::ExecuteMethod_sampleIndividuals): a tag constraint was specified, but an individual in the subpopulation does not have a defined tag value, so that constraint cannot be applied." << EidosTerminate(nullptr);
+				
+				if (candidate_tag != tag)
+					continue;
+			}
 			if (migrant_specified && (candidate->migrant_ != migrant))
 				continue;
 			if (ageMin_specified && (candidate->age_ < ageMin))
 				continue;
 			if (ageMax_specified && (candidate->age_ > ageMax))
 				continue;
+			if (any_tagL_specified)
+			{
+				if (tagL0_specified)
+				{
+					if (!candidate->tagL0_set_)
+						EIDOS_TERMINATION << "ERROR (Subpopulation::ExecuteMethod_sampleIndividuals): a tagL0 constraint was specified, but an individual in the subpopulation does not have a defined tagL0 value, so that constraint cannot be applied." << EidosTerminate(nullptr);
+					if (candidate->tagL0_value_ != tagL0)
+						continue;
+				}
+				if (tagL1_specified)
+				{
+					if (!candidate->tagL1_set_)
+						EIDOS_TERMINATION << "ERROR (Subpopulation::ExecuteMethod_sampleIndividuals): a tagL1 constraint was specified, but an individual in the subpopulation does not have a defined tagL1 value, so that constraint cannot be applied." << EidosTerminate(nullptr);
+					if (candidate->tagL1_value_ != tagL1)
+						continue;
+				}
+				if (tagL2_specified)
+				{
+					if (!candidate->tagL2_set_)
+						EIDOS_TERMINATION << "ERROR (Subpopulation::ExecuteMethod_sampleIndividuals): a tagL2 constraint was specified, but an individual in the subpopulation does not have a defined tagL2 value, so that constraint cannot be applied." << EidosTerminate(nullptr);
+					if (candidate->tagL2_value_ != tagL2)
+						continue;
+				}
+				if (tagL3_specified)
+				{
+					if (!candidate->tagL3_set_)
+						EIDOS_TERMINATION << "ERROR (Subpopulation::ExecuteMethod_sampleIndividuals): a tagL3 constraint was specified, but an individual in the subpopulation does not have a defined tagL3 value, so that constraint cannot be applied." << EidosTerminate(nullptr);
+					if (candidate->tagL3_value_ != tagL3)
+						continue;
+				}
+				if (tagL4_specified)
+				{
+					if (!candidate->tagL4_set_)
+						EIDOS_TERMINATION << "ERROR (Subpopulation::ExecuteMethod_sampleIndividuals): a tagL4 constraint was specified, but an individual in the subpopulation does not have a defined tagL4 value, so that constraint cannot be applied." << EidosTerminate(nullptr);
+					if (candidate->tagL4_value_ != tagL4)
+						continue;
+				}
+			}
 			
 			return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Object_singleton(parent_individuals_[sample_index], gSLiM_Individual_Class));
 		}
@@ -7253,7 +7342,7 @@ EidosValue_SP Subpopulation::ExecuteMethod_sampleIndividuals(EidosGlobalStringID
 		
 		candidate_count = 0;	// we will count how many candidates we actually end up with
 		
-		if (!tag_specified && !ageMin_specified && !ageMax_specified && !migrant_specified)
+		if (!tag_specified && !ageMin_specified && !ageMax_specified && !migrant_specified && !any_tagL_specified)
 		{
 			if (excluded_index == -1)
 			{
@@ -7275,8 +7364,16 @@ EidosValue_SP Subpopulation::ExecuteMethod_sampleIndividuals(EidosGlobalStringID
 			{
 				Individual *candidate = parent_individuals_[value_index];
 				
-				if (tag_specified && (candidate->tag_value_ != tag))
-					continue;
+				if (tag_specified)
+				{
+					slim_usertag_t candidate_tag = candidate->tag_value_;
+					
+					if (candidate_tag == SLIM_TAG_UNSET_VALUE)
+						EIDOS_TERMINATION << "ERROR (Subpopulation::ExecuteMethod_sampleIndividuals): a tag constraint was specified, but an individual in the subpopulation does not have a defined tag value, so that constraint cannot be applied." << EidosTerminate(nullptr);
+					
+					if (candidate_tag != tag)
+						continue;
+				}
 				if (migrant_specified && (candidate->migrant_ != migrant))
 					continue;
 				if (ageMin_specified && (candidate->age_ < ageMin))
@@ -7285,6 +7382,44 @@ EidosValue_SP Subpopulation::ExecuteMethod_sampleIndividuals(EidosGlobalStringID
 					continue;
 				if (value_index == excluded_index)
 					continue;
+				if (any_tagL_specified)
+				{
+					if (tagL0_specified)
+					{
+						if (!candidate->tagL0_set_)
+							EIDOS_TERMINATION << "ERROR (Subpopulation::ExecuteMethod_sampleIndividuals): a tagL0 constraint was specified, but an individual in the subpopulation does not have a defined tagL0 value, so that constraint cannot be applied." << EidosTerminate(nullptr);
+						if (candidate->tagL0_value_ != tagL0)
+							continue;
+					}
+					if (tagL1_specified)
+					{
+						if (!candidate->tagL1_set_)
+							EIDOS_TERMINATION << "ERROR (Subpopulation::ExecuteMethod_sampleIndividuals): a tagL1 constraint was specified, but an individual in the subpopulation does not have a defined tagL1 value, so that constraint cannot be applied." << EidosTerminate(nullptr);
+						if (candidate->tagL1_value_ != tagL1)
+							continue;
+					}
+					if (tagL2_specified)
+					{
+						if (!candidate->tagL2_set_)
+							EIDOS_TERMINATION << "ERROR (Subpopulation::ExecuteMethod_sampleIndividuals): a tagL2 constraint was specified, but an individual in the subpopulation does not have a defined tagL2 value, so that constraint cannot be applied." << EidosTerminate(nullptr);
+						if (candidate->tagL2_value_ != tagL2)
+							continue;
+					}
+					if (tagL3_specified)
+					{
+						if (!candidate->tagL3_set_)
+							EIDOS_TERMINATION << "ERROR (Subpopulation::ExecuteMethod_sampleIndividuals): a tagL3 constraint was specified, but an individual in the subpopulation does not have a defined tagL3 value, so that constraint cannot be applied." << EidosTerminate(nullptr);
+						if (candidate->tagL3_value_ != tagL3)
+							continue;
+					}
+					if (tagL4_specified)
+					{
+						if (!candidate->tagL4_set_)
+							EIDOS_TERMINATION << "ERROR (Subpopulation::ExecuteMethod_sampleIndividuals): a tagL4 constraint was specified, but an individual in the subpopulation does not have a defined tagL4 value, so that constraint cannot be applied." << EidosTerminate(nullptr);
+						if (candidate->tagL4_value_ != tagL4)
+							continue;
+					}
+				}
 				
 				index_buffer[candidate_count++] = value_index;
 			}
@@ -7353,7 +7488,7 @@ EidosValue_SP Subpopulation::ExecuteMethod_sampleIndividuals(EidosGlobalStringID
 	return result_SP;
 }
 
-//  *********************	– (object<Individual>)subsetIndividuals([No<Individual>$ exclude = NULL], [Ns$ sex = NULL], [Ni$ tag = NULL], [Ni$ minAge = NULL], [Ni$ maxAge = NULL], [Nl$ migrant = NULL])
+//  *********************	– (object<Individual>)subsetIndividuals([No<Individual>$ exclude = NULL], [Ns$ sex = NULL], [Ni$ tag = NULL], [Ni$ minAge = NULL], [Ni$ maxAge = NULL], [Nl$ migrant = NULL], [Nl$ tagL0 = NULL], [Nl$ tagL1 = NULL], [Nl$ tagL2 = NULL], [Nl$ tagL3 = NULL], [Nl$ tagL4 = NULL])
 //
 EidosValue_SP Subpopulation::ExecuteMethod_subsetIndividuals(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter)
 {
@@ -7403,7 +7538,7 @@ EidosValue_SP Subpopulation::ExecuteMethod_subsetIndividuals(EidosGlobalStringID
 			EIDOS_TERMINATION << "ERROR (Subpopulation::ExecuteMethod_subsetIndividuals): sex must be NULL in non-sexual models." << EidosTerminate(nullptr);
 	}
 	
-	// a tag value may be specified
+	// a tag value may be specified; if so, tag values must be defined for all individuals
 	EidosValue *tag_value = p_arguments[2].get();
 	bool tag_specified = (tag_value->Type() != EidosValueType::kValueNULL);
 	slim_usertag_t tag = (tag_specified ? tag_value->IntAtIndex(0, nullptr) : 0);
@@ -7424,7 +7559,25 @@ EidosValue_SP Subpopulation::ExecuteMethod_subsetIndividuals(EidosGlobalStringID
 	bool migrant_specified = (migrant_value->Type() != EidosValueType::kValueNULL);
 	eidos_logical_t migrant = (migrant_specified ? migrant_value->LogicalAtIndex(0, nullptr) : false);
 	
-	// determine the range the sample will be drawn from; this does not take into account tag or ageMin/ageMax
+	// logical tag values, tagL0 - tagL4, may be specified; if so, those tagL values must be defined for all individuals
+	EidosValue *tagL0_value = p_arguments[6].get();
+	bool tagL0_specified = (tagL0_value->Type() != EidosValueType::kValueNULL);
+	eidos_logical_t tagL0 = (tagL0_specified ? tagL0_value->LogicalAtIndex(0, nullptr) : false);
+	EidosValue *tagL1_value = p_arguments[7].get();
+	bool tagL1_specified = (tagL1_value->Type() != EidosValueType::kValueNULL);
+	eidos_logical_t tagL1 = (tagL1_specified ? tagL1_value->LogicalAtIndex(0, nullptr) : false);
+	EidosValue *tagL2_value = p_arguments[8].get();
+	bool tagL2_specified = (tagL2_value->Type() != EidosValueType::kValueNULL);
+	eidos_logical_t tagL2 = (tagL2_specified ? tagL2_value->LogicalAtIndex(0, nullptr) : false);
+	EidosValue *tagL3_value = p_arguments[9].get();
+	bool tagL3_specified = (tagL3_value->Type() != EidosValueType::kValueNULL);
+	eidos_logical_t tagL3 = (tagL3_specified ? tagL3_value->LogicalAtIndex(0, nullptr) : false);
+	EidosValue *tagL4_value = p_arguments[10].get();
+	bool tagL4_specified = (tagL4_value->Type() != EidosValueType::kValueNULL);
+	eidos_logical_t tagL4 = (tagL4_specified ? tagL4_value->LogicalAtIndex(0, nullptr) : false);
+	bool any_tagL_specified = (tagL0_specified || tagL1_specified || tagL2_specified || tagL3_specified || tagL4_specified);
+	
+	// determine the range the sample will be drawn from; this does not take into account tag, tagLX, or ageMin/ageMax
 	int first_candidate_index, last_candidate_index, candidate_count;
 	
 	if (sex == IndividualSex::kUnspecified)
@@ -7454,9 +7607,9 @@ EidosValue_SP Subpopulation::ExecuteMethod_subsetIndividuals(EidosGlobalStringID
 	result_SP = EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Object_vector(gSLiM_Individual_Class));
 	EidosValue_Object_vector *result = ((EidosValue_Object_vector *)result_SP.get());
 	
-	if (!tag_specified && !ageMin_specified && !ageMax_specified && !migrant_specified)
+	if (!tag_specified && !ageMin_specified && !ageMax_specified && !migrant_specified && !any_tagL_specified)
 	{
-		// usually there will be no specifed tag/ageMin/ageMax, so handle it more quickly; reserve since we know the size within 1
+		// usually there will be no specifed tag/ageMin/ageMax/tagL, so handle it more quickly; reserve since we know the size within 1
 		result->reserve(candidate_count);
 		
 		if (excluded_index == -1)
@@ -7482,8 +7635,16 @@ EidosValue_SP Subpopulation::ExecuteMethod_subsetIndividuals(EidosGlobalStringID
 		{
 			Individual *candidate = parent_individuals_[value_index];
 			
-			if (tag_specified && (candidate->tag_value_ != tag))
-				continue;
+			if (tag_specified)
+			{
+				slim_usertag_t candidate_tag = candidate->tag_value_;
+				
+				if (candidate_tag == SLIM_TAG_UNSET_VALUE)
+					EIDOS_TERMINATION << "ERROR (Subpopulation::ExecuteMethod_subsetIndividuals): a tag constraint was specified, but an individual in the subpopulation does not have a defined tag value, so that constraint cannot be applied." << EidosTerminate(nullptr);
+				
+				if (candidate_tag != tag)
+					continue;
+			}
 			if (migrant_specified && (candidate->migrant_ != migrant))
 				continue;
 			if (ageMin_specified && (candidate->age_ < ageMin))
@@ -7492,6 +7653,44 @@ EidosValue_SP Subpopulation::ExecuteMethod_subsetIndividuals(EidosGlobalStringID
 				continue;
 			if (value_index == excluded_index)
 				continue;
+			if (any_tagL_specified)
+			{
+				if (tagL0_specified)
+				{
+					if (!candidate->tagL0_set_)
+						EIDOS_TERMINATION << "ERROR (Subpopulation::ExecuteMethod_subsetIndividuals): a tagL0 constraint was specified, but an individual in the subpopulation does not have a defined tagL0 value, so that constraint cannot be applied." << EidosTerminate(nullptr);
+					if (candidate->tagL0_value_ != tagL0)
+						continue;
+				}
+				if (tagL1_specified)
+				{
+					if (!candidate->tagL1_set_)
+						EIDOS_TERMINATION << "ERROR (Subpopulation::ExecuteMethod_subsetIndividuals): a tagL1 constraint was specified, but an individual in the subpopulation does not have a defined tagL1 value, so that constraint cannot be applied." << EidosTerminate(nullptr);
+					if (candidate->tagL1_value_ != tagL1)
+						continue;
+				}
+				if (tagL2_specified)
+				{
+					if (!candidate->tagL2_set_)
+						EIDOS_TERMINATION << "ERROR (Subpopulation::ExecuteMethod_subsetIndividuals): a tagL2 constraint was specified, but an individual in the subpopulation does not have a defined tagL2 value, so that constraint cannot be applied." << EidosTerminate(nullptr);
+					if (candidate->tagL2_value_ != tagL2)
+						continue;
+				}
+				if (tagL3_specified)
+				{
+					if (!candidate->tagL3_set_)
+						EIDOS_TERMINATION << "ERROR (Subpopulation::ExecuteMethod_subsetIndividuals): a tagL3 constraint was specified, but an individual in the subpopulation does not have a defined tagL3 value, so that constraint cannot be applied." << EidosTerminate(nullptr);
+					if (candidate->tagL3_value_ != tagL3)
+						continue;
+				}
+				if (tagL4_specified)
+				{
+					if (!candidate->tagL4_set_)
+						EIDOS_TERMINATION << "ERROR (Subpopulation::ExecuteMethod_subsetIndividuals): a tagL4 constraint was specified, but an individual in the subpopulation does not have a defined tagL4 value, so that constraint cannot be applied." << EidosTerminate(nullptr);
+					if (candidate->tagL4_value_ != tagL4)
+						continue;
+				}
+			}
 			
 			result->push_object_element_capcheck_NORR(parent_individuals_[value_index]);
 		}
@@ -8159,13 +8358,13 @@ const std::vector<EidosMethodSignature_CSP> *Subpopulation_Class::Methods(void) 
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_addCloned, kEidosValueMaskObject, gSLiM_Individual_Class))->AddObject_S("parent", gSLiM_Individual_Class)->AddInt_OS("count", gStaticEidosValue_Integer1)->AddLogical_OS("defer", gStaticEidosValue_LogicalF));
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_addCrossed, kEidosValueMaskObject, gSLiM_Individual_Class))->AddObject_S("parent1", gSLiM_Individual_Class)->AddObject_S("parent2", gSLiM_Individual_Class)->AddArgWithDefault(kEidosValueMaskNULL | kEidosValueMaskFloat | kEidosValueMaskString | kEidosValueMaskSingleton | kEidosValueMaskOptional, "sex", nullptr, gStaticEidosValueNULL)->AddInt_OS("count", gStaticEidosValue_Integer1)->AddLogical_OS("defer", gStaticEidosValue_LogicalF));
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_addEmpty, kEidosValueMaskObject, gSLiM_Individual_Class))->AddArgWithDefault(kEidosValueMaskNULL | kEidosValueMaskFloat | kEidosValueMaskString | kEidosValueMaskSingleton | kEidosValueMaskOptional, "sex", nullptr, gStaticEidosValueNULL)->AddLogical_OSN("genome1Null", gStaticEidosValueNULL)->AddLogical_OSN("genome2Null", gStaticEidosValueNULL)->AddInt_OS("count", gStaticEidosValue_Integer1));
-		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_addRecombinant, kEidosValueMaskObject, gSLiM_Individual_Class))->AddObject_SN("strand1", gSLiM_Genome_Class)->AddObject_SN("strand2", gSLiM_Genome_Class)->AddInt_N("breaks1")->AddObject_SN("strand3", gSLiM_Genome_Class)->AddObject_SN("strand4", gSLiM_Genome_Class)->AddInt_N("breaks2")->AddArgWithDefault(kEidosValueMaskNULL | kEidosValueMaskFloat | kEidosValueMaskString | kEidosValueMaskSingleton | kEidosValueMaskOptional, "sex", nullptr, gStaticEidosValueNULL)->AddObject_OSN("parent1", gSLiM_Individual_Class, gStaticEidosValueNULL)->AddObject_OSN("parent2", gSLiM_Individual_Class, gStaticEidosValueNULL)->AddInt_OS("count", gStaticEidosValue_Integer1)->AddLogical_OS("defer", gStaticEidosValue_LogicalF));
+		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_addRecombinant, kEidosValueMaskObject, gSLiM_Individual_Class))->AddObject_SN("strand1", gSLiM_Genome_Class)->AddObject_SN("strand2", gSLiM_Genome_Class)->AddInt_N("breaks1")->AddObject_SN("strand3", gSLiM_Genome_Class)->AddObject_SN("strand4", gSLiM_Genome_Class)->AddInt_N("breaks2")->AddArgWithDefault(kEidosValueMaskNULL | kEidosValueMaskFloat | kEidosValueMaskString | kEidosValueMaskSingleton | kEidosValueMaskOptional, "sex", nullptr, gStaticEidosValueNULL)->AddObject_OSN("parent1", gSLiM_Individual_Class, gStaticEidosValueNULL)->AddObject_OSN("parent2", gSLiM_Individual_Class, gStaticEidosValueNULL)->AddLogical_OS("randomizeStrands", gStaticEidosValue_LogicalF)->AddInt_OS("count", gStaticEidosValue_Integer1)->AddLogical_OS("defer", gStaticEidosValue_LogicalF));
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_addSelfed, kEidosValueMaskObject, gSLiM_Individual_Class))->AddObject_S("parent", gSLiM_Individual_Class)->AddInt_OS("count", gStaticEidosValue_Integer1)->AddLogical_OS("defer", gStaticEidosValue_LogicalF));
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_takeMigrants, kEidosValueMaskVOID))->AddObject("migrants", gSLiM_Individual_Class));
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_removeSubpopulation, kEidosValueMaskVOID)));
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_cachedFitness, kEidosValueMaskFloat))->AddInt_N("indices"));
-		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_sampleIndividuals, kEidosValueMaskObject, gSLiM_Individual_Class))->AddInt_S("size")->AddLogical_OS("replace", gStaticEidosValue_LogicalF)->AddObject_OSN("exclude", gSLiM_Individual_Class, gStaticEidosValueNULL)->AddString_OSN("sex", gStaticEidosValueNULL)->AddInt_OSN("tag", gStaticEidosValueNULL)->AddInt_OSN("minAge", gStaticEidosValueNULL)->AddInt_OSN("maxAge", gStaticEidosValueNULL)->AddLogical_OSN("migrant", gStaticEidosValueNULL));
-		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_subsetIndividuals, kEidosValueMaskObject, gSLiM_Individual_Class))->AddObject_OSN("exclude", gSLiM_Individual_Class, gStaticEidosValueNULL)->AddString_OSN("sex", gStaticEidosValueNULL)->AddInt_OSN("tag", gStaticEidosValueNULL)->AddInt_OSN("minAge", gStaticEidosValueNULL)->AddInt_OSN("maxAge", gStaticEidosValueNULL)->AddLogical_OSN("migrant", gStaticEidosValueNULL));
+		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_sampleIndividuals, kEidosValueMaskObject, gSLiM_Individual_Class))->AddInt_S("size")->AddLogical_OS("replace", gStaticEidosValue_LogicalF)->AddObject_OSN("exclude", gSLiM_Individual_Class, gStaticEidosValueNULL)->AddString_OSN("sex", gStaticEidosValueNULL)->AddInt_OSN("tag", gStaticEidosValueNULL)->AddInt_OSN("minAge", gStaticEidosValueNULL)->AddInt_OSN("maxAge", gStaticEidosValueNULL)->AddLogical_OSN("migrant", gStaticEidosValueNULL)->AddLogical_OSN("tagL0", gStaticEidosValueNULL)->AddLogical_OSN("tagL1", gStaticEidosValueNULL)->AddLogical_OSN("tagL2", gStaticEidosValueNULL)->AddLogical_OSN("tagL3", gStaticEidosValueNULL)->AddLogical_OSN("tagL4", gStaticEidosValueNULL));
+		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_subsetIndividuals, kEidosValueMaskObject, gSLiM_Individual_Class))->AddObject_OSN("exclude", gSLiM_Individual_Class, gStaticEidosValueNULL)->AddString_OSN("sex", gStaticEidosValueNULL)->AddInt_OSN("tag", gStaticEidosValueNULL)->AddInt_OSN("minAge", gStaticEidosValueNULL)->AddInt_OSN("maxAge", gStaticEidosValueNULL)->AddLogical_OSN("migrant", gStaticEidosValueNULL)->AddLogical_OSN("tagL0", gStaticEidosValueNULL)->AddLogical_OSN("tagL1", gStaticEidosValueNULL)->AddLogical_OSN("tagL2", gStaticEidosValueNULL)->AddLogical_OSN("tagL3", gStaticEidosValueNULL)->AddLogical_OSN("tagL4", gStaticEidosValueNULL));
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_defineSpatialMap, kEidosValueMaskObject | kEidosValueMaskSingleton, gSLiM_SpatialMap_Class))->AddString_S("name")->AddString_S("spatiality")->AddNumeric("values")->AddLogical_OS(gStr_interpolate, gStaticEidosValue_LogicalF)->AddNumeric_ON("valueRange", gStaticEidosValueNULL)->AddString_ON("colors", gStaticEidosValueNULL));
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_addSpatialMap, kEidosValueMaskVOID, gSLiM_SpatialMap_Class))->AddObject_S("map", gSLiM_SpatialMap_Class));
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_removeSpatialMap, kEidosValueMaskVOID, gSLiM_SpatialMap_Class))->AddArg(kEidosValueMaskString | kEidosValueMaskObject | kEidosValueMaskSingleton, "map", gSLiM_SpatialMap_Class));

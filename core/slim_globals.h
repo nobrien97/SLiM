@@ -993,6 +993,7 @@ extern const std::string &gStr_neighborCountOfPoint;
 extern const std::string &gStr_nearestInteractingNeighbors;
 extern const std::string &gStr_interactingNeighborCount;
 extern const std::string &gStr_nearestNeighborsOfPoint;
+extern const std::string &gStr_setConstraints;
 extern const std::string &gStr_setInteractionFunction;
 extern const std::string &gStr_strength;
 extern const std::string &gStr_totalOfNeighborStrengths;
@@ -1085,6 +1086,7 @@ extern const std::string &gStr_e;
 extern const std::string &gStr_w;
 extern const std::string &gStr_p;
 extern const std::string &gStr_l;
+extern const std::string &gStr_p;
 //extern const std::string &gStr_s;		now gEidosStr_s
 extern const std::string &gStr_species;
 extern const std::string &gStr_ticks;
@@ -1397,6 +1399,7 @@ enum _SLiMGlobalStringID : int {
 	gID_nearestInteractingNeighbors,
 	gID_interactingNeighborCount,
 	gID_nearestNeighborsOfPoint,
+	gID_setConstraints,
 	gID_setInteractionFunction,
 	gID_strength,
 	gID_totalOfNeighborStrengths,
@@ -1486,6 +1489,7 @@ enum _SLiMGlobalStringID : int {
 	gID_w,
 	gID_p,
 	gID_l,
+	gID_p,
 	//gID_s,	now gEidosID_s
 	gID_species,
 	gID_ticks,
