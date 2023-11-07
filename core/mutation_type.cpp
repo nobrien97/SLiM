@@ -43,7 +43,6 @@ std::ostream& operator<<(std::ostream& p_out, DFEType p_dfe_type)
 		case DFEType::kNormal:			p_out << gEidosStr_n;	break;
 		case DFEType::kWeibull:			p_out << gStr_w;		break;
 		case DFEType::kLaplace:			p_out << gStr_p;		break;
-		case DFEType::kLaplace:			p_out << gStr_p;		break;
 		case DFEType::kScript:			p_out << gEidosStr_s;	break;
 	}
 	

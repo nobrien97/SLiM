@@ -1487,7 +1487,6 @@ enum _SLiMGlobalStringID : int {
 	gID_e,
 	// gID_n,		now gEidosID_n
 	gID_w,
-	gID_p,
 	gID_l,
 	gID_p,
 	//gID_s,	now gEidosID_s

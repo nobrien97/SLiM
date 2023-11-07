@@ -1942,11 +1942,6 @@ EidosValue_SP SLiM_ExecuteFunction_calcHeterozygosityAtPosition(const std::vecto
 				continue;
 			}
 
-			for (int l = 0; l < 5; ++l)
-			{
-
-			}
-
 			// Sort ids
 			std::sort(mutsGenome1.begin(), mutsGenome1.end());
 			std::sort(mutsGenome2.begin(), mutsGenome2.end());
