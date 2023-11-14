@@ -867,6 +867,7 @@ void EidosDictionaryUnretained::AddJSONFrom(nlohmann::json &json)
 				{
 					EidosDictionaryRetained *dictionary = new EidosDictionaryRetained();
 					state_ptr->dictionary_symbols_[key] = EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Object_singleton(dictionary, gEidosDictionaryRetained_Class));
+					dictionary->Release();		// now retained by state_ptr->dictionary_symbols_
 				}
 				else if (value.is_boolean())
 				{
@@ -893,6 +894,7 @@ void EidosDictionaryUnretained::AddJSONFrom(nlohmann::json &json)
 					EidosDictionaryRetained *dictionary = new EidosDictionaryRetained();
 					dictionary->AddJSONFrom(value);
 					state_ptr->dictionary_symbols_[key] = EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Object_singleton(dictionary, gEidosDictionaryRetained_Class));
+					dictionary->Release();		// now retained by state_ptr->dictionary_symbols_
 				}
 				else if (value.is_array())
 				{
@@ -982,9 +984,12 @@ void EidosDictionaryUnretained::AddJSONFrom(nlohmann::json &json)
 							for (size_t element_index = 0; element_index < array_count; ++element_index)
 							{
 								EidosDictionaryRetained *element_dictionary = new EidosDictionaryRetained();
+								
+								object_value->push_object_element_RR(element_dictionary);	// retain it in object_value
+								element_dictionary->Release();
+								
 								if (value[element_index].type() == nlohmann::json::value_t::object)
 									element_dictionary->AddJSONFrom(value[element_index]);
-								object_value->push_object_element_RR(element_dictionary);
 							}
 							
 							state_ptr->dictionary_symbols_[key] = EidosValue_SP(object_value);
@@ -1649,11 +1654,11 @@ static EidosValue_SP Eidos_Instantiate_EidosDictionaryRetained(const std::vector
 	EidosDictionaryRetained *objectElement = new EidosDictionaryRetained();
 	result_SP = EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Object_singleton(objectElement, gEidosDictionaryRetained_Class));
 	
-	objectElement->ConstructFromEidos(p_arguments, p_interpreter, "Eidos_Instantiate_EidosDictionaryRetained", "Dictionary");
-	objectElement->ContentsChanged("Dictionary()");
-	
 	// objectElement is now retained by result_SP, so we can release it
 	objectElement->Release();
+	
+	objectElement->ConstructFromEidos(p_arguments, p_interpreter, "Eidos_Instantiate_EidosDictionaryRetained", "Dictionary");
+	objectElement->ContentsChanged("Dictionary()");
 	
 	return result_SP;
 }
