@@ -44,6 +44,16 @@ void ODEPar::setParValue(std::vector<double> vals)
     }
 }
 
+void ODEPar::setParValue(double AUC, double aZ, double bZ, double KZ, double KXZ)
+{
+    _AUC = AUC;
+    _aZ = aZ;
+    _bZ = bZ;
+    _KZ = KZ;
+    _KXZ = KXZ;
+    return;
+}
+
 std::vector<double> ODEPar::getPars()
 {
     return std::vector<double>({ _AUC, _aZ, _bZ, _KZ, _KXZ });

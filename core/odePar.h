@@ -35,6 +35,7 @@ public:
 
     // Set all values
     void setParValue(std::vector<double> vals);
+    void setParValue(double AUC, double aZ, double bZ, double KZ, double KXZ);
 
     // Get an ODEPar from a vector of ODEPars
     static double getODEValFromVector(const ODEPar& target, const std::vector<std::unique_ptr<ODEPar>>& vec, bool incrementCount = false);

@@ -51,6 +51,8 @@
 #pragma mark Eidos support
 #pragma mark -
 
+#define MAX_PAST_COMBOS 100
+
 // Note that the functions below are dispatched out by Community::ContextDefinedFunctionDispatch()
 
 //	*********************	(integer$)initializeAncestralNucleotides(is sequence)
@@ -2380,14 +2382,12 @@ EidosValue_SP Species::ExecuteMethod_NARIntegrate(EidosGlobalStringID p_method_I
 			EV_data.setParValue((mutType + 1), exp(indVals));
 		}
 
-
 		// Lambda to compare combination to ODEPar
 		auto compareODE = [&EV_data](const std::unique_ptr<ODEPar>& existing)
 		{
 			return EV_data == *existing.get();
 		};
-
-		// If we match an existing entry in the data frame - otherwise we need to calculate the AUC
+		// If we match an existing entry in the list of past combos - otherwise we need to calculate the AUC
 		if (std::any_of(this->pastCombos.begin(), this->pastCombos.end(), compareODE))
 		{
 			double curAUC = ODEPar::getODEValFromVector(EV_data, this->pastCombos, true);
@@ -2396,7 +2396,7 @@ EidosValue_SP Species::ExecuteMethod_NARIntegrate(EidosGlobalStringID p_method_I
 			ind->phenoPars.get()->setParValue(EV_data.getPars());
 			continue;
 		}
-
+	
 		// Lambdas for AUC and ODE system
 		// Declare/define a lambda which defines the ODE system - this is going to be very ugly
 		auto NAR = [&EV_data, &Xstart, &Xstop, &nXZ, &nZ, &X](const asc::state_t &val, asc::state_t &dxdt, double t)
@@ -2434,10 +2434,21 @@ EidosValue_SP Species::ExecuteMethod_NARIntegrate(EidosGlobalStringID p_method_I
 		// Check that z is > 0
 		z = (z >= 0) ? z : 0.0;
 		out.emplace_back(z);
-		// Add this to the list of existing solutions
-		this->pastCombos.emplace_back(std::make_unique<ODEPar>(z, EV_data.aZ(), EV_data.bZ(), EV_data.KZ(), EV_data.KXZ()));
-		// Update the individual's phenoPars values
-		ind->phenoPars.get()->setParValue(this->pastCombos.back().get()->getPars());
+
+		// First check if the pastcombos list is too long: if it is, it's more expensive to search for a 
+		// match than to just calculate again. So we'll limit the number of combos to some sane amount, 
+		// which hopefully should reduce the cost of searching in a highly variable environment while 
+		// still having some benefit for intermediate-variance populations
+		if (pastCombos.size() < MAX_PAST_COMBOS)
+		{
+			// Add this to the list of existing solutions
+			this->pastCombos.emplace_back(std::make_unique<ODEPar>(z, EV_data.aZ(), EV_data.bZ(), EV_data.KZ(), EV_data.KXZ()));
+			// Update the individual's phenoPars values
+			ind->phenoPars.get()->setParValue(this->pastCombos.back().get()->getPars());
+		} else 
+		{
+			ind->phenoPars.get()->setParValue(z, EV_data.aZ(), EV_data.bZ(), EV_data.KZ(), EV_data.KXZ());
+		}
 
 	}
 
