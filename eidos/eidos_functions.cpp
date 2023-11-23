@@ -32,7 +32,7 @@
 
 // - (void)source(string$ filePath, [logical$ chdir = F])
 const char *gEidosSourceCode_source =
-R"({
+R"V0G0N({
 	warn = suppressWarnings(T);
 	lines = readFile(filePath);
 	suppressWarnings(warn);
@@ -52,7 +52,7 @@ R"({
 	
 	if (_changedwd)
 		setwd(_oldwd);
-})";
+})V0G0N";
 
 
 //
@@ -1065,7 +1065,7 @@ EidosValue_SP SubsetEidosValue(const EidosValue *p_original_value, const EidosVa
 					if (logical_index_data[value_idx])
 						logical_result->push_logical_no_check(first_child_data[value_idx]);
 				
-				result_SP = std::move(logical_result_SP);
+				result_SP = logical_result_SP;
 			}
 			else if (original_value_type == EidosValueType::kValueInt)
 			{
@@ -1077,7 +1077,7 @@ EidosValue_SP SubsetEidosValue(const EidosValue *p_original_value, const EidosVa
 					if (logical_index_data[value_idx])
 						int_result->push_int_no_check(first_child_data[value_idx]);		// cannot use set_int_no_check() because of the if()
 				
-				result_SP = std::move(int_result_SP);
+				result_SP = int_result_SP;
 			}
 			else if (original_value_type == EidosValueType::kValueFloat)
 			{
@@ -1089,7 +1089,7 @@ EidosValue_SP SubsetEidosValue(const EidosValue *p_original_value, const EidosVa
 					if (logical_index_data[value_idx])
 						float_result->push_float_no_check(first_child_data[value_idx]);	// cannot use set_int_no_check() because of the if()
 				
-				result_SP = std::move(float_result_SP);
+				result_SP = float_result_SP;
 			}
 			else if (original_value_type == EidosValueType::kValueString)
 			{
@@ -1101,7 +1101,7 @@ EidosValue_SP SubsetEidosValue(const EidosValue *p_original_value, const EidosVa
 					if (logical_index_data[value_idx])
 						string_result->PushString(first_child_vec[value_idx]);
 				
-				result_SP = std::move(string_result_SP);
+				result_SP = string_result_SP;
 			}
 			else if (original_value_type == EidosValueType::kValueObject)
 			{
@@ -1113,7 +1113,7 @@ EidosValue_SP SubsetEidosValue(const EidosValue *p_original_value, const EidosVa
 					if (logical_index_data[value_idx])
 						obj_result->push_object_element_no_check_CRR(first_child_vec[value_idx]);
 				
-				result_SP = std::move(obj_result_SP);
+				result_SP = obj_result_SP;
 			}
 		}
 	}
@@ -1201,7 +1201,7 @@ EidosValue_SP SubsetEidosValue(const EidosValue *p_original_value, const EidosVa
 					}
 				}
 				
-				result_SP = std::move(float_result_SP);
+				result_SP = float_result_SP;
 			}
 			else if (original_value_type == EidosValueType::kValueInt)
 			{
@@ -1245,7 +1245,7 @@ EidosValue_SP SubsetEidosValue(const EidosValue *p_original_value, const EidosVa
 					}
 				}
 				
-				result_SP = std::move(int_result_SP);
+				result_SP = int_result_SP;
 			}
 			else if (original_value_type == EidosValueType::kValueObject)
 			{
@@ -1289,7 +1289,7 @@ EidosValue_SP SubsetEidosValue(const EidosValue *p_original_value, const EidosVa
 					}
 				}
 				
-				result_SP = std::move(obj_result_SP);
+				result_SP = obj_result_SP;
 			}
 			else if (original_value_type == EidosValueType::kValueLogical)
 			{
@@ -1333,7 +1333,7 @@ EidosValue_SP SubsetEidosValue(const EidosValue *p_original_value, const EidosVa
 					}
 				}
 				
-				result_SP = std::move(logical_result_SP);
+				result_SP = logical_result_SP;
 			}
 			else if (original_value_type == EidosValueType::kValueString)
 			{
@@ -1377,7 +1377,7 @@ EidosValue_SP SubsetEidosValue(const EidosValue *p_original_value, const EidosVa
 					}
 				}
 				
-				result_SP = std::move(string_result_SP);
+				result_SP = string_result_SP;
 			}
 			else
 			{

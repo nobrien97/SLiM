@@ -99,7 +99,7 @@
 #endif
 
 
-static std::string Eidos_Beep_QT(std::string p_sound_name);
+static std::string Eidos_Beep_QT(const std::string &p_sound_name);
 
 
 QtSLiMAppDelegate *qtSLiMAppDelegate = nullptr;
@@ -420,6 +420,8 @@ void QtSLiMAppDelegate::setUpRecipesMenu(QMenu *openRecipesMenu, QAction *findRe
     QStringList entryList = recipesDir.entryList(QStringList("Recipe *.*"));   // the previous name filter seems to be ignored
     QCollator collator;
     
+    // BCH 11/14/2023: Note that on certain platforms, QCollator seems to do the wrong thing here.  This may be
+    // related to https://bugreports.qt.io/browse/QTBUG-54537.  It's their bug, and fairly harmless; so it goes.
     collator.setNumericMode(true);
     std::sort(entryList.begin(), entryList.end(), collator);
     //qDebug() << entryList;
@@ -1835,7 +1837,7 @@ QWidget *QtSLiMAppDelegate::activeWindowExcluding(QWidget *excluded)
 
 // This is declared in eidos_beep.h, but in QtSLiM it is actually defined here,
 // so that we can produce the beep sound with Qt
-std::string Eidos_Beep_QT(std::string __attribute__((__unused__)) p_sound_name)
+std::string Eidos_Beep_QT(const std::string &__attribute__((__unused__)) p_sound_name)
 {
     std::string return_string;
     

@@ -108,7 +108,7 @@ const std::vector<EidosFunctionSignature_CSP> *Community::SLiMFunctionSignatures
 
 // (float$)calcFST(object<Genome> genomes1, object<Genome> genomes2, [No<Mutation> muts = NULL], [Ni$ start = NULL], [Ni$ end = NULL])
 const char *gSLiMSourceCode_calcFST = 
-R"({
+R"V0G0N({
 	if ((genomes1.length() == 0) | (genomes2.length() == 0))
 		stop("ERROR (calcFST()): genomes1 and genomes2 must both be non-empty.");
 	if (community.allSpecies.length() > 1)
@@ -151,11 +151,11 @@ R"({
 	H_s = p1_p * (1.0 - p1_p) + p2_p * (1.0 - p2_p);
 	fst = 1.0 - mean(H_s) / mean(H_t);
 	return fst;
-})";
+})V0G0N";
 
 // (float$)calcVA(object<Individual> individuals, io<MutationType>$ mutType)
 const char *gSLiMSourceCode_calcVA = 
-R"({
+R"V0G0N({
 	species = mutType.species;
 	if (community.allSpecies.length() > 1)
 		if (!all(individuals.subpopulation.species == species))
@@ -167,11 +167,11 @@ R"({
 		assert(length(mutType) == 1, "calcVA() mutation type lookup failed");
 	}
 	return var(individuals.sumOfMutationsOfType(mutType));
-})";
+})V0G0N";
 
 // (float$)calcPairHeterozygosity(object<Genome>$ genome1, object<Genome>$ genome2, [Ni$ start = NULL], [Ni$ end = NULL], [l$ infiniteSites = T])
 const char *gSLiMSourceCode_calcPairHeterozygosity = 
-R"({
+R"V0G0N({
 	if (community.allSpecies.length() > 1)
 	{
 		species = unique(c(genome1.individual.subpopulation.species, genome2.individual.subpopulation.species), preserveOrder=F);
@@ -209,11 +209,11 @@ R"({
 		unshared = unique(unshared.position, preserveOrder=F);
 
 	return size(unshared) / length;
-})";
+})V0G0N";
 
 // (float$)calcHeterozygosity(o<Genome> genomes, [No<Mutation> muts = NULL], [Ni$ start = NULL], [Ni$ end = NULL])
 const char *gSLiMSourceCode_calcHeterozygosity = 
-R"({
+R"V0G0N({
 	if (genomes.length() == 0)
 		stop("ERROR (calcHeterozygosity()): genomes must be non-empty.");
 	if (community.allSpecies.length() > 1)
@@ -252,11 +252,11 @@ R"({
 	p = genomes.mutationFrequenciesInGenomes(muts);
 	heterozygosity = 2 * sum(p * (1 - p)) / length;
 	return heterozygosity;
-})";
+})V0G0N";
 
 // (float$)calcWattersonsTheta(o<Genome> genomes, [No<Mutation> muts = NULL], [Ni$ start = NULL], [Ni$ end = NULL])
 const char *gSLiMSourceCode_calcWattersonsTheta = 
-R"({
+R"V0G0N({
 	if (genomes.length() == 0)
 		stop("ERROR (calcWattersonsTheta()): genomes must be non-empty.");
 	if (community.allSpecies.length() > 1)
@@ -300,11 +300,11 @@ R"({
 	a_n = sum(1 / 1:(n-1));
 	theta = (k / a_n) / (species.chromosome.lastPosition + 1);
 	return theta;
-})";
+})V0G0N";
 
 // (float$)calcInbreedingLoad(object<Genome> genomes, [No<MutationType>$ mutType = NULL])
 const char *gSLiMSourceCode_calcInbreedingLoad = 
-R"({
+R"V0G0N({
 	if (genomes.length() == 0)
 		stop("ERROR (calcInbreedingLoad()): genomes must be non-empty.");
 	if (community.allSpecies.length() > 1)
@@ -351,7 +351,7 @@ R"({
 	// calculate number of haploid lethal equivalents (B or inbreeding load)
 	// this equation is from Morton et al. 1956
 	return (sum(q*s) - sum(q^2*s) - 2*sum(q*(1-q)*s*h));
-})";
+})V0G0N";
 
 
 // ************************************************************************************
@@ -741,9 +741,9 @@ EidosValue_SP SLiM_ExecuteFunction_nucleotidesToCodons(const std::vector<EidosVa
 			{
 				int64_t codon_base = value_index * 3;
 				
-				int nuc1 = nuc_lookup[(int)(string_ref[codon_base])];
-				int nuc2 = nuc_lookup[(int)(string_ref[codon_base + 1])];
-				int nuc3 = nuc_lookup[(int)(string_ref[codon_base + 2])];
+				int nuc1 = nuc_lookup[(int)(unsigned char)(string_ref[codon_base])];
+				int nuc2 = nuc_lookup[(int)(unsigned char)(string_ref[codon_base + 1])];
+				int nuc3 = nuc_lookup[(int)(unsigned char)(string_ref[codon_base + 2])];
 				
 				if ((nuc1 > 3) || (nuc2 > 3) || (nuc3 > 3))
 					EIDOS_TERMINATION << "ERROR (SLiM_ExecuteFunction_nucleotidesToCodons): function nucleotidesToCodons() requires string sequence values to be 'A', 'C', 'G', or 'T'." << EidosTerminate(nullptr);
@@ -775,7 +775,7 @@ EidosValue_SP SLiM_ExecuteFunction_nucleotidesToCodons(const std::vector<EidosVa
 			
 			for (int value_index = 0; value_index < length_3; ++value_index)
 			{
-				int64_t codon_base = value_index * 3;
+				int64_t codon_base = (size_t)value_index * 3;
 				
 				const std::string &nucstring1 = (*string_vec)[codon_base];
 				const std::string &nucstring2 = (*string_vec)[codon_base + 1];
@@ -784,9 +784,9 @@ EidosValue_SP SLiM_ExecuteFunction_nucleotidesToCodons(const std::vector<EidosVa
 				if ((nucstring1.length() != 1) || (nucstring2.length() != 1) || (nucstring3.length() != 1))
 					EIDOS_TERMINATION << "ERROR (SLiM_ExecuteFunction_nucleotidesToCodons): function nucleotidesToCodons() requires string sequence values to be 'A', 'C', 'G', or 'T'." << EidosTerminate(nullptr);
 				
-				int nuc1 = nuc_lookup[(int)(nucstring1[0])];
-				int nuc2 = nuc_lookup[(int)(nucstring2[0])];
-				int nuc3 = nuc_lookup[(int)(nucstring3[0])];
+				int nuc1 = nuc_lookup[(int)(unsigned char)(nucstring1[0])];
+				int nuc2 = nuc_lookup[(int)(unsigned char)(nucstring2[0])];
+				int nuc3 = nuc_lookup[(int)(unsigned char)(nucstring3[0])];
 				
 				if ((nuc1 > 3) || (nuc2 > 3) || (nuc3 > 3))
 					EIDOS_TERMINATION << "ERROR (SLiM_ExecuteFunction_nucleotidesToCodons): function nucleotidesToCodons() requires string sequence values to be 'A', 'C', 'G', or 'T'." << EidosTerminate(nullptr);
@@ -803,7 +803,7 @@ EidosValue_SP SLiM_ExecuteFunction_nucleotidesToCodons(const std::vector<EidosVa
 			
 			for (int value_index = 0; value_index < length_3; ++value_index)
 			{
-				int64_t codon_base = value_index * 3;
+				int64_t codon_base = (size_t)value_index * 3;
 				
 				int64_t nuc1 = int_data[codon_base];
 				int64_t nuc2 = int_data[codon_base + 1];
@@ -848,7 +848,7 @@ static void CountNucleotides(EidosValue *sequence_value, int64_t *total_ACGT, co
 			for (std::size_t i = 0; i < length; ++i)
 			{
 				char nuc_char = string_ref[i];
-				uint8_t nuc_index = nuc_lookup[(int)(nuc_char)];
+				uint8_t nuc_index = nuc_lookup[(int)(unsigned char)(nuc_char)];
 				
 				if (nuc_index > 3)
 					EIDOS_TERMINATION << "ERROR (SLiM_ExecuteFunction_" << function_name << "): function " << function_name << "() requires string sequence values to be 'A', 'C', 'G', or 'T'." << EidosTerminate(nullptr);
@@ -887,7 +887,7 @@ static void CountNucleotides(EidosValue *sequence_value, int64_t *total_ACGT, co
 					EIDOS_TERMINATION << "ERROR (SLiM_ExecuteFunction_" << function_name << "): function " << function_name << "() requires string sequence values to be 'A', 'C', 'G', or 'T'." << EidosTerminate(nullptr);
 				
 				char nuc_char = nuc_string[0];
-				uint8_t nuc_index = nuc_lookup[(int)(nuc_char)];
+				uint8_t nuc_index = nuc_lookup[(int)(unsigned char)(nuc_char)];
 				
 				if (nuc_index > 3)
 					EIDOS_TERMINATION << "ERROR (SLiM_ExecuteFunction_" << function_name << "): function " << function_name << "() requires string sequence values to be 'A', 'C', 'G', or 'T'." << EidosTerminate(nullptr);
@@ -1220,18 +1220,24 @@ EidosValue_SP SLiM_ExecuteFunction_codonsToNucleotides(const std::vector<EidosVa
 				case 1: string_result->PushString(gStr_C); break;
 				case 2: string_result->PushString(gStr_G); break;
 				case 3: string_result->PushString(gStr_T); break;
+				default:
+					EIDOS_TERMINATION << "ERROR (SLiM_ExecuteFunction_codonsToNucleotides): nucleotide value out of range." << EidosTerminate();
 			}
 			switch (nuc2) {
 				case 0: string_result->PushString(gStr_A); break;
 				case 1: string_result->PushString(gStr_C); break;
 				case 2: string_result->PushString(gStr_G); break;
 				case 3: string_result->PushString(gStr_T); break;
+				default:
+					EIDOS_TERMINATION << "ERROR (SLiM_ExecuteFunction_codonsToNucleotides): nucleotide value out of range." << EidosTerminate();
 			}
 			switch (nuc3) {
 				case 0: string_result->PushString(gStr_A); break;
 				case 1: string_result->PushString(gStr_C); break;
 				case 2: string_result->PushString(gStr_G); break;
 				case 3: string_result->PushString(gStr_T); break;
+				default:
+					EIDOS_TERMINATION << "ERROR (SLiM_ExecuteFunction_codonsToNucleotides): nucleotide value out of range." << EidosTerminate();
 			}
 		}
 		
@@ -1253,9 +1259,9 @@ EidosValue_SP SLiM_ExecuteFunction_codonsToNucleotides(const std::vector<EidosVa
 			int nuc2 = (codon >> 2) & 0x03;
 			int nuc3 = codon & 0x03;
 			
-			int_result->set_int_no_check(nuc1, codon_index * 3);
-			int_result->set_int_no_check(nuc2, codon_index * 3 + 1);
-			int_result->set_int_no_check(nuc3, codon_index * 3 + 2);
+			int_result->set_int_no_check(nuc1, (size_t)codon_index * 3);
+			int_result->set_int_no_check(nuc2, (size_t)codon_index * 3 + 1);
+			int_result->set_int_no_check(nuc3, (size_t)codon_index * 3 + 2);
 		}
 		
 		return EidosValue_SP(int_result);
@@ -1281,9 +1287,9 @@ EidosValue_SP SLiM_ExecuteFunction_codonsToNucleotides(const std::vector<EidosVa
 			int nuc2 = (codon >> 2) & 0x03;
 			int nuc3 = codon & 0x03;
 			
-			nuc_string_ptr[codon_index * 3] = gSLiM_Nucleotides[nuc1];
-			nuc_string_ptr[codon_index * 3 + 1] = gSLiM_Nucleotides[nuc2];
-			nuc_string_ptr[codon_index * 3 + 2] = gSLiM_Nucleotides[nuc3];
+			nuc_string_ptr[(size_t)codon_index * 3] = gSLiM_Nucleotides[nuc1];
+			nuc_string_ptr[(size_t)codon_index * 3 + 1] = gSLiM_Nucleotides[nuc2];
+			nuc_string_ptr[(size_t)codon_index * 3 + 2] = gSLiM_Nucleotides[nuc3];
 		}
 		
 		return EidosValue_SP(string_result);
@@ -1471,7 +1477,7 @@ EidosValue_SP SLiM_ExecuteFunction_summarizeIndividuals(const std::vector<EidosV
 		else if (spatiality_string.compare("yz") == 0)			{ spatiality = 2; required_dimensionality = 3; component0 = 1; component1 = 2; }
 		else if (spatiality_string.compare("xyz") == 0)			{ spatiality = 3; required_dimensionality = 3; component0 = 0; component1 = 1; component2 = 2; }
 		else
-			EIDOS_TERMINATION << "ERROR (SLiM_ExecuteFunction_summarizeIndividuals): summarizeIndividuals() spatiality \"" << spatiality_string << "\" must be \"x\", \"y\", \"z\", \"xy\", \"xz\", \"yz\", or \"xyz\"." << EidosTerminate();
+			EIDOS_TERMINATION << "ERROR (SLiM_ExecuteFunction_summarizeIndividuals): summarizeIndividuals() spatiality '" << spatiality_string << "' must be 'x', 'y', 'z', 'xy', 'xz', 'yz', or 'xyz'." << EidosTerminate();
 	}
 	
 	if (required_dimensionality > spatial_dimensionality)
