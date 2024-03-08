@@ -2456,7 +2456,7 @@ EidosValue_SP Species::ExecuteMethod_NARIntegrate(EidosGlobalStringID p_method_I
 	return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float_vector{out});
 }
 
-//	*********************	– (float)pairwiseR2(Nio<Subpopulation> subpops)
+//	*********************	– (float)pairwiseR2(Nio<Subpopulation> subpops, L$ D' = false)
 EidosValue_SP Species::ExecuteMethod_pairwiseR2(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter)
 {
 	// Note: this calculates r2 based on frequencies across all mutation types:
@@ -2465,11 +2465,12 @@ EidosValue_SP Species::ExecuteMethod_pairwiseR2(EidosGlobalStringID p_method_id,
 
 	// TODO: This ignores all subpop information, just works over the first one
 	Subpopulation *subpop_value = SLiM_ExtractSubpopulationFromEidosValue_io(p_arguments[0].get(), 0, &(this->community_), this, "pairwiseR2()");
-
+	EidosValue* calcD_ev = (EidosValue*)p_arguments[1].get();
+	bool calcD = calcD_ev->LogicalAtIndex(0, nullptr);
 	std::vector<Genome*>& genomes = subpop_value->CurrentGenomes();
 	
 	int genomelength = subpop_value->species_.TheChromosome().last_position_ + 1;
-	double singletonFreq = (double)(1.0/genomes.size());
+	double singletonFreq = 1.0/genomes.size();
 	double denominator = population_.TallyMutationReferencesAcrossPopulation(false); // Denominator for freq calc + tally mutations
 	
 	
@@ -2533,7 +2534,6 @@ EidosValue_SP Species::ExecuteMethod_pairwiseR2(EidosGlobalStringID p_method_id,
 		}
 
 		// Get the minor allele frequency
-
 		std::pair<double, Mutation*> MAF;
 
 		// Return the mutation with the smallest allele frequency at this position and clear mutAllFreq
@@ -2569,7 +2569,7 @@ EidosValue_SP Species::ExecuteMethod_pairwiseR2(EidosGlobalStringID p_method_id,
 			
 		// Check if we are on the diagonal: in this case r^2 = 1, even if we don't have any mutations (e.g. wildtype)
 			if (a == b) {
-				(*corTable)(a, b) = 1.0;
+				(*corTable)(a, b) = calcD ? 0.0 : 1.0;
 				continue;
 			}
 
@@ -2586,10 +2586,31 @@ EidosValue_SP Species::ExecuteMethod_pairwiseR2(EidosGlobalStringID p_method_id,
 		// Check that we have mutations at both sites - if not, shared freq is 0
 			if ((std::get<1>(mutFreqMAFs[a]) == -1) || (std::get<1>(mutFreqMAFs[b]) == -1)) {
 				ABFreq = 0.0;
-			} else {
+			} 
+			else 
+			{
 			// Hill and Robertson 1968, Stolyarova et al. 2021
 				ABFreq = sharedMutFreq(genomes, std::get<2>(mutFreqMAFs[a]), std::get<2>(mutFreqMAFs[b]));
+			}
+
+			if (calcD)
+			{
+				double D = ABFreq - (mutFreqA * mutFreqB);				
+				double Dmax;
+
+				if (D > 0)
+				{
+					Dmax = std::min((mutFreqA * (1 - mutFreqB)), ((1 - mutFreqA) * mutFreqB));
 				}
+				else
+				{
+					Dmax = std::max(-(mutFreqA * mutFreqB), -((1 - mutFreqA) * (1 - mutFreqB)));
+				}
+				
+				(*corTable)(a, b) = D / Dmax;
+				continue;
+			}
+			
 			(*corTable)(a, b) = ( pow(ABFreq - (mutFreqA * mutFreqB), 2) ) / ( mutFreqA * (1 - mutFreqA) * mutFreqB * (1 - mutFreqB) );	
 		}
 	
@@ -3742,23 +3763,22 @@ EidosValue_SP Species::ExecuteMethod_treeSeqOutput(EidosGlobalStringID p_method_
 	return gStaticEidosValueVOID;
 }
 
+bool ContainsBothMuts(MutationIndex& mut1, MutationIndex& mut2, Genome*& genome)
+{
+	return ((genome->contains_mutation(mut1)) && (genome->contains_mutation(mut2))); 
+}
+
 // Helper Function for pairwiseR2 - gets the shared frequency between mutations
 double Species::sharedMutFreq(std::vector<Genome*>& genomes, MutationIndex mut1, MutationIndex mut2) {
-	// Find the frequency of AB: number of genomes with alleles i and j and loci n and m
-	auto containsBothMuts = [mut1, mut2] (Genome* genome) { 
-		return (bool)((genome->contains_mutation(mut1)) && (genome->contains_mutation(mut2))); 
-		};
-
 	// Go through each genome, determine if it has both mutations or not, add to counter
-	int validGenomes = 0;
-//	size_t validGenomes = 0;
+	double ABGenomes = 0;
 	for (Genome* g : genomes)
 	{
-		validGenomes += (int)containsBothMuts(g);
-//		validGenomes += (size_t)containsBothMuts(g);
+		ABGenomes += (double)ContainsBothMuts(mut1, mut2, g);
 	}	
-	return (double)validGenomes/genomes.size();
-	//return ((double)validGenomes)/genomes.size();
+
+	// return frequency of shared genomes
+	return ABGenomes/genomes.size();
 }
 
 // Helper function for getHaplos - detects if a site is multiallelic
@@ -3842,7 +3862,7 @@ const std::vector<EidosMethodSignature_CSP> *Species_Class::Methods(void) const
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_mutationFrequencies, kEidosValueMaskFloat))->AddIntObject_N("subpops", gSLiM_Subpopulation_Class)->AddObject_ON("mutations", gSLiM_Mutation_Class, gStaticEidosValueNULL));
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_mutationsOfType, kEidosValueMaskObject, gSLiM_Mutation_Class))->AddIntObject_S("mutType", gSLiM_MutationType_Class));
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_NARIntegrate, kEidosValueMaskFloat))->AddIntObject_N("individuals", gSLiM_Individual_Class));
-		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_pairwiseR2, kEidosValueMaskFloat))->AddIntObject_S("subpop", gSLiM_Subpopulation_Class));
+		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_pairwiseR2, kEidosValueMaskFloat))->AddIntObject_S("subpop", gSLiM_Subpopulation_Class)->AddLogical_OS("D'", gStaticEidosValue_LogicalF));
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_getHaplos, kEidosValueMaskInt))->AddObject("genomes", gSLiM_Genome_Class)->AddInt("pos"));
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_outputFixedMutations, kEidosValueMaskVOID))->AddString_OSN(gEidosStr_filePath, gStaticEidosValueNULL)->AddLogical_OS("append", gStaticEidosValue_LogicalF));
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_outputFull, kEidosValueMaskVOID))->AddString_OSN(gEidosStr_filePath, gStaticEidosValueNULL)->AddLogical_OS("binary", gStaticEidosValue_LogicalF)->AddLogical_OS("append", gStaticEidosValue_LogicalF)->AddLogical_OS("spatialPositions", gStaticEidosValue_LogicalT)->AddLogical_OS("ages", gStaticEidosValue_LogicalT)->AddLogical_OS("ancestralNucleotides", gStaticEidosValue_LogicalT)->AddLogical_OS("pedigreeIDs", gStaticEidosValue_LogicalF));
