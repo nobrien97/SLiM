@@ -1700,7 +1700,7 @@ EidosValue_SP Species::ExecuteInstanceMethod(EidosGlobalStringID p_method_id, co
 		case gID_mutationCounts:					return ExecuteMethod_mutationFreqsCounts(p_method_id, p_arguments, p_interpreter);
 		case gID_mutationsOfType:					return ExecuteMethod_mutationsOfType(p_method_id, p_arguments, p_interpreter);
 		case gID_NARIntegrate:						return ExecuteMethod_NARIntegrate(p_method_id, p_arguments, p_interpreter);
-		case gID_calcLD:						return ExecuteMethod_calcLD(p_method_id, p_arguments, p_interpreter);
+		case gID_calcLD:							return ExecuteMethod_calcLD(p_method_id, p_arguments, p_interpreter);
 		case gID_getHaplos:							return ExecuteMethod_getHaplos(p_method_id, p_arguments, p_interpreter);
 		case gID_countOfMutationsOfType:			return ExecuteMethod_countOfMutationsOfType(p_method_id, p_arguments, p_interpreter);
 		case gID_outputFixedMutations:				return ExecuteMethod_outputFixedMutations(p_method_id, p_arguments, p_interpreter);
@@ -2456,7 +2456,7 @@ EidosValue_SP Species::ExecuteMethod_NARIntegrate(EidosGlobalStringID p_method_I
 	return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float_vector{out});
 }
 
-//	*********************	– (float)calcLD(Nio<Subpopulation> subpops, L$ D' = false)
+//	*********************	– (float)calcLD(Nio<Subpopulation>$ subpop, L$ D' = false)
 EidosValue_SP Species::ExecuteMethod_calcLD(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter)
 {
 	// Note: this calculates r2 based on frequencies across all mutation types:
@@ -2464,15 +2464,24 @@ EidosValue_SP Species::ExecuteMethod_calcLD(EidosGlobalStringID p_method_id, con
 	// see how r2 changes depending on MAF of shared mutation types vs different mutation types
 
 	// TODO: This ignores all subpop information, just works over the first one
-	Subpopulation *subpop_value = SLiM_ExtractSubpopulationFromEidosValue_io(p_arguments[0].get(), 0, &(this->community_), this, "calcLD()");
+	Subpopulation *subpop_value = SLiM_ExtractSubpopulationFromEidosValue_io(p_arguments[0].get(), 
+														0, &(this->community_), this, "calcLD()");
+	std::vector<Genome*>& genomes = subpop_value->CurrentGenomes();
+
+	// Do we want to calculate R^2 or D'?
 	EidosValue* calcD_ev = (EidosValue*)p_arguments[1].get();
 	bool calcD = calcD_ev->LogicalAtIndex(0, nullptr);
-	std::vector<Genome*>& genomes = subpop_value->CurrentGenomes();
 	
 	int genomelength = subpop_value->species_.TheChromosome().last_position_ + 1;
-	double singletonFreq = 1.0/genomes.size();
-	double denominator = population_.TallyMutationReferencesAcrossPopulation(false); // Denominator for freq calc + tally mutations
-	
+	double singletonFreq = 1.0 / genomes.size();
+
+	static std::vector<Subpopulation*> subpops_to_tally;
+	subpops_to_tally.clear();
+
+	subpops_to_tally.emplace_back(subpop_value);
+
+	// tally across the requested subpop					
+	double denominator = population_.TallyMutationReferencesAcrossSubpopulations(&subpops_to_tally, false);
 	
 	// Store the MAFs, mutation positions, and mutation ID in a vector
 	// [0] = MAF; [1] = pos; [2] = ID
@@ -2604,13 +2613,13 @@ EidosValue_SP Species::ExecuteMethod_calcLD(EidosGlobalStringID p_method_id, con
 				}
 				else
 				{
-					Dmax = std::max(-(mutFreqA * mutFreqB), -((1 - mutFreqA) * (1 - mutFreqB)));
+					Dmax = std::max(-mutFreqA * mutFreqB, -(1 - mutFreqA) * (1 - mutFreqB));
 				}
 				
 				(*corTable)(a, b) = D / Dmax;
 				continue;
 			}
-			
+			// r^2
 			(*corTable)(a, b) = ( pow(ABFreq - (mutFreqA * mutFreqB), 2) ) / ( mutFreqA * (1 - mutFreqA) * mutFreqB * (1 - mutFreqB) );	
 		}
 	
