@@ -2613,7 +2613,7 @@ EidosValue_SP Species::ExecuteMethod_calcLD(EidosGlobalStringID p_method_id, con
 				}
 				else
 				{
-					Dmax = std::max(-mutFreqA * mutFreqB, -(1 - mutFreqA) * (1 - mutFreqB));
+					Dmax = std::min(mutFreqA * mutFreqB, (1 - mutFreqA) * (1 - mutFreqB));
 				}
 				
 				(*corTable)(a, b) = D / Dmax;
