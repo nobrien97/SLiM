@@ -2456,9 +2456,13 @@ EidosValue_SP Species::ExecuteMethod_NARIntegrate(EidosGlobalStringID p_method_I
 	return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float_vector{out});
 }
 
-//	*********************	– (float)calcLD(Nio<Subpopulation>$ subpop, L$ D' = false)
+//	*********************	– (float)calcLD(Nio<Subpopulation>$ subpop, string$ statistic = "D'")
 EidosValue_SP Species::ExecuteMethod_calcLD(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter)
 {
+	static std::string StatisticR2 = "r2";
+	static std::string StatisticD = "D";
+	static std::string StatisticDPrime = "D'";
+
 	// Note: this calculates r2 based on frequencies across all mutation types:
 	// it might be good to be able to choose a mutation type to compare across, so that we can
 	// see how r2 changes depending on MAF of shared mutation types vs different mutation types
@@ -2469,8 +2473,13 @@ EidosValue_SP Species::ExecuteMethod_calcLD(EidosGlobalStringID p_method_id, con
 	std::vector<Genome*>& genomes = subpop_value->CurrentGenomes();
 
 	// Do we want to calculate R^2 or D'?
-	EidosValue* calcD_ev = (EidosValue*)p_arguments[1].get();
-	bool calcD = calcD_ev->LogicalAtIndex(0, nullptr);
+	EidosValue* statistic_ev = (EidosValue*)p_arguments[1].get();
+	std::string statistic = statistic_ev->StringAtIndex(0, nullptr);
+
+	if (statistic != StatisticR2 && statistic != StatisticD && statistic != StatisticDPrime)
+	{
+		EIDOS_TERMINATION << "ERROR (Species::ExecuteMethod_calcLD): " << EidosStringRegistry::StringForGlobalStringID(p_method_id) << "() requires statistic to be one of r2, D, or D'." << EidosTerminate();
+	}
 	
 	int genomelength = subpop_value->species_.TheChromosome().last_position_ + 1;
 	double singletonFreq = 1.0 / genomes.size();
@@ -2578,7 +2587,7 @@ EidosValue_SP Species::ExecuteMethod_calcLD(EidosGlobalStringID p_method_id, con
 			
 		// Check if we are on the diagonal: in this case r^2 = 1, even if we don't have any mutations (e.g. wildtype)
 			if (a == b) {
-				(*corTable)(a, b) = calcD ? 0.0 : 1.0;
+				(*corTable)(a, b) = statistic == StatisticR2 ? 1.0 : 0.0;
 				continue;
 			}
 
@@ -2602,9 +2611,9 @@ EidosValue_SP Species::ExecuteMethod_calcLD(EidosGlobalStringID p_method_id, con
 				ABFreq = sharedMutFreq(genomes, std::get<2>(mutFreqMAFs[a]), std::get<2>(mutFreqMAFs[b]));
 			}
 
-			if (calcD)
+			if (statistic != StatisticR2)
 			{
-				double D = ABFreq - (mutFreqA * mutFreqB);				
+				double D = ABFreq - (mutFreqA * mutFreqB);
 				double Dmax;
 
 				if (D > 0)
@@ -2616,6 +2625,11 @@ EidosValue_SP Species::ExecuteMethod_calcLD(EidosGlobalStringID p_method_id, con
 					Dmax = std::min(mutFreqA * mutFreqB, (1 - mutFreqA) * (1 - mutFreqB));
 				}
 				
+				if (statistic == StatisticD)
+				{
+					Dmax = 1.0;
+				}
+
 				(*corTable)(a, b) = D / Dmax;
 				continue;
 			}
@@ -3871,7 +3885,7 @@ const std::vector<EidosMethodSignature_CSP> *Species_Class::Methods(void) const
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_mutationFrequencies, kEidosValueMaskFloat))->AddIntObject_N("subpops", gSLiM_Subpopulation_Class)->AddObject_ON("mutations", gSLiM_Mutation_Class, gStaticEidosValueNULL));
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_mutationsOfType, kEidosValueMaskObject, gSLiM_Mutation_Class))->AddIntObject_S("mutType", gSLiM_MutationType_Class));
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_NARIntegrate, kEidosValueMaskFloat))->AddIntObject_N("individuals", gSLiM_Individual_Class));
-		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_calcLD, kEidosValueMaskFloat))->AddIntObject_S("subpop", gSLiM_Subpopulation_Class)->AddLogical_OS("D'", gStaticEidosValue_LogicalF));
+		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_calcLD, kEidosValueMaskFloat))->AddIntObject_S("subpop", gSLiM_Subpopulation_Class)->AddString_OS("statistic", EidosValue_String_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String_singleton("r2"))));
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_getHaplos, kEidosValueMaskInt))->AddObject("genomes", gSLiM_Genome_Class)->AddInt("pos"));
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_outputFixedMutations, kEidosValueMaskVOID))->AddString_OSN(gEidosStr_filePath, gStaticEidosValueNULL)->AddLogical_OS("append", gStaticEidosValue_LogicalF));
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_outputFull, kEidosValueMaskVOID))->AddString_OSN(gEidosStr_filePath, gStaticEidosValueNULL)->AddLogical_OS("binary", gStaticEidosValue_LogicalF)->AddLogical_OS("append", gStaticEidosValue_LogicalF)->AddLogical_OS("spatialPositions", gStaticEidosValue_LogicalT)->AddLogical_OS("ages", gStaticEidosValue_LogicalT)->AddLogical_OS("ancestralNucleotides", gStaticEidosValue_LogicalT)->AddLogical_OS("pedigreeIDs", gStaticEidosValue_LogicalF));
