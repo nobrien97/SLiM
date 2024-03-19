@@ -1701,6 +1701,7 @@ EidosValue_SP Species::ExecuteInstanceMethod(EidosGlobalStringID p_method_id, co
 		case gID_mutationsOfType:					return ExecuteMethod_mutationsOfType(p_method_id, p_arguments, p_interpreter);
 		case gID_NARIntegrate:						return ExecuteMethod_NARIntegrate(p_method_id, p_arguments, p_interpreter);
 		case gID_calcLD:							return ExecuteMethod_calcLD(p_method_id, p_arguments, p_interpreter);
+		case gID_calcLDBetweenSitePairs:			return ExecuteMethod_calcLDBetweenSitePairs(p_method_id, p_arguments, p_interpreter);
 		case gID_getHaplos:							return ExecuteMethod_getHaplos(p_method_id, p_arguments, p_interpreter);
 		case gID_countOfMutationsOfType:			return ExecuteMethod_countOfMutationsOfType(p_method_id, p_arguments, p_interpreter);
 		case gID_outputFixedMutations:				return ExecuteMethod_outputFixedMutations(p_method_id, p_arguments, p_interpreter);
@@ -2459,10 +2460,6 @@ EidosValue_SP Species::ExecuteMethod_NARIntegrate(EidosGlobalStringID p_method_I
 //	*********************	– (float)calcLD(Nio<Subpopulation>$ subpop, string$ statistic = "D'")
 EidosValue_SP Species::ExecuteMethod_calcLD(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter)
 {
-	static std::string StatisticR2 = "r2";
-	static std::string StatisticD = "D";
-	static std::string StatisticDPrime = "D'";
-
 	// Note: this calculates r2 based on frequencies across all mutation types:
 	// it might be good to be able to choose a mutation type to compare across, so that we can
 	// see how r2 changes depending on MAF of shared mutation types vs different mutation types
@@ -2476,7 +2473,7 @@ EidosValue_SP Species::ExecuteMethod_calcLD(EidosGlobalStringID p_method_id, con
 	EidosValue* statistic_ev = (EidosValue*)p_arguments[1].get();
 	std::string statistic = statistic_ev->StringAtIndex(0, nullptr);
 
-	if (statistic != StatisticR2 && statistic != StatisticD && statistic != StatisticDPrime)
+	if (statistic != Species::StatisticR2 && statistic != Species::StatisticD && statistic != Species::StatisticDPrime)
 	{
 		EIDOS_TERMINATION << "ERROR (Species::ExecuteMethod_calcLD): " << EidosStringRegistry::StringForGlobalStringID(p_method_id) << "() requires statistic to be one of r2, D, or D'." << EidosTerminate();
 	}
@@ -2587,7 +2584,7 @@ EidosValue_SP Species::ExecuteMethod_calcLD(EidosGlobalStringID p_method_id, con
 			
 		// Check if we are on the diagonal: in this case r^2 = 1, even if we don't have any mutations (e.g. wildtype)
 			if (a == b) {
-				(*corTable)(a, b) = statistic == StatisticR2 ? 1.0 : 0.0;
+				(*corTable)(a, b) = statistic == Species::StatisticR2 ? 1.0 : 0.0;
 				continue;
 			}
 
@@ -2611,7 +2608,7 @@ EidosValue_SP Species::ExecuteMethod_calcLD(EidosGlobalStringID p_method_id, con
 				ABFreq = sharedMutFreq(genomes, std::get<2>(mutFreqMAFs[a]), std::get<2>(mutFreqMAFs[b]));
 			}
 
-			if (statistic != StatisticR2)
+			if (statistic != Species::StatisticR2)
 			{
 				double D = ABFreq - (mutFreqA * mutFreqB);
 				double Dmax;
@@ -2625,7 +2622,7 @@ EidosValue_SP Species::ExecuteMethod_calcLD(EidosGlobalStringID p_method_id, con
 					Dmax = std::min(mutFreqA * mutFreqB, (1 - mutFreqA) * (1 - mutFreqB));
 				}
 				
-				if (statistic == StatisticD)
+				if (statistic == Species::StatisticD)
 				{
 					Dmax = 1.0;
 				}
@@ -2639,6 +2636,241 @@ EidosValue_SP Species::ExecuteMethod_calcLD(EidosGlobalStringID p_method_id, con
 	
 	}	
 	return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float_vector{corTable->getVec()});
+
+}
+
+double roundUpToDigits(double x, int n)
+{ 
+    const double scale = pow(10.0, n);
+ 
+    return ceil(x * scale) / scale;
+}
+
+//	*********************	– (float)calcLDBetweenSitePairs(Nio<Subpopulation>$ subpop, integer pos1, integer pos2, string$ statistic = "D'", logical$ byFreq = F, float$ threshold = 0.05)
+EidosValue_SP Species::ExecuteMethod_calcLDBetweenSitePairs(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter)
+{
+	// TODO: This ignores all subpop information, just works over the first one
+	Subpopulation *subpop_value = SLiM_ExtractSubpopulationFromEidosValue_io(p_arguments[0].get(), 
+														0, &(this->community_), this, "calcLD()");
+	std::vector<Genome*>& genomes = subpop_value->CurrentGenomes();
+
+	EidosValue* pos1_ev = (EidosValue*)p_arguments[1].get();
+	EidosValue* pos2_ev = (EidosValue*)p_arguments[2].get();
+
+	// Do we want to calculate R^2, D, or D'?
+	EidosValue* statistic_ev = (EidosValue*)p_arguments[3].get();
+	std::string statistic = statistic_ev->StringAtIndex(0, nullptr);
+
+	// Only track LD between loci with derived alleles at similar frequencies 
+	bool byFreq = ((EidosValue*)p_arguments[4].get())->LogicalAtIndex(0, nullptr);
+
+	// the minor allele frequency threshold - alleles with lower frequencies are excluded from analysis
+	double MAFthreshold = ((EidosValue*)p_arguments[5].get())->FloatAtIndex(0, nullptr);
+
+	if (pos1_ev->Count() != pos2_ev->Count())
+	{
+		EIDOS_TERMINATION << "ERROR (Species::ExecuteMethod_calcLDBetweenSitePairs): " << EidosStringRegistry::StringForGlobalStringID(p_method_id) << "() pos1 and pos2 must be the same length." << EidosTerminate();
+	}
+
+	if (statistic != Species::StatisticR2 && statistic != Species::StatisticD && statistic != Species::StatisticDPrime)
+	{
+		EIDOS_TERMINATION << "ERROR (Species::ExecuteMethod_calcLDBetweenSitePairs): " << EidosStringRegistry::StringForGlobalStringID(p_method_id) << "() requires statistic to be one of r2, D, or D'." << EidosTerminate();
+	}
+	
+	static std::vector<Subpopulation*> subpops_to_tally;
+	subpops_to_tally.clear();
+
+	subpops_to_tally.emplace_back(subpop_value);
+
+	// tally across the requested subpop					
+	double denominator = population_.TallyMutationReferencesAcrossSubpopulations(&subpops_to_tally, false);
+	
+	// Get a vector of unique sites we need to find the minor alleles of
+	std::vector<int> pos(pos1_ev->Count() * 2); // maximum size is twice the number of positions (if both vectors unique)
+	for (int i = 0; i < pos1_ev->Count(); ++i)
+	{
+		pos.emplace_back(pos1_ev->IntAtIndex(i, nullptr));
+		pos.emplace_back(pos2_ev->IntAtIndex(i, nullptr));
+	}
+	
+	// Remove the duplicates
+	std::sort(pos.begin(), pos.end());
+	std::vector<int>::iterator it = std::unique(pos.begin(), pos.end());
+	pos.resize(std::distance(pos.begin(), it));
+
+	// Store the MAFs, mutation positions, and mutation ID in a std::map
+	// key: position, value: tuple([0] = MAF; [1] = ID)
+	std::map<int, std::tuple<double, MutationIndex>> mutFreqMAFs;
+
+	// Get all mutations in a std::vector
+	Mutation *mut_block_ptr = gSLiM_Mutation_Block;
+
+	int registry_size;
+	const MutationIndex *registry = population_.MutationRegistry(&registry_size);
+	std::vector<Mutation*> allMuts;
+
+
+	if (registry_size)
+	{
+		for (int value_index = 0; value_index < registry_size; ++value_index)
+		{
+			Mutation* mut = mut_block_ptr + registry[value_index];
+			allMuts.emplace_back(mut);
+		}
+	}
+
+	// Iterate over each given site to find their refcounts (which were calculated in TallyMutationReferences())
+	slim_refcount_t *refcount_block_ptr = gSLiM_Mutation_Refcounts;
+
+	for (size_t i = 0; i < pos.size(); ++i)
+	{
+		// Create a vector of mutations existing at position n or m
+		std::vector<Mutation*> iMuts;
+		std::copy_if(allMuts.begin(), allMuts.end(), std::back_inserter( iMuts ), 
+			([i, &pos]( Mutation* mut ) { return mut->position_ == pos[i]; }));
+
+		// if (!iMuts.size()) // If there's no mutation at this position, we have an empty variable
+		// {
+		// 	mutFreqMAFs.insert(std::pair<int, std::tuple<double, MutationIndex>>(-1, {0.0, -1}));
+		// 	continue;
+		// }
+		// Get each mutation's frequency
+		std::vector<std::pair<double, Mutation*>> mutAllFreq;
+		for (Mutation* mut : iMuts)
+		{
+			int8_t mut_state = mut->state_;
+			double freq;
+				
+			if (mut_state == MutationState::kInRegistry)					freq = *(refcount_block_ptr + mut->BlockIndex()) / denominator;
+			else /* mut_state == MutationState::kFixedAndSubstituted */		freq = 1.0;
+
+			mutAllFreq.emplace_back(freq, mut);
+		}
+
+		// Remove mutations that are below the specified threshold
+		// We ignore singletons for r2 calc
+		mutAllFreq.erase(std::remove_if(mutAllFreq.begin(), mutAllFreq.end(), 
+			[MAFthreshold](const auto& val) { return val.first < MAFthreshold; }),
+						 mutAllFreq.end());
+
+		// Now need to check if mutAllFreq is empty:
+		if (!mutAllFreq.size()) // If there's no mutation at this position, we have an empty variable
+		{
+			mutFreqMAFs.insert(std::pair<int, std::tuple<double, MutationIndex>>(pos[i], {0.0, -1}));
+			continue;
+		}
+
+		// Get the minor allele frequency
+		std::pair<double, Mutation*> MAF;
+
+		// Return the mutation with the smallest allele frequency at this position and clear mutAllFreq
+		// If we only have one value, then that's the minor allele
+		if (mutAllFreq.size() == 1) 
+		{
+			MAF = mutAllFreq[0];
+		} else {
+			MAF = *std::min_element(mutAllFreq.begin(), mutAllFreq.end(), 
+				[](const auto& lhs, const auto& rhs) { return lhs.first < rhs.first; });
+		} 
+
+		// Set mutFreqMAFs tuple values according to MAF values: MAF[0] = freq, MAF[1] = ID
+		mutFreqMAFs.insert(std::pair<int, std::tuple<double, MutationIndex>>(
+			MAF.second->position_,
+			{
+				MAF.first,
+				MAF.second->BlockIndex()
+			}
+		));
+
+		mutAllFreq.clear();
+	}
+	// Calculate LD and store in a vector of length pos1 if we aren't doing SFS specific LD
+	// if we are, we are storing pairs of frequencies and LD values
+	std::vector<double> result(pos1_ev->Count() * (byFreq + 1));
+
+	double ABFreq;
+	
+	for (int i = 0; i < pos1_ev->Count(); i+=(byFreq + 1)) 
+	{			
+	// Get our MAF frequencies for locus A and B 
+		int a = pos1_ev->IntAtIndex(i, nullptr);
+		int b = pos2_ev->IntAtIndex(i, nullptr);
+
+		double mutFreqA = std::get<0>(mutFreqMAFs[a]);
+		double mutFreqB = std::get<0>(mutFreqMAFs[b]);	
+
+		// byFreq: Check if both mutations have a similar frequency: if not, then don't compare them
+		if (byFreq)
+		{
+			double freqBinA = roundUpToDigits(mutFreqA, 1); 
+			double freqBinB = roundUpToDigits(mutFreqB, 1);
+
+			if (freqBinA != freqBinB) 
+			{
+				result[i] = -1;
+				result[i+1] = -1;
+				continue;
+			}
+		}
+			
+		// Check if either mutation has frequency 0 - if they do, set the r^2 to 0 and move on
+			if ((mutFreqA == 0.0) || (mutFreqB == 0.0)) {
+				result[i] = (0.0);
+				if (byFreq)
+				{
+					result[i+1] = (roundUpToDigits(mutFreqA, 1));
+				}
+				continue;
+			}		
+		
+  			else 
+			{
+			// Hill and Robertson 1968, Stolyarova et al. 2021
+				ABFreq = sharedMutFreq(genomes, std::get<1>(mutFreqMAFs[a]), std::get<1>(mutFreqMAFs[b]));
+			}
+			
+
+			if (statistic != Species::StatisticR2)
+			{
+				double D = ABFreq - (mutFreqA * mutFreqB);
+				double Dmax;
+
+				if (D > 0)
+				{
+					Dmax = std::min((mutFreqA * (1 - mutFreqB)), ((1 - mutFreqA) * mutFreqB));
+				}
+				else
+				{
+					Dmax = std::min(mutFreqA * mutFreqB, (1 - mutFreqA) * (1 - mutFreqB));
+				}
+				
+				if (statistic == Species::StatisticD)
+				{
+					Dmax = 1.0;
+				}
+
+				result[i] = (D / Dmax);
+
+				if (byFreq) 
+				{
+					result[i+1] = (roundUpToDigits(mutFreqA, 1));
+				}
+				continue;
+			}
+			// r^2
+			result[i] = (( pow(ABFreq - (mutFreqA * mutFreqB), 2) ) / ( mutFreqA * (1 - mutFreqA) * mutFreqB * (1 - mutFreqB) ));	
+			if (byFreq) 
+			{
+				result[i+1] = (roundUpToDigits(mutFreqA, 1));
+			}
+	}
+
+	// Remove any invalid entries
+	result.erase(std::remove_if(result.begin(), result.end(), 
+			[](const auto& val) { return val < 0.0; }),
+						 result.end());
+	
+	return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float_vector{result});
 
 }
 
@@ -3886,6 +4118,7 @@ const std::vector<EidosMethodSignature_CSP> *Species_Class::Methods(void) const
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_mutationsOfType, kEidosValueMaskObject, gSLiM_Mutation_Class))->AddIntObject_S("mutType", gSLiM_MutationType_Class));
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_NARIntegrate, kEidosValueMaskFloat))->AddIntObject_N("individuals", gSLiM_Individual_Class));
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_calcLD, kEidosValueMaskFloat))->AddIntObject_S("subpop", gSLiM_Subpopulation_Class)->AddString_OS("statistic", EidosValue_String_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String_singleton("r2"))));
+		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_calcLDBetweenSitePairs, kEidosValueMaskFloat))->AddIntObject_S("subpop", gSLiM_Subpopulation_Class)->AddInt("pos1")->AddInt("pos2")->AddString_OS("statistic", EidosValue_String_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String_singleton("r2")))->AddLogical_OS("byFreq", gStaticEidosValue_LogicalF)->AddFloat_OS("threshold", EidosValue_Float_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float_singleton(0.05))));
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_getHaplos, kEidosValueMaskInt))->AddObject("genomes", gSLiM_Genome_Class)->AddInt("pos"));
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_outputFixedMutations, kEidosValueMaskVOID))->AddString_OSN(gEidosStr_filePath, gStaticEidosValueNULL)->AddLogical_OS("append", gStaticEidosValue_LogicalF));
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_outputFull, kEidosValueMaskVOID))->AddString_OSN(gEidosStr_filePath, gStaticEidosValueNULL)->AddLogical_OS("binary", gStaticEidosValue_LogicalF)->AddLogical_OS("append", gStaticEidosValue_LogicalF)->AddLogical_OS("spatialPositions", gStaticEidosValue_LogicalT)->AddLogical_OS("ages", gStaticEidosValue_LogicalT)->AddLogical_OS("ancestralNucleotides", gStaticEidosValue_LogicalT)->AddLogical_OS("pedigreeIDs", gStaticEidosValue_LogicalF));

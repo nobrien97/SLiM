@@ -173,6 +173,10 @@ class Species : public EidosDictionaryUnretained
 private:
 	typedef EidosDictionaryUnretained super;
 
+	inline static const std::string StatisticR2 = "r2";
+	inline static const std::string StatisticD = "D";
+	inline static const std::string StatisticDPrime = "D'";
+
 #ifdef SLIMGUI
 public:
 #else
@@ -652,6 +656,7 @@ public:
 	EidosValue_SP ExecuteMethod_mutationsOfType(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter);
 	EidosValue_SP ExecuteMethod_NARIntegrate(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter);
 	EidosValue_SP ExecuteMethod_calcLD(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter);
+	EidosValue_SP ExecuteMethod_calcLDBetweenSitePairs(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter);	
 	EidosValue_SP ExecuteMethod_getHaplos(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter);
 
 	EidosValue_SP ExecuteMethod_countOfMutationsOfType(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter);

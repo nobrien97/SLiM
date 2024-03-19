@@ -1291,6 +1291,7 @@ const std::string &gStr_relatedness = EidosRegisteredString("relatedness", gID_r
 const std::string &gStr_sharedParentCount = EidosRegisteredString("sharedParentCount", gID_sharedParentCount);
 const std::string &gStr_NARIntegrate = EidosRegisteredString("NARIntegrate", gID_NARIntegrate);
 const std::string &gStr_calcLD = EidosRegisteredString("calcLD", gID_calcLD);
+const std::string &gStr_calcLDBetweenSitePairs = EidosRegisteredString("calcLDBetweenSitePairs", gID_calcLDBetweenSitePairs);
 const std::string &gStr_getHaplos = EidosRegisteredString("getHaplos", gID_getHaplos);
 const std::string &gStr_mutationsOfType = EidosRegisteredString("mutationsOfType", gID_mutationsOfType);
 const std::string &gStr_setSpatialPosition = EidosRegisteredString("setSpatialPosition", gID_setSpatialPosition);
