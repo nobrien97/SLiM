@@ -2639,11 +2639,10 @@ EidosValue_SP Species::ExecuteMethod_calcLD(EidosGlobalStringID p_method_id, con
 
 }
 
-double roundUpToDigits(double x, int n)
+double roundToDigits(double x, int n)
 { 
     const double scale = pow(10.0, n);
- 
-    return ceil(x * scale) / scale;
+    return round(x * scale) / scale;
 }
 
 //	*********************	– (float)calcLDBetweenSitePairs(Nio<Subpopulation>$ subpop, integer pos1, integer pos2, string$ statistic = "D'", logical$ byFreq = F, float$ threshold = 0.05)
@@ -2790,11 +2789,27 @@ EidosValue_SP Species::ExecuteMethod_calcLDBetweenSitePairs(EidosGlobalStringID 
 
 	double ABFreq;
 	
-	for (int i = 0; i < pos1_ev->Count(); i+=(byFreq + 1)) 
+	double n = pos1_ev->Count(); // Number of iterations
+	for (size_t i = 0; i < result.size(); i+=(byFreq + 1)) 
 	{			
-	// Get our MAF frequencies for locus A and B 
-		int a = pos1_ev->IntAtIndex(i, nullptr);
-		int b = pos2_ev->IntAtIndex(i, nullptr);
+		// Get our MAF frequencies for locus A and B 
+		int adj_index = byFreq ? ((double)i) / n * n / 2.0 : i; // If we're byFreq we need to adjust the mutation index
+		int a = pos1_ev->IntAtIndex(adj_index, nullptr);
+		int b = pos2_ev->IntAtIndex(adj_index, nullptr);
+
+		bool mutExistsA = std::get<1>(mutFreqMAFs[a]) > -1;
+		bool mutExistsB = std::get<1>(mutFreqMAFs[b]) > -1;
+
+		// If the mutation doesn't exist at either site, exit early
+		if (!mutExistsA || !mutExistsB)
+		{
+			result[i] = -100;
+			if (byFreq)
+			{
+				result[i+1] = -100;
+			}
+			continue;
+		}
 
 		double mutFreqA = std::get<0>(mutFreqMAFs[a]);
 		double mutFreqB = std::get<0>(mutFreqMAFs[b]);	
@@ -2802,72 +2817,72 @@ EidosValue_SP Species::ExecuteMethod_calcLDBetweenSitePairs(EidosGlobalStringID 
 		// byFreq: Check if both mutations have a similar frequency: if not, then don't compare them
 		if (byFreq)
 		{
-			double freqBinA = roundUpToDigits(mutFreqA, 1); 
-			double freqBinB = roundUpToDigits(mutFreqB, 1);
+			double freqBinA = roundToDigits(mutFreqA, 1); 
+			double freqBinB = roundToDigits(mutFreqB, 1);
 
 			if (freqBinA != freqBinB) 
 			{
-				result[i] = -1;
-				result[i+1] = -1;
+				result[i] = -100;
+				result[i+1] = -100;
 				continue;
 			}
 		}
 			
-		// Check if either mutation has frequency 0 - if they do, set the r^2 to 0 and move on
-			if ((mutFreqA == 0.0) || (mutFreqB == 0.0)) {
-				result[i] = (0.0);
-				if (byFreq)
-				{
-					result[i+1] = (roundUpToDigits(mutFreqA, 1));
-				}
-				continue;
-			}		
+		// // Check if either mutation has frequency 0 - if they do, set the r^2 to 0 and move on
+		// if ((mutFreqA == 0.0) || (mutFreqB == 0.0)) 
+		// {
+		// 	result[i] = (0.0);
+		// 	if (byFreq)
+		// 	{
+		// 		result[i+1] = (roundToDigits(mutFreqA, 1));
+		// 	}
+		// 	continue;
+		// }		
+	
+  		
+		// Hill and Robertson 1968, Stolyarova et al. 2021
+		ABFreq = sharedMutFreq(genomes, std::get<1>(mutFreqMAFs[a]), std::get<1>(mutFreqMAFs[b]));
 		
-  			else 
+		
+
+		if (statistic != Species::StatisticR2)
+		{
+			double D = ABFreq - (mutFreqA * mutFreqB);
+			double Dmax;
+			if (D > 0)
 			{
-			// Hill and Robertson 1968, Stolyarova et al. 2021
-				ABFreq = sharedMutFreq(genomes, std::get<1>(mutFreqMAFs[a]), std::get<1>(mutFreqMAFs[b]));
+				Dmax = std::min((mutFreqA * (1 - mutFreqB)), ((1 - mutFreqA) * mutFreqB));
+			}
+			else
+			{
+				Dmax = std::min(mutFreqA * mutFreqB, (1 - mutFreqA) * (1 - mutFreqB));
 			}
 			
-
-			if (statistic != Species::StatisticR2)
+			if (statistic == Species::StatisticD)
 			{
-				double D = ABFreq - (mutFreqA * mutFreqB);
-				double Dmax;
-
-				if (D > 0)
-				{
-					Dmax = std::min((mutFreqA * (1 - mutFreqB)), ((1 - mutFreqA) * mutFreqB));
-				}
-				else
-				{
-					Dmax = std::min(mutFreqA * mutFreqB, (1 - mutFreqA) * (1 - mutFreqB));
-				}
-				
-				if (statistic == Species::StatisticD)
-				{
-					Dmax = 1.0;
-				}
-
-				result[i] = (D / Dmax);
-
-				if (byFreq) 
-				{
-					result[i+1] = (roundUpToDigits(mutFreqA, 1));
-				}
-				continue;
+				Dmax = 1.0;
 			}
-			// r^2
-			result[i] = (( pow(ABFreq - (mutFreqA * mutFreqB), 2) ) / ( mutFreqA * (1 - mutFreqA) * mutFreqB * (1 - mutFreqB) ));	
+
+			result[i] = (D / Dmax);
+
 			if (byFreq) 
 			{
-				result[i+1] = (roundUpToDigits(mutFreqA, 1));
+				result[i+1] = (roundToDigits(mutFreqA, 1));
 			}
+			continue;
+		}
+		// r^2
+		result[i] = (( pow(ABFreq - (mutFreqA * mutFreqB), 2) ) / ( mutFreqA * (1 - mutFreqA) * mutFreqB * (1 - mutFreqB) ));	
+		
+		if (byFreq) 
+		{
+			result[i+1] = (roundToDigits(mutFreqA, 1));
+		}
 	}
 
 	// Remove any invalid entries
 	result.erase(std::remove_if(result.begin(), result.end(), 
-			[](const auto& val) { return val < 0.0; }),
+			[](const auto& val) { return val < -10.0; }),
 						 result.end());
 	
 	return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float_vector{result});
