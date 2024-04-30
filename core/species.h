@@ -678,7 +678,7 @@ public:
 	EidosValue_SP ExecuteMethod_treeSeqRememberIndividuals(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter);
 	EidosValue_SP ExecuteMethod_treeSeqOutput(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter);
 
-	double sharedMutFreq(std::vector<Genome*>& genomes, MutationIndex mut1, MutationIndex mut2);
+	double sharedMutFreq(std::vector<Genome*>& genomes, MutationIndex mut1, MutationIndex mut2, bool mut1Missing = false, bool mut2Missing = false);
 	bool isMultiAllelic(int pos, std::vector<Mutation*> muts);
 	static double AUC(const double &h, const double &a, const double &b);
 };

@@ -2812,7 +2812,21 @@ EidosValue_SP Species::ExecuteMethod_calcLDBetweenSitePairs(EidosGlobalStringID 
 		}
 
 		double mutFreqA = std::get<0>(mutFreqMAFs[a]);
-		double mutFreqB = std::get<0>(mutFreqMAFs[b]);	
+		double mutFreqB = std::get<0>(mutFreqMAFs[b]);
+
+		// Convert to minor allele frequency
+		bool isMajorA = std::get<0>(mutFreqMAFs[a]) > 0.5f;
+		bool isMajorB = std::get<0>(mutFreqMAFs[b]) > 0.5f;
+
+		if (isMajorA)
+		{
+			mutFreqA = 1 - mutFreqA;
+		}
+
+		if (isMajorB)
+		{
+			mutFreqB = 1 - mutFreqB;
+		}
 
 		// byFreq: Check if both mutations have a similar frequency: if not, then don't compare them
 		if (byFreq)
@@ -2841,8 +2855,8 @@ EidosValue_SP Species::ExecuteMethod_calcLDBetweenSitePairs(EidosGlobalStringID 
 	
   		
 		// Hill and Robertson 1968, Stolyarova et al. 2021
-		ABFreq = sharedMutFreq(genomes, std::get<1>(mutFreqMAFs[a]), std::get<1>(mutFreqMAFs[b]));
-		
+		ABFreq = sharedMutFreq(genomes, std::get<1>(mutFreqMAFs[a]), std::get<1>(mutFreqMAFs[b]),
+							   isMajorA, isMajorB);		
 		
 
 		if (statistic != Species::StatisticR2)
@@ -2863,6 +2877,12 @@ EidosValue_SP Species::ExecuteMethod_calcLDBetweenSitePairs(EidosGlobalStringID 
 				Dmax = 1.0;
 			}
 
+			// Adjust the sign depending on the conversion to minor frequency: 
+			// is it DAB, DAb, DaB, or dab that was calculated?
+			if (isMajorA != isMajorB)
+			{
+				D = -D;
+			}
 			result[i] = (D / Dmax);
 
 			if (byFreq) 
@@ -4033,18 +4053,57 @@ EidosValue_SP Species::ExecuteMethod_treeSeqOutput(EidosGlobalStringID p_method_
 	return gStaticEidosValueVOID;
 }
 
-bool ContainsBothMuts(MutationIndex& mut1, MutationIndex& mut2, Genome*& genome)
+static bool ContainsBothMuts(MutationIndex& mut1, MutationIndex& mut2, Genome*& genome)
 {
 	return ((genome->contains_mutation(mut1)) && (genome->contains_mutation(mut2))); 
 }
 
+static bool ContainsMut1Only(MutationIndex& mut1, MutationIndex& mut2, Genome*& genome)
+{
+	return ((genome->contains_mutation(mut1)) && !(genome->contains_mutation(mut2)));
+}
+
+static bool ContainsMut2Only(MutationIndex& mut1, MutationIndex& mut2, Genome*& genome)
+{
+	return (!(genome->contains_mutation(mut1)) && (genome->contains_mutation(mut2)));
+}
+
+static bool ContainsNeitherMut(MutationIndex& mut1, MutationIndex& mut2, Genome*& genome)
+{
+	return (!(genome->contains_mutation(mut1)) && !(genome->contains_mutation(mut2)));
+}
+
+
+
 // Helper Function for calcLD - gets the shared frequency between mutations
-double Species::sharedMutFreq(std::vector<Genome*>& genomes, MutationIndex mut1, MutationIndex mut2) {
+double Species::sharedMutFreq(std::vector<Genome*>& genomes, MutationIndex mut1, MutationIndex mut2, bool mut1Missing, bool mut2Missing) {
 	// Go through each genome, determine if it has both mutations or not, add to counter
 	double ABGenomes = 0;
+
+	// If either mutation is a flipped allele (major not minor), want to check if mut2 is missing instead
+	// for frequency of wildtype
+	static bool (*checkAlleleFn)(MutationIndex&, MutationIndex&, Genome*&);
+
+	checkAlleleFn = ContainsBothMuts;
+
+	if (mut1Missing && !mut2Missing)
+	{
+		checkAlleleFn = ContainsMut2Only;
+	}
+
+	if (!mut1Missing && mut2Missing)
+	{
+		checkAlleleFn = ContainsMut1Only;
+	}
+
+	if (mut1Missing && mut2Missing)
+	{
+		checkAlleleFn = ContainsNeitherMut;
+	}
+
 	for (Genome* g : genomes)
 	{
-		ABGenomes += (double)ContainsBothMuts(mut1, mut2, g);
+		ABGenomes += (double)checkAlleleFn(mut1, mut2, g);
 	}	
 
 	// return frequency of shared genomes
