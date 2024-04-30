@@ -8,8 +8,11 @@ cd ~/SLiM/SLiM
 mkdir build
 cd build
 cmake ../
-make slim eidos
+make -j48 slim eidos
 cp ../../slim ../../slim_old
 cp ../../eidos ../../eidos_old
 cp slim ../../slim
 cp eidos ../../eidos
+
+./slim -testEidos
+./slim -testSLiM
