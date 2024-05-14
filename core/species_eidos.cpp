@@ -3034,15 +3034,15 @@ EidosValue_SP Species::ExecuteMethod_sharedMutFreqs(EidosGlobalStringID p_method
 	}
 	// Calculate LD and store in a vector of length pos1 if we aren't doing SFS specific LD
 	// if we are, we are storing pairs of frequencies and LD values
-	std::vector<double> result(pos1_ev->Count() * 5);
+	std::vector<double> result(pos1_ev->Count() * 7);
 
 	double ABFreq;
 	
 	double n = pos1_ev->Count(); // Number of iterations
-	for (size_t i = 0; i < result.size(); i+=5) 
+	for (size_t i = 0; i < result.size(); i+=7) 
 	{			
 		// Get our MAF frequencies for locus A and B 
-		int adj_index = ((double)i) / n * n / 5.0; // double cast to int always floors
+		int adj_index = ((double)i) / n * n / 7.0; // double cast to int always floors
 		int a = pos1_ev->IntAtIndex(adj_index, nullptr);
 		int b = pos2_ev->IntAtIndex(adj_index, nullptr);
 
@@ -3056,21 +3056,30 @@ EidosValue_SP Species::ExecuteMethod_sharedMutFreqs(EidosGlobalStringID p_method
 		// If the mutation doesn't exist at either site, exit early
 		if (!mutExistsA || !mutExistsB)
 		{
-			for (int j = 0; j < 5; ++j)
+			for (int j = 0; j < 7; ++j)
 			{
 				result[i+j] = -100;
 			}
 			continue;
 		}
-
-		// Hill and Robertson 1968, Stolyarova et al. 2021
-		ABFreq = sharedMutFreq(genomes, mutIDA, mutIDB, false, false);		
 		
 		result[i] = mutIDA;
 		result[i+1] = mutIDB;
 		result[i+2] = mutFreqA;
 		result[i+3] = mutFreqB;
-		result[i+4] = ABFreq;
+
+		// Need to calculate AB, Ab, aB at least for figuring out fitness
+		// k = 1: aB
+		// k = 2: ab
+		// k = 3: AB
+		// can then infer Ab
+		for (int k = 1; k < 4; ++k)
+		{
+			bool mut1Missing = k % 3 != 0;
+			bool mut2Missing = k % 2 == 0;
+			ABFreq = sharedMutFreq(genomes, mutIDA, mutIDB, mut1Missing, mut2Missing);		
+			result[i+k] = ABFreq;
+		}
 
 	}
 
