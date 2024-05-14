@@ -3068,17 +3068,17 @@ EidosValue_SP Species::ExecuteMethod_sharedMutFreqs(EidosGlobalStringID p_method
 		result[i+2] = mutFreqA;
 		result[i+3] = mutFreqB;
 
-		// Need to calculate AB, Ab, aB at least for figuring out fitness
-		// k = 1: aB
-		// k = 2: ab
-		// k = 3: AB
-		// can then infer Ab
-		for (int k = 1; k < 4; ++k)
+		// Need to calculate 3 shared frequencies at least for figuring out fitness
+		// k = 1: ab
+		// k = 2: aB
+		// k = 3: Ab
+		// can then infer AB
+		for (size_t k = (i + 4); k < (i+7); ++k)
 		{
-			bool mut1Missing = k % 3 != 0;
-			bool mut2Missing = k % 2 == 0;
+			bool mut1Missing = (k - i) % 3 != 0;
+			bool mut2Missing = (k - i) % 2 == 0;
 			ABFreq = sharedMutFreq(genomes, mutIDA, mutIDB, mut1Missing, mut2Missing);		
-			result[i+k] = ABFreq;
+			result[k] = ABFreq;
 		}
 
 	}
