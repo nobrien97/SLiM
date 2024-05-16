@@ -2521,7 +2521,7 @@ EidosValue_SP Species::ExecuteMethod_calcLD(EidosGlobalStringID p_method_id, con
 		std::copy_if(allMuts.begin(), allMuts.end(), std::back_inserter( iMuts ), ([n]( Mutation* mut ) { return mut->position_ == n; }));
 		if (!iMuts.size()) // If there's no mutation at this position, we have an empty variable
 		{
-			mutFreqMAFs[n] = std::tuple<double, int, MutationIndex>{0.0, -1, -1};
+			mutFreqMAFs[n] = std::tuple<double, int, slim_mutationid_t>{0.0, -1, -1};
 			continue;
 		}
 		// Get each mutation's frequency
@@ -2545,7 +2545,7 @@ EidosValue_SP Species::ExecuteMethod_calcLD(EidosGlobalStringID p_method_id, con
 		// Now need to check if mutAllFreq is empty:
 		if (!mutAllFreq.size()) // If there's no mutation at this position, we have an empty variable
 		{
-			mutFreqMAFs[n] = std::tuple<double, int, MutationIndex>{0.0, -1, -1};
+			mutFreqMAFs[n] = std::tuple<double, int, slim_mutationid_t>{0.0, -1, -1};
 			continue;
 		}
 
@@ -2564,7 +2564,7 @@ EidosValue_SP Species::ExecuteMethod_calcLD(EidosGlobalStringID p_method_id, con
 		// Set mutFreqMAFs tuple values according to MAF values: MAF[0] = freq, MAF[1] = pos, MAF[2] = ID
 		std::get<0>(mutFreqMAFs[n]) = (MAF.first > singletonFreq) ? MAF.first : 0.0;
 		std::get<1>(mutFreqMAFs[n]) = (MAF.first > singletonFreq) ? MAF.second->position_ : -1;
-		std::get<2>(mutFreqMAFs[n]) = (MAF.first > singletonFreq) ? MAF.second->BlockIndex() : -1;
+		std::get<2>(mutFreqMAFs[n]) = (MAF.first > singletonFreq) ? MAF.second->mutation_id_ : -1;
 		mutAllFreq.clear();
 	}
 	// Then, calculate correlations and store in a matrix
@@ -2700,7 +2700,7 @@ EidosValue_SP Species::ExecuteMethod_calcLDBetweenSitePairs(EidosGlobalStringID 
 
 	// Store the MAFs, mutation positions, and mutation ID in a std::map
 	// key: position, value: tuple([0] = MAF; [1] = ID)
-	std::map<int, std::tuple<double, MutationIndex>> mutFreqMAFs;
+	std::map<int, std::tuple<double, slim_mutationid_t>> mutFreqMAFs;
 
 	// Get all mutations in a std::vector
 	Mutation *mut_block_ptr = gSLiM_Mutation_Block;
@@ -2756,7 +2756,7 @@ EidosValue_SP Species::ExecuteMethod_calcLDBetweenSitePairs(EidosGlobalStringID 
 		// Now need to check if mutAllFreq is empty:
 		if (!mutAllFreq.size()) // If there's no mutation at this position, we have an empty variable
 		{
-			mutFreqMAFs.insert(std::pair<int, std::tuple<double, MutationIndex>>(pos[i], {0.0, -1}));
+			mutFreqMAFs.insert(std::pair<int, std::tuple<double, slim_mutationid_t>>(pos[i], {0.0, -1}));
 			continue;
 		}
 
@@ -2774,11 +2774,11 @@ EidosValue_SP Species::ExecuteMethod_calcLDBetweenSitePairs(EidosGlobalStringID 
 		} 
 
 		// Set mutFreqMAFs tuple values according to MAF values: MAF[0] = freq, MAF[1] = ID
-		mutFreqMAFs.insert(std::pair<int, std::tuple<double, MutationIndex>>(
+		mutFreqMAFs.insert(std::pair<int, std::tuple<double, slim_mutationid_t>>(
 			MAF.second->position_,
 			{
 				MAF.first,
-				MAF.second->BlockIndex()
+				MAF.second->mutation_id_
 			}
 		));
 
@@ -2953,7 +2953,7 @@ EidosValue_SP Species::ExecuteMethod_sharedMutFreqs(EidosGlobalStringID p_method
 
 	// Store the MAFs, mutation positions, and mutation ID in a std::map
 	// key: position, value: tuple([0] = MAF; [1] = ID)
-	std::map<int, std::tuple<double, MutationIndex>> mutFreqMAFs;
+	std::map<int, std::tuple<double, slim_mutationid_t>> mutFreqMAFs;
 
 	// Get all mutations in a std::vector
 	Mutation *mut_block_ptr = gSLiM_Mutation_Block;
@@ -3004,7 +3004,7 @@ EidosValue_SP Species::ExecuteMethod_sharedMutFreqs(EidosGlobalStringID p_method
 		// Now need to check if mutAllFreq is empty:
 		if (!mutAllFreq.size()) // If there's no mutation at this position, we have an empty variable
 		{
-			mutFreqMAFs.insert(std::pair<int, std::tuple<double, MutationIndex>>(pos[i], {0.0, -1}));
+			mutFreqMAFs.insert(std::pair<int, std::tuple<double, slim_mutationid_t>>(pos[i], {0.0, -1}));
 			continue;
 		}
 
@@ -3022,11 +3022,11 @@ EidosValue_SP Species::ExecuteMethod_sharedMutFreqs(EidosGlobalStringID p_method
 		} 
 
 		// Set mutFreqMAFs tuple values according to MAF values: MAF[0] = freq, MAF[1] = ID
-		mutFreqMAFs.insert(std::pair<int, std::tuple<double, MutationIndex>>(
+		mutFreqMAFs.insert(std::pair<int, std::tuple<double, slim_mutationid_t>>(
 			MAF.second->position_,
 			{
 				MAF.first,
-				MAF.second->BlockIndex()
+				MAF.second->mutation_id_
 			}
 		));
 
