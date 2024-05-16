@@ -2521,7 +2521,7 @@ EidosValue_SP Species::ExecuteMethod_calcLD(EidosGlobalStringID p_method_id, con
 		std::copy_if(allMuts.begin(), allMuts.end(), std::back_inserter( iMuts ), ([n]( Mutation* mut ) { return mut->position_ == n; }));
 		if (!iMuts.size()) // If there's no mutation at this position, we have an empty variable
 		{
-			mutFreqMAFs[n] = std::tuple<double, int, slim_mutationid_t>{0.0, -1, -1};
+			mutFreqMAFs[n] = std::tuple<double, int, MutationIndex>{0.0, -1, -1};
 			continue;
 		}
 		// Get each mutation's frequency
@@ -2545,7 +2545,7 @@ EidosValue_SP Species::ExecuteMethod_calcLD(EidosGlobalStringID p_method_id, con
 		// Now need to check if mutAllFreq is empty:
 		if (!mutAllFreq.size()) // If there's no mutation at this position, we have an empty variable
 		{
-			mutFreqMAFs[n] = std::tuple<double, int, slim_mutationid_t>{0.0, -1, -1};
+			mutFreqMAFs[n] = std::tuple<double, int, MutationIndex>{0.0, -1, -1};
 			continue;
 		}
 
@@ -2564,7 +2564,7 @@ EidosValue_SP Species::ExecuteMethod_calcLD(EidosGlobalStringID p_method_id, con
 		// Set mutFreqMAFs tuple values according to MAF values: MAF[0] = freq, MAF[1] = pos, MAF[2] = ID
 		std::get<0>(mutFreqMAFs[n]) = (MAF.first > singletonFreq) ? MAF.first : 0.0;
 		std::get<1>(mutFreqMAFs[n]) = (MAF.first > singletonFreq) ? MAF.second->position_ : -1;
-		std::get<2>(mutFreqMAFs[n]) = (MAF.first > singletonFreq) ? MAF.second->mutation_id_ : -1;
+		std::get<2>(mutFreqMAFs[n]) = (MAF.first > singletonFreq) ? MAF.second->BlockIndex() : -1;
 		mutAllFreq.clear();
 	}
 	// Then, calculate correlations and store in a matrix
@@ -2700,7 +2700,7 @@ EidosValue_SP Species::ExecuteMethod_calcLDBetweenSitePairs(EidosGlobalStringID 
 
 	// Store the MAFs, mutation positions, and mutation ID in a std::map
 	// key: position, value: tuple([0] = MAF; [1] = ID)
-	std::map<int, std::tuple<double, slim_mutationid_t>> mutFreqMAFs;
+	std::map<int, std::tuple<double, MutationIndex>> mutFreqMAFs;
 
 	// Get all mutations in a std::vector
 	Mutation *mut_block_ptr = gSLiM_Mutation_Block;
@@ -2756,7 +2756,7 @@ EidosValue_SP Species::ExecuteMethod_calcLDBetweenSitePairs(EidosGlobalStringID 
 		// Now need to check if mutAllFreq is empty:
 		if (!mutAllFreq.size()) // If there's no mutation at this position, we have an empty variable
 		{
-			mutFreqMAFs.insert(std::pair<int, std::tuple<double, slim_mutationid_t>>(pos[i], {0.0, -1}));
+			mutFreqMAFs.insert(std::pair<int, std::tuple<double, MutationIndex>>(pos[i], {0.0, -1}));
 			continue;
 		}
 
@@ -2774,11 +2774,11 @@ EidosValue_SP Species::ExecuteMethod_calcLDBetweenSitePairs(EidosGlobalStringID 
 		} 
 
 		// Set mutFreqMAFs tuple values according to MAF values: MAF[0] = freq, MAF[1] = ID
-		mutFreqMAFs.insert(std::pair<int, std::tuple<double, slim_mutationid_t>>(
+		mutFreqMAFs.insert(std::pair<int, std::tuple<double, MutationIndex>>(
 			MAF.second->position_,
 			{
 				MAF.first,
-				MAF.second->mutation_id_
+				MAF.second->BlockIndex()
 			}
 		));
 
@@ -2953,7 +2953,7 @@ EidosValue_SP Species::ExecuteMethod_sharedMutFreqs(EidosGlobalStringID p_method
 
 	// Store the MAFs, mutation positions, and mutation ID in a std::map
 	// key: position, value: tuple([0] = MAF; [1] = ID)
-	std::map<int, std::tuple<double, slim_mutationid_t>> mutFreqMAFs;
+	std::map<int, std::tuple<double, Mutation*>> mutFreqMAFs;
 
 	// Get all mutations in a std::vector
 	Mutation *mut_block_ptr = gSLiM_Mutation_Block;
@@ -2982,6 +2982,11 @@ EidosValue_SP Species::ExecuteMethod_sharedMutFreqs(EidosGlobalStringID p_method
 		std::copy_if(allMuts.begin(), allMuts.end(), std::back_inserter( iMuts ), 
 			([i, &pos]( Mutation* mut ) { return mut->position_ == pos[i]; }));
 
+		// Filter out neutral mutations: only consider QTLs 
+		allMuts.erase(std::remove_if(allMuts.begin(), allMuts.end(), 
+			[](const auto& val) { return val->mutation_type_ptr_->mutation_type_id_ < 2; }),
+						 allMuts.end());
+		
 		// Get each mutation's frequency
 		std::vector<std::pair<double, Mutation*>> mutAllFreq;
 		for (Mutation* mut : iMuts)
@@ -3004,7 +3009,7 @@ EidosValue_SP Species::ExecuteMethod_sharedMutFreqs(EidosGlobalStringID p_method
 		// Now need to check if mutAllFreq is empty:
 		if (!mutAllFreq.size()) // If there's no mutation at this position, we have an empty variable
 		{
-			mutFreqMAFs.insert(std::pair<int, std::tuple<double, slim_mutationid_t>>(pos[i], {0.0, -1}));
+			mutFreqMAFs.insert(std::pair<int, std::tuple<double, Mutation*>>(pos[i], {0.0, nullptr}));
 			continue;
 		}
 
@@ -3021,12 +3026,12 @@ EidosValue_SP Species::ExecuteMethod_sharedMutFreqs(EidosGlobalStringID p_method
 				[](const auto& lhs, const auto& rhs) { return lhs.first < rhs.first; });
 		} 
 
-		// Set mutFreqMAFs tuple values according to MAF values: MAF[0] = freq, MAF[1] = ID
-		mutFreqMAFs.insert(std::pair<int, std::tuple<double, slim_mutationid_t>>(
+		// Set mutFreqMAFs tuple values according to MAF values: MAF[0] = freq, MAF[1] = Mutation
+		mutFreqMAFs.insert(std::pair<int, std::tuple<double, Mutation*>>(
 			MAF.second->position_,
 			{
 				MAF.first,
-				MAF.second->mutation_id_
+				MAF.second
 			}
 		));
 
@@ -3046,10 +3051,24 @@ EidosValue_SP Species::ExecuteMethod_sharedMutFreqs(EidosGlobalStringID p_method
 		int a = pos1_ev->IntAtIndex(adj_index, nullptr);
 		int b = pos2_ev->IntAtIndex(adj_index, nullptr);
 
-		int mutIDA = std::get<1>(mutFreqMAFs[a]);
-		int mutIDB = std::get<1>(mutFreqMAFs[b]);
-		bool mutExistsA = mutIDA > -1;
-		bool mutExistsB = mutIDB > -1;
+		Mutation* mutA = std::get<1>(mutFreqMAFs[a]);
+		Mutation* mutB = std::get<1>(mutFreqMAFs[b]);
+
+		int mutBlockIDA = -1;
+		int mutBlockIDB = -1;
+
+		if (mutA != nullptr)
+		{
+			mutBlockIDA = mutA->BlockIndex();
+		}
+
+		if (mutB != nullptr)
+		{
+			mutBlockIDB = mutB->BlockIndex();
+		}
+		
+		bool mutExistsA = mutBlockIDA > -1;
+		bool mutExistsB = mutBlockIDB > -1;
 		double mutFreqA = std::get<0>(mutFreqMAFs[a]);
 		double mutFreqB = std::get<0>(mutFreqMAFs[b]);
 
@@ -3063,8 +3082,8 @@ EidosValue_SP Species::ExecuteMethod_sharedMutFreqs(EidosGlobalStringID p_method
 			continue;
 		}
 		
-		result[i] = mutIDA;
-		result[i+1] = mutIDB;
+		result[i] = mutA->mutation_id_;
+		result[i+1] = mutB->mutation_id_;
 		result[i+2] = mutFreqA;
 		result[i+3] = mutFreqB;
 
@@ -3077,7 +3096,7 @@ EidosValue_SP Species::ExecuteMethod_sharedMutFreqs(EidosGlobalStringID p_method
 		{
 			bool mut1Missing = (k - i) % 3 != 0;
 			bool mut2Missing = (k - i) % 2 == 0;
-			ABFreq = sharedMutFreq(genomes, mutIDA, mutIDB, mut1Missing, mut2Missing);		
+			ABFreq = sharedMutFreq(genomes, mutBlockIDA, mutBlockIDB, mut1Missing, mut2Missing);		
 			result[k] = ABFreq;
 		}
 
