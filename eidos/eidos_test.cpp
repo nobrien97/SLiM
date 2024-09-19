@@ -3,7 +3,7 @@
 //  Eidos
 //
 //  Created by Ben Haller on 4/7/15.
-//  Copyright (c) 2015-2023 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2015-2024 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -171,32 +171,32 @@ void EidosAssertScriptSuccess_LV(const std::string &p_script_string, std::initia
 
 void EidosAssertScriptSuccess_I(const std::string &p_script_string, int64_t p_integer)
 {
-	EidosAssertScriptSuccess(p_script_string, EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Int_singleton(p_integer)));
+	EidosAssertScriptSuccess(p_script_string, EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Int(p_integer)));
 }
 
 void EidosAssertScriptSuccess_IV(const std::string &p_script_string, std::initializer_list<int64_t> p_integer_vec)
 {
-	EidosAssertScriptSuccess(p_script_string, EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Int_vector(p_integer_vec)));
+	EidosAssertScriptSuccess(p_script_string, EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Int(p_integer_vec)));
 }
 
 void EidosAssertScriptSuccess_F(const std::string &p_script_string, double p_float)
 {
-	EidosAssertScriptSuccess(p_script_string, EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float_singleton(p_float)));
+	EidosAssertScriptSuccess(p_script_string, EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float(p_float)));
 }
 
 void EidosAssertScriptSuccess_FV(const std::string &p_script_string, std::initializer_list<double> p_float_vec)
 {
-	EidosAssertScriptSuccess(p_script_string, EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float_vector(p_float_vec)));
+	EidosAssertScriptSuccess(p_script_string, EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float(p_float_vec)));
 }
 
 void EidosAssertScriptSuccess_S(const std::string &p_script_string, const char *p_string)
 {
-	EidosAssertScriptSuccess(p_script_string, EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String_singleton(p_string)));
+	EidosAssertScriptSuccess(p_script_string, EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String(p_string)));
 }
 
 void EidosAssertScriptSuccess_SV(const std::string &p_script_string, std::initializer_list<const char *> p_string_vec)
 {
-	EidosAssertScriptSuccess(p_script_string, EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String_vector(p_string_vec)));
+	EidosAssertScriptSuccess(p_script_string, EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String(p_string_vec)));
 }
 
 // Instantiates and runs the script, and prints an error if the script does not cause an exception to be raised
@@ -318,6 +318,7 @@ int RunEidosTests(void)
 	free(temp_path_cstr);
 	
 	// Run tests
+	_RunInternalFilesystemTests();
 	_RunLiteralsIdentifiersAndTokenizationTests();
 	_RunSymbolsAndVariablesTests();
 	_RunParsingTests();
@@ -1389,11 +1390,260 @@ int RunEidosTests(void)
 	return (gEidosTestFailureCount > 0) ? EXIT_FAILURE : EXIT_SUCCESS;
 }
 
+#pragma mark internal filesystem tests
+void _RunInternalFilesystemTests(void)
+{
+	// test some of the core Eidos C++ filesystem functions directly for correct behavior
+	// the behaviors are quite different on Windows, so that is handled entirely separately
+#ifndef _WIN32
+	// Eidos_ResolvedPath(): look for replacement of a leading ~, pass-through of the rest
+	try {
+		std::string result = Eidos_ResolvedPath("foo/bar.baz");
+		if (result == "foo/bar.baz")
+			gEidosTestSuccessCount++;
+		else
+		{
+			gEidosTestFailureCount++;
+			std::cerr << "Eidos_ResolvedPath(\"foo/bar.baz\")" << " : " << EIDOS_OUTPUT_FAILURE_TAG << " : incorrect result " << result << std::endl;
+		}
+	} catch (...) {
+		gEidosTestFailureCount++;
+		std::cerr << "Eidos_ResolvedPath(\"foo/bar.baz\")" << " : " << EIDOS_OUTPUT_FAILURE_TAG << " : raise during execution" << std::endl;
+	}
+	
+	try {
+		std::string result = Eidos_ResolvedPath("~/foo/bar.baz");
+		if ((result.length() > 0) && (result[0] != '~') && Eidos_string_hasSuffix(result, "/foo/bar.baz"))
+			gEidosTestSuccessCount++;
+		else
+		{
+			gEidosTestFailureCount++;
+			std::cerr << "Eidos_ResolvedPath(\"~/foo/bar.baz\")" << " : " << EIDOS_OUTPUT_FAILURE_TAG << " : incorrect result " << result << std::endl;
+		}
+	} catch (...) {
+		gEidosTestFailureCount++;
+		std::cerr << "Eidos_ResolvedPath(\"~/foo/bar.baz\")" << " : " << EIDOS_OUTPUT_FAILURE_TAG << " : raise during execution" << std::endl;
+	}
+	
+	// Eidos_AbsolutePath(): the current working directory should be prepended
+	try {
+		std::string result = Eidos_AbsolutePath("foo/bar.baz");
+		if (Eidos_string_hasSuffix(result, "/foo/bar.baz"))
+			gEidosTestSuccessCount++;
+		else
+		{
+			gEidosTestFailureCount++;
+			std::cerr << "Eidos_AbsolutePath(\"foo/bar.baz\")" << " : " << EIDOS_OUTPUT_FAILURE_TAG << " : incorrect result " << result << std::endl;
+		}
+	} catch (...) {
+		gEidosTestFailureCount++;
+		std::cerr << "Eidos_AbsolutePath(\"foo/bar.baz\")" << " : " << EIDOS_OUTPUT_FAILURE_TAG << " : raise during execution" << std::endl;
+	}
+	
+	// Eidos_StripTrailingSlash(): remove a / at the end of a path, pass everything else through
+	try {
+		std::string result = Eidos_StripTrailingSlash("~/foo/foobar/");
+		if (result == "~/foo/foobar")
+			gEidosTestSuccessCount++;
+		else
+		{
+			gEidosTestFailureCount++;
+			std::cerr << "Eidos_StripTrailingSlash(\"~/foo/foobar/\")" << " : " << EIDOS_OUTPUT_FAILURE_TAG << " : incorrect result " << result << std::endl;
+		}
+	} catch (...) {
+		gEidosTestFailureCount++;
+		std::cerr << "Eidos_StripTrailingSlash(\"~/foo/foobar/\")" << " : " << EIDOS_OUTPUT_FAILURE_TAG << " : raise during execution" << std::endl;
+	}
+	
+	try {
+		std::string result = Eidos_StripTrailingSlash("~/foo/foobar");
+		if (result == "~/foo/foobar")
+			gEidosTestSuccessCount++;
+		else
+		{
+			gEidosTestFailureCount++;
+			std::cerr << "Eidos_StripTrailingSlash(\"~/foo/foobar\")" << " : " << EIDOS_OUTPUT_FAILURE_TAG << " : incorrect result " << result << std::endl;
+		}
+	} catch (...) {
+		gEidosTestFailureCount++;
+		std::cerr << "Eidos_StripTrailingSlash(\"~/foo/foobar\")" << " : " << EIDOS_OUTPUT_FAILURE_TAG << " : raise during execution" << std::endl;
+	}
+	
+	// Eidos_LastPathComponent(): extract the last component of the path using / as the separator
+	try {
+		std::string result = Eidos_LastPathComponent("foo/foobar/bar.baz");
+		if (result == "bar.baz")
+			gEidosTestSuccessCount++;
+		else
+		{
+			gEidosTestFailureCount++;
+			std::cerr << "Eidos_LastPathComponent(\"foo/foobar/bar.baz\")" << " : " << EIDOS_OUTPUT_FAILURE_TAG << " : incorrect result " << result << std::endl;
+		}
+	} catch (...) {
+		gEidosTestFailureCount++;
+		std::cerr << "Eidos_LastPathComponent(\"foo/foobar/bar.baz\")" << " : " << EIDOS_OUTPUT_FAILURE_TAG << " : raise during execution" << std::endl;
+	}
+	
+	try {
+		std::string result = Eidos_LastPathComponent("foo/foobar/");
+		if (result == "foobar")
+			gEidosTestSuccessCount++;
+		else
+		{
+			gEidosTestFailureCount++;
+			std::cerr << "Eidos_LastPathComponent(\"foo/foobar/\")" << " : " << EIDOS_OUTPUT_FAILURE_TAG << " : incorrect result " << result << std::endl;
+		}
+	} catch (...) {
+		gEidosTestFailureCount++;
+		std::cerr << "Eidos_LastPathComponent(\"foo/foobar/\")" << " : " << EIDOS_OUTPUT_FAILURE_TAG << " : raise during execution" << std::endl;
+	}
+#else
+	// Eidos_ResolvedPath(): on Windows this is not supported, and should raise if a leading ~ is present
+	try {
+		std::string result = Eidos_ResolvedPath("foo/bar.baz");
+		if (result == "foo/bar.baz")
+			gEidosTestSuccessCount++;
+		else
+		{
+			gEidosTestFailureCount++;
+			std::cerr << "Eidos_ResolvedPath(\"foo/bar.baz\")" << " : " << EIDOS_OUTPUT_FAILURE_TAG << " : incorrect result " << result << std::endl;
+		}
+	} catch (...) {
+		gEidosTestFailureCount++;
+		std::cerr << "Eidos_ResolvedPath(\"foo/bar.baz\")" << " : " << EIDOS_OUTPUT_FAILURE_TAG << " : raise during execution" << std::endl;
+	}
+	
+	try {
+		std::string result = Eidos_ResolvedPath("~/foo/bar.baz");
+		gEidosTestFailureCount++;
+		std::cerr << "Eidos_ResolvedPath(\"~/foo/bar.baz\")" << " : " << EIDOS_OUTPUT_FAILURE_TAG << " : incorrect result " << result << " (raise expected)" << std::endl;
+	} catch (...) {
+		gEidosTestSuccessCount++;
+	}
+	
+	// Eidos_AbsolutePath(): the current working directory should be prepended; it might end in \ or in /
+	try {
+		std::string result = Eidos_AbsolutePath("foo/bar.baz");
+		if ((Eidos_string_hasSuffix(result, "/foo/bar.baz")) || (Eidos_string_hasSuffix(result, "\\foo/bar.baz")))
+			gEidosTestSuccessCount++;
+		else
+		{
+			gEidosTestFailureCount++;
+			std::cerr << "Eidos_AbsolutePath(\"foo/bar.baz\")" << " : " << EIDOS_OUTPUT_FAILURE_TAG << " : incorrect result " << result << std::endl;
+		}
+	} catch (...) {
+		gEidosTestFailureCount++;
+		std::cerr << "Eidos_AbsolutePath(\"foo/bar.baz\")" << " : " << EIDOS_OUTPUT_FAILURE_TAG << " : raise during execution" << std::endl;
+	}
+	
+	// Eidos_StripTrailingSlash(): remove a / or \\ at the end of a path, pass everything else through
+	try {
+		std::string result = Eidos_StripTrailingSlash("~/foo/foobar/");
+		if (result == "~/foo/foobar")
+			gEidosTestSuccessCount++;
+		else
+		{
+			gEidosTestFailureCount++;
+			std::cerr << "Eidos_StripTrailingSlash(\"~/foo/foobar/\")" << " : " << EIDOS_OUTPUT_FAILURE_TAG << " : incorrect result " << result << std::endl;
+		}
+	} catch (...) {
+		gEidosTestFailureCount++;
+		std::cerr << "Eidos_StripTrailingSlash(\"~/foo/foobar/\")" << " : " << EIDOS_OUTPUT_FAILURE_TAG << " : raise during execution" << std::endl;
+	}
+	
+	try {
+		std::string result = Eidos_StripTrailingSlash("~\\foo\\foobar\\");
+		if (result == "~\\foo\\foobar")
+			gEidosTestSuccessCount++;
+		else
+		{
+			gEidosTestFailureCount++;
+			std::cerr << "Eidos_StripTrailingSlash(\"~\\foo\\foobar\\\")" << " : " << EIDOS_OUTPUT_FAILURE_TAG << " : incorrect result " << result << std::endl;
+		}
+	} catch (...) {
+		gEidosTestFailureCount++;
+		std::cerr << "Eidos_StripTrailingSlash(\"~\\foo\\foobar\\\")" << " : " << EIDOS_OUTPUT_FAILURE_TAG << " : raise during execution" << std::endl;
+	}
+	
+	try {
+		std::string result = Eidos_StripTrailingSlash("~/foo/foobar");
+		if (result == "~/foo/foobar")
+			gEidosTestSuccessCount++;
+		else
+		{
+			gEidosTestFailureCount++;
+			std::cerr << "Eidos_StripTrailingSlash(\"~/foo/foobar\")" << " : " << EIDOS_OUTPUT_FAILURE_TAG << " : incorrect result " << result << std::endl;
+		}
+	} catch (...) {
+		gEidosTestFailureCount++;
+		std::cerr << "Eidos_StripTrailingSlash(\"~/foo/foobar\")" << " : " << EIDOS_OUTPUT_FAILURE_TAG << " : raise during execution" << std::endl;
+	}
+	
+	// Eidos_LastPathComponent(): extract the last component of the path using / and \ as the separators
+	try {
+		std::string result = Eidos_LastPathComponent("foo/foobar/bar.baz");
+		if (result == "bar.baz")
+			gEidosTestSuccessCount++;
+		else
+		{
+			gEidosTestFailureCount++;
+			std::cerr << "Eidos_LastPathComponent(\"foo/foobar/bar.baz\")" << " : " << EIDOS_OUTPUT_FAILURE_TAG << " : incorrect result " << result << std::endl;
+		}
+	} catch (...) {
+		gEidosTestFailureCount++;
+		std::cerr << "Eidos_LastPathComponent(\"foo/foobar/bar.baz\")" << " : " << EIDOS_OUTPUT_FAILURE_TAG << " : raise during execution" << std::endl;
+	}
+	
+	try {
+		std::string result = Eidos_LastPathComponent("foo\\foobar\\bar.baz");
+		if (result == "bar.baz")
+			gEidosTestSuccessCount++;
+		else
+		{
+			gEidosTestFailureCount++;
+			std::cerr << "Eidos_LastPathComponent(\"foo\\foobar\\bar.baz\")" << " : " << EIDOS_OUTPUT_FAILURE_TAG << " : incorrect result " << result << std::endl;
+		}
+	} catch (...) {
+		gEidosTestFailureCount++;
+		std::cerr << "Eidos_LastPathComponent(\"foo\\foobar\\bar.baz\")" << " : " << EIDOS_OUTPUT_FAILURE_TAG << " : raise during execution" << std::endl;
+	}
+
+	try {
+		std::string result = Eidos_LastPathComponent("foo/foobar/");
+		if (result == "foobar")
+			gEidosTestSuccessCount++;
+		else
+		{
+			gEidosTestFailureCount++;
+			std::cerr << "Eidos_LastPathComponent(\"foo/foobar/\")" << " : " << EIDOS_OUTPUT_FAILURE_TAG << " : incorrect result " << result << std::endl;
+		}
+	} catch (...) {
+		gEidosTestFailureCount++;
+		std::cerr << "Eidos_LastPathComponent(\"foo/foobar/\")" << " : " << EIDOS_OUTPUT_FAILURE_TAG << " : raise during execution" << std::endl;
+	}
+
+	try {
+		std::string result = Eidos_LastPathComponent("foo\\foobar\\");
+		if (result == "foobar")
+			gEidosTestSuccessCount++;
+		else
+		{
+			gEidosTestFailureCount++;
+			std::cerr << "Eidos_LastPathComponent(\"foo\\foobar\\\")" << " : " << EIDOS_OUTPUT_FAILURE_TAG << " : incorrect result " << result << std::endl;
+		}
+	} catch (...) {
+		gEidosTestFailureCount++;
+		std::cerr << "Eidos_LastPathComponent(\"foo\\foobar\\\")" << " : " << EIDOS_OUTPUT_FAILURE_TAG << " : raise during execution" << std::endl;
+	}
+#endif
+}
+
 #pragma mark literals & identifiers
 void _RunLiteralsIdentifiersAndTokenizationTests(void)
 {
 	// test literals, built-in identifiers, and tokenization
 	// NOLINTBEGIN(*-raw-string-literal) : these strings are fine
+	EidosAssertScriptSuccess_VOID(";");
 	EidosAssertScriptSuccess_I("3;", 3);
 	EidosAssertScriptSuccess_I("3e2;", 300);
 	EidosAssertScriptSuccess_F("3.1;", 3.1);
@@ -1467,6 +1717,12 @@ void _RunLiteralsIdentifiersAndTokenizationTests(void)
 	EidosAssertScriptRaise("PI = PI * 2.0;", 3, "is a constant");
 	EidosAssertScriptRaise("PI = PI / 2;", 3, "is a constant");
 	EidosAssertScriptRaise("PI = PI / 2.0;", 3, "is a constant");
+	EidosAssertScriptRaise("PI = PI % 2;", 3, "is a constant");
+	EidosAssertScriptRaise("PI = PI % 2.0;", 3, "is a constant");
+	EidosAssertScriptRaise("PI = PI ^ 2;", 3, "is a constant");
+	EidosAssertScriptRaise("PI = PI ^ 2.0;", 3, "is a constant");
+	EidosAssertScriptRaise("PI = c(PI, 2);", 3, "is a constant");
+	EidosAssertScriptRaise("PI = c(PI, 2.0);", 3, "is a constant");
 	EidosAssertScriptRaise("for (PI in c(3, 4)) 5;", 5, "is a constant");
 	EidosAssertScriptRaise("for (PI in c(3.0, 4.0)) 5;", 5, "is a constant");
 	
@@ -1484,6 +1740,12 @@ void _RunLiteralsIdentifiersAndTokenizationTests(void)
 	EidosAssertScriptRaise("defineConstant('Q', 7); Q = Q * 2.0;", 26, "is a constant");
 	EidosAssertScriptRaise("defineConstant('Q', 7); Q = Q / 2;", 26, "is a constant");
 	EidosAssertScriptRaise("defineConstant('Q', 7); Q = Q / 2.0;", 26, "is a constant");
+	EidosAssertScriptRaise("defineConstant('Q', 7); Q = Q % 2;", 26, "is a constant");
+	EidosAssertScriptRaise("defineConstant('Q', 7); Q = Q % 2.0;", 26, "is a constant");
+	EidosAssertScriptRaise("defineConstant('Q', 7); Q = Q ^ 2;", 26, "is a constant");
+	EidosAssertScriptRaise("defineConstant('Q', 7); Q = Q ^ 2.0;", 26, "is a constant");
+	EidosAssertScriptRaise("defineConstant('Q', 7); Q = c(Q, 2);", 26, "is a constant");
+	EidosAssertScriptRaise("defineConstant('Q', 7); Q = c(Q, 2.0);", 26, "is a constant");
 	EidosAssertScriptRaise("defineConstant('Q', 7); for (Q in c(3, 4)) 5;", 29, "is a constant");
 	EidosAssertScriptRaise("defineConstant('Q', 7); for (Q in c(3.0, 4.0)) 5;", 29, "is a constant");
 }
@@ -1526,6 +1788,35 @@ void _RunSymbolsAndVariablesTests(void)
 	EidosAssertScriptSuccess_I("\u1F603e = 3; \u1F603e;", 3);
 	EidosAssertScriptSuccess_I("e\u1F603 = 3; e\u1F603;", 3);
 	EidosAssertScriptSuccess_I("e\u1F603\u1F603e = 3; e\u1F603\u1F603e;", 3);
+	
+	// test defineGlobal() and defineConstant() for correctly checking identifier syntax
+	EidosAssertScriptSuccess_I("defineConstant('Q', 7); Q;", 7);
+	EidosAssertScriptSuccess_I("defineConstant('_Qixx_14850_', 7); _Qixx_14850_;", 7);
+	EidosAssertScriptRaise("defineConstant('_Qixx 14850_', 7);", 0, "valid Eidos identifier");
+	EidosAssertScriptRaise("defineConstant('_Qixx.14850_', 7);", 0, "valid Eidos identifier");
+	
+	EidosAssertScriptSuccess_I("defineConstant('\u00E9', 3); \u00E9;", 3);
+	EidosAssertScriptSuccess_I("defineConstant('\u00E9e', 3); \u00E9e;", 3);
+	EidosAssertScriptSuccess_I("defineConstant('e\u00E9', 3); e\u00E9;", 3);
+	EidosAssertScriptSuccess_I("defineConstant('e\u00E9\u00E9e', 3); e\u00E9\u00E9e;", 3);
+	EidosAssertScriptSuccess_I("defineConstant('\u1F603', 3); \u1F603;", 3);
+	EidosAssertScriptSuccess_I("defineConstant('\u1F603e', 3); \u1F603e;", 3);
+	EidosAssertScriptSuccess_I("defineConstant('e\u1F603', 3); e\u1F603;", 3);
+	EidosAssertScriptSuccess_I("defineConstant('e\u1F603\u1F603e', 3); e\u1F603\u1F603e;", 3);
+	
+	EidosAssertScriptSuccess_I("defineGlobal('Q', 7); Q;", 7);
+	EidosAssertScriptSuccess_I("defineGlobal('_Qixx_14850_', 7); _Qixx_14850_;", 7);
+	EidosAssertScriptRaise("defineGlobal('_Qixx 14850_', 7);", 0, "valid Eidos identifier");
+	EidosAssertScriptRaise("defineGlobal('_Qixx.14850_', 7);", 0, "valid Eidos identifier");
+	
+	EidosAssertScriptSuccess_I("defineGlobal('\u00E9', 3); \u00E9;", 3);
+	EidosAssertScriptSuccess_I("defineGlobal('\u00E9e', 3); \u00E9e;", 3);
+	EidosAssertScriptSuccess_I("defineGlobal('e\u00E9', 3); e\u00E9;", 3);
+	EidosAssertScriptSuccess_I("defineGlobal('e\u00E9\u00E9e', 3); e\u00E9\u00E9e;", 3);
+	EidosAssertScriptSuccess_I("defineGlobal('\u1F603', 3); \u1F603;", 3);
+	EidosAssertScriptSuccess_I("defineGlobal('\u1F603e', 3); \u1F603e;", 3);
+	EidosAssertScriptSuccess_I("defineGlobal('e\u1F603', 3); e\u1F603;", 3);
+	EidosAssertScriptSuccess_I("defineGlobal('e\u1F603\u1F603e', 3); e\u1F603\u1F603e;", 3);
 }
 
 #pragma mark parsing
@@ -1567,6 +1858,7 @@ void _RunFunctionDispatchTests(void)
 	EidosAssertScriptSuccess_I("abs(-10);", 10);
 	EidosAssertScriptRaise("abs();", 0, "missing required argument x");
 	EidosAssertScriptRaise("abs(-10, -10);", 0, "too many arguments supplied");
+	EidosAssertScriptRaise("abs(x=-10, -10);", 0, "too many arguments supplied");
 	EidosAssertScriptSuccess_I("abs(x=-10);", 10);
 	EidosAssertScriptRaise("abs(y=-10);", 0, "skipped over required argument");
 	EidosAssertScriptRaise("abs(x=-10, x=-10);", 0, "supplied more than once");
@@ -1575,6 +1867,7 @@ void _RunFunctionDispatchTests(void)
 	
 	EidosAssertScriptSuccess_I("integerDiv(6, 3);", 2);
 	EidosAssertScriptRaise("integerDiv(6, 3, 3);", 0, "too many arguments supplied");
+	EidosAssertScriptRaise("integerDiv(x=6, y=3, 3);", 0, "too many arguments supplied");
 	EidosAssertScriptRaise("integerDiv(6);", 0, "missing required argument y");
 	EidosAssertScriptSuccess_I("integerDiv(x=6, y=3);", 2);
 	EidosAssertScriptRaise("integerDiv(y=6, 3);", 0, "skipped over required argument");

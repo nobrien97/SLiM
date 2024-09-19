@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 8/18/2020.
-//  Copyright (c) 2020-2023 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2020-2024 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -27,6 +27,9 @@
 #include <QGuiApplication>
 #include <QDebug>
 
+#include <string>
+#include <vector>
+
 #include "QtSLiMWindow.h"
 #include "subpopulation.h"
 #include "mutation_type.h"
@@ -37,13 +40,19 @@ QtSLiMGraphView_2DSampleSFS::QtSLiMGraphView_2DSampleSFS(QWidget *p_parent, QtSL
     histogramBinCount_ = 21;        // this is the genome sample size + 1
     allowBinCountRescale_ = false;
     
-    xAxisMin_ = -1;                 // zero is included, unlike the 1D plot
-    xAxisMax_ = histogramBinCount_ - 1;
+    x0_ = -1;                 // zero is included, unlike the 1D plot
+    x1_ = histogramBinCount_ - 1;
+    
+    xAxisMin_ = x0_;
+    xAxisMax_ = x1_;
     xAxisHistogramStyle_ = true;
     xAxisTickValuePrecision_ = 0;
     
-    yAxisMin_ = -1;                 // zero is included, unlike the 1D plot
-    yAxisMax_ = histogramBinCount_ - 1;
+    y0_ = -1;                 // zero is included, unlike the 1D plot
+    y1_ = histogramBinCount_ - 1;
+    
+    yAxisMin_ = y0_;
+    yAxisMax_ = y1_;
     yAxisHistogramStyle_ = true;
     yAxisTickValuePrecision_ = 0;
     
@@ -95,6 +104,8 @@ void QtSLiMGraphView_2DSampleSFS::addedToWindow(void)
 
 QtSLiMGraphView_2DSampleSFS::~QtSLiMGraphView_2DSampleSFS()
 {
+    // We are responsible for our own destruction
+    QtSLiMGraphView_2DSampleSFS::invalidateCachedData();
 }
 
 void QtSLiMGraphView_2DSampleSFS::subpopulation1PopupChanged(int /* index */)
@@ -304,6 +315,8 @@ void QtSLiMGraphView_2DSampleSFS::changeSampleSize(void)
             histogramBinCount_ = newSampleSize + 1;
             xAxisMax_ = histogramBinCount_ - 1;
             yAxisMax_ = histogramBinCount_ - 1;
+            x1_ = xAxisMax_;               // the same as xAxisMax_, for base plots
+            y1_ = yAxisMax_;               // the same as yAxisMax_, for base plots
             invalidateCachedData();
             update();
         }

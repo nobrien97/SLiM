@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 8/8/2020.
-//  Copyright (c) 2020-2023 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2020-2024 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -25,6 +25,9 @@
 #include "subpopulation.h"
 #include "individual.h"
 
+#include <utility>
+#include <string>
+
 #include <QPainterPath>
 
 QtSLiMGraphView_SubpopFitnessDists::QtSLiMGraphView_SubpopFitnessDists(QWidget *p_parent, QtSLiMWindow *controller) : QtSLiMGraphView(p_parent, controller)
@@ -32,7 +35,9 @@ QtSLiMGraphView_SubpopFitnessDists::QtSLiMGraphView_SubpopFitnessDists(QWidget *
     histogramBinCount_ = 50;
     allowBinCountRescale_ = true;
     
-    xAxisMax_ = 2.0;
+    x1_ = 2.0;
+    
+    xAxisMax_ = x1_;
     xAxisMajorTickInterval_ = 1.0;
     xAxisMinorTickInterval_ = 0.2;
     xAxisMajorTickModulus_ = 5;

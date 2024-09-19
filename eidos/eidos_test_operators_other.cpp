@@ -3,7 +3,7 @@
 //  Eidos
 //
 //  Created by Ben Haller on 7/11/20.
-//  Copyright (c) 2020-2023 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2020-2024 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -34,18 +34,18 @@ void _RunOperatorSubsetTests(void)
 	EidosAssertScriptSuccess_IV("x = 1:5; x[2:3];", {3, 4});
 	EidosAssertScriptSuccess_IV("x = 1:5; x[c(0, 2, 4)];", {1, 3, 5});
 	EidosAssertScriptSuccess_IV("x = 1:5; x[0:4];", {1, 2, 3, 4, 5});
-	EidosAssertScriptSuccess("x = 1:5; x[float(0)];", gStaticEidosValue_Integer_ZeroVec);
-	EidosAssertScriptSuccess_I("x = 1:5; x[2.0];", 3);
-	EidosAssertScriptSuccess_IV("x = 1:5; x[2.0:3];", {3, 4});
-	EidosAssertScriptSuccess_IV("x = 1:5; x[c(0.0, 2, 4)];", {1, 3, 5});
-	EidosAssertScriptSuccess_IV("x = 1:5; x[0.0:4];", {1, 2, 3, 4, 5});
+	EidosAssertScriptRaise("x = 1:5; x[float(0)];", 10, "float indices");
+	EidosAssertScriptRaise("x = 1:5; x[2.0];", 10, "float indices");
+	EidosAssertScriptRaise("x = 1:5; x[2.0:3];", 10, "float indices");
+	EidosAssertScriptRaise("x = 1:5; x[c(0.0, 2, 4)];", 10, "float indices");
+	EidosAssertScriptRaise("x = 1:5; x[0.0:4];", 10, "float indices");
 	EidosAssertScriptRaise("x = 1:5; x[c(7,8)];", 10, "out-of-range index");
 	EidosAssertScriptRaise("x = 1:5; x[logical(0)];", 10, "operator requires that the size()");
 	EidosAssertScriptRaise("x = 1:5; x[T];", 10, "operator requires that the size()");
 	EidosAssertScriptRaise("x = 1:5; x[c(T, T)];", 10, "operator requires that the size()");
 	EidosAssertScriptRaise("x = 1:5; x[c(T, F, T)];", 10, "operator requires that the size()");
-	EidosAssertScriptRaise("x = 1:5; x[NAN];", 10, "cannot be converted");
-	EidosAssertScriptRaise("x = 1:5; x[c(0.0, 2, NAN)];", 10, "cannot be converted");
+	EidosAssertScriptRaise("x = 1:5; x[NAN];", 10, "float indices");
+	EidosAssertScriptRaise("x = 1:5; x[c(0.0, 2, NAN)];", 10, "float indices");
 	EidosAssertScriptSuccess_IV("x = 1:5; x[c(T, F, T, F, T)];", {1, 3, 5});
 	EidosAssertScriptSuccess_IV("x = 1:5; x[c(T, T, T, T, T)];", {1, 2, 3, 4, 5});
 	EidosAssertScriptSuccess("x = 1:5; x[c(F, F, F, F, F)];", gStaticEidosValue_Integer_ZeroVec);
@@ -56,28 +56,18 @@ void _RunOperatorSubsetTests(void)
 	
 	EidosAssertScriptSuccess_LV("x = c(T,T,F,T,F); x[c(2,3)];", {false, true});
 	EidosAssertScriptRaise("x = c(T,T,F,T,F); x[c(2,3,7)];", 19, "out-of-range index");
-	EidosAssertScriptSuccess_LV("x = c(T,T,F,T,F); x[c(2.0,3)];", {false, true});
-	EidosAssertScriptRaise("x = c(T,T,F,T,F); x[c(2.0,3,7)];", 19, "out-of-range index");
 	
 	EidosAssertScriptSuccess_IV("x = 1:5; x[c(2,3)];", {3, 4});
 	EidosAssertScriptRaise("x = 1:5; x[c(2,3,7)];", 10, "out-of-range index");
-	EidosAssertScriptSuccess_IV("x = 1:5; x[c(2.0,3)];", {3, 4});
-	EidosAssertScriptRaise("x = 1:5; x[c(2.0,3,7)];", 10, "out-of-range index");
 	
 	EidosAssertScriptSuccess_FV("x = 1.0:5; x[c(2,3)];", {3.0, 4.0});
 	EidosAssertScriptRaise("x = 1.0:5; x[c(2,3,7)];", 12, "out-of-range index");
-	EidosAssertScriptSuccess_FV("x = 1.0:5; x[c(2.0,3)];", {3.0, 4.0});
-	EidosAssertScriptRaise("x = 1.0:5; x[c(2.0,3,7)];", 12, "out-of-range index");
 	
 	EidosAssertScriptSuccess_SV("x = c('foo', 'bar', 'foobaz', 'baz', 'xyzzy'); x[c(2,3)];", {"foobaz", "baz"});
 	EidosAssertScriptRaise("x = c('foo', 'bar', 'foobaz', 'baz', 'xyzzy'); x[c(2,3,7)];", 48, "out-of-range index");
-	EidosAssertScriptSuccess_SV("x = c('foo', 'bar', 'foobaz', 'baz', 'xyzzy'); x[c(2.0,3)];", {"foobaz", "baz"});
-	EidosAssertScriptRaise("x = c('foo', 'bar', 'foobaz', 'baz', 'xyzzy'); x[c(2.0,3,7)];", 48, "out-of-range index");
 	
 	EidosAssertScriptSuccess_IV("x = c(_Test(1), _Test(2), _Test(3), _Test(4), _Test(5)); x = x[c(2,3)]; x._yolk;", {3, 4});
 	EidosAssertScriptRaise("x = c(_Test(1), _Test(2), _Test(3), _Test(4), _Test(5)); x = x[c(2,3,7)]; x._yolk;", 62, "out-of-range index");
-	EidosAssertScriptSuccess_IV("x = c(_Test(1), _Test(2), _Test(3), _Test(4), _Test(5)); x = x[c(2.0,3)]; x._yolk;", {3, 4});
-	EidosAssertScriptRaise("x = c(_Test(1), _Test(2), _Test(3), _Test(4), _Test(5)); x = x[c(2.0,3,7)]; x._yolk;", 62, "out-of-range index");
 	
 	EidosAssertScriptSuccess_I("x = 5; x[T];", 5);
 	EidosAssertScriptSuccess_IV("x = 5; x[F];", {});
@@ -86,10 +76,6 @@ void _RunOperatorSubsetTests(void)
 	EidosAssertScriptRaise("x = 5; x[1];", 8, "out of range");
 	EidosAssertScriptRaise("x = 5; x[-1];", 8, "out of range");
 	EidosAssertScriptSuccess_IV("x = 5; x[integer(0)];", {});
-	EidosAssertScriptSuccess_I("x = 5; x[0.0];", 5);
-	EidosAssertScriptRaise("x = 5; x[1.0];", 8, "out-of-range");
-	EidosAssertScriptRaise("x = 5; x[-1.0];", 8, "out-of-range");
-	EidosAssertScriptSuccess_IV("x = 5; x[float(0)];", {});
 	
 	EidosAssertScriptRaise("x = 5:9; x[matrix(0)];", 10, "matrix or array index operand is not supported");
 	EidosAssertScriptRaise("x = 5:9; x[matrix(0:2)];", 10, "matrix or array index operand is not supported");
@@ -214,10 +200,11 @@ void _RunOperatorAssignTests(void)
 	EidosAssertScriptRaise("x = 1:5; x[c(T,T,F,T,F,T)] = 7:9; x;", 10, "must match the size()");
 	EidosAssertScriptSuccess_IV("x = 1:5; x[c(2,3)] = c(9, 5); x;", {1, 2, 9, 5, 5});
 	EidosAssertScriptRaise("x = 1:5; x[c(7,8)] = 7; x;", 10, "out-of-range index");
-	EidosAssertScriptSuccess_IV("x = 1:5; x[c(2.0,3)] = c(9, 5); x;", {1, 2, 9, 5, 5});
-	EidosAssertScriptRaise("x = 1:5; x[c(7.0,8)] = 7; x;", 10, "out-of-range index");
-	EidosAssertScriptRaise("x = 1:5; x[NAN] = 3;", 10, "cannot be converted");
-	EidosAssertScriptRaise("x = 1:5; x[c(0.0, 2, NAN)] = c(5, 7, 3);", 10, "cannot be converted");
+	
+	EidosAssertScriptSuccess_I("x = _Test(9); x = _Test(7); x._yolk;", 7);
+	EidosAssertScriptSuccess_I("x = _Test(9); x[0] = _Test(7); x._yolk;", 7);
+	EidosAssertScriptSuccess_IV("x = c(_Test(9), _Test(5)); x[0] = _Test(7); x._yolk;", {7, 5});
+	EidosAssertScriptSuccess_IV("x = c(_Test(9), _Test(5)); x[1] = _Test(7); x._yolk;", {9, 7});
 	
 	EidosAssertScriptRaise("x = 5:9; x[matrix(0)] = 3;", 10, "matrix or array index operand is not supported");
 	EidosAssertScriptRaise("x = 5:9; x[matrix(0:2)] = 3;", 10, "matrix or array index operand is not supported");
@@ -237,10 +224,10 @@ void _RunOperatorAssignTests(void)
 	EidosAssertScriptSuccess_L("x = matrix(5:9); x[c(T,F,T,T,F)] = 3; identical(x, matrix(c(3,6,3,3,9)));", true);
 	
 	// operator = (especially in conjunction with matrix/array-style subsetting with operator [])
-	EidosAssertScriptSuccess_VOID("NULL[logical(0)] = NULL;");			// technically legal, as no assignment is done
-	EidosAssertScriptRaise("NULL[logical(0),] = NULL;", 4, "too many subset arguments");
-	EidosAssertScriptRaise("NULL[logical(0),logical(0)] = NULL;", 4, "too many subset arguments");
-	EidosAssertScriptRaise("NULL[,] = NULL;", 4, "too many subset arguments");
+	EidosAssertScriptRaise("NULL[logical(0)] = NULL;", 17, "cannot be redefined because it is a constant");
+	EidosAssertScriptRaise("NULL[logical(0),] = NULL;", 18, "cannot be redefined because it is a constant");
+	EidosAssertScriptRaise("NULL[logical(0),logical(0)] = NULL;", 28, "cannot be redefined because it is a constant");
+	EidosAssertScriptRaise("NULL[,] = NULL;", 8, "cannot be redefined because it is a constant");
 	EidosAssertScriptSuccess_VOID("x = NULL; x[logical(0)] = NULL;");	// technically legal, as no assignment is done
 	EidosAssertScriptRaise("x = NULL; x[logical(0),] = NULL;", 11, "too many subset arguments");
 	EidosAssertScriptRaise("x = NULL; x[logical(0),logical(0)] = NULL;", 11, "too many subset arguments");
@@ -425,6 +412,32 @@ void _RunOperatorAssignTests(void)
 	EidosAssertScriptSuccess_FV("x = 5.0:6.0; x = x ^ c(2,3); x;", {25.0, 216.0});
 	EidosAssertScriptRaise("x = 5.0:7.0; x = x ^ (3.0:4.0); x;", 19, "operator requires that either");
 	EidosAssertScriptRaise("x = 5.0:6.0; x = x ^ (3.0:5.0); x;", 19, "operator requires that either");
+	
+	// scoped compound assignment (see https://github.com/MesserLab/SLiM/issues/430)
+	EidosAssertScriptSuccess_I("function (void)mod(void) { x = x + 1; } x = 1; mod(); x;", 1);
+	EidosAssertScriptSuccess_F("function (void)mod(void) { x = x + 1; } x = 1.0; mod(); x;", 1.0);
+	EidosAssertScriptSuccess_I("function (void)mod(void) { defineGlobal('x', x + 1); } x = 1; mod(); x;", 2);
+	EidosAssertScriptSuccess_F("function (void)mod(void) { defineGlobal('x', x + 1); } x = 1.0; mod(); x;", 2.0);
+	
+	EidosAssertScriptSuccess_I("function (void)mod(void) { x = x - 1; } x = 1; mod(); x;", 1);
+	EidosAssertScriptSuccess_F("function (void)mod(void) { x = x - 1; } x = 1.0; mod(); x;", 1.0);
+	EidosAssertScriptSuccess_I("function (void)mod(void) { defineGlobal('x', x - 1); } x = 1; mod(); x;", 0);
+	EidosAssertScriptSuccess_F("function (void)mod(void) { defineGlobal('x', x - 1); } x = 1.0; mod(); x;", 0.0);
+	
+	EidosAssertScriptSuccess_I("function (void)mod(void) { x = c(x, 2); } x = 1; mod(); x;", 1);
+	EidosAssertScriptSuccess_F("function (void)mod(void) { x = c(x, 2); } x = 1.0; mod(); x;", 1.0);
+	EidosAssertScriptSuccess_IV("function (void)mod(void) { defineGlobal('x', c(x, 2)); } x = 1; mod(); x;", {1, 2});
+	EidosAssertScriptSuccess_FV("function (void)mod(void) { defineGlobal('x', c(x, 2)); } x = 1.0; mod(); x;", {1.0, 2.0});
+	
+	EidosAssertScriptSuccess_I("function (void)mod(void) { x = cbind(x, 2); } x = 1; mod(); x;", 1);
+	EidosAssertScriptSuccess_F("function (void)mod(void) { x = cbind(x, 2.0); } x = 1.0; mod(); x;", 1.0);
+	EidosAssertScriptSuccess_L("function (void)mod(void) { defineGlobal('x', cbind(x, 2)); } x = 1; mod(); identical(x, cbind(1, 2));", true);
+	EidosAssertScriptSuccess_L("function (void)mod(void) { defineGlobal('x', cbind(x, 2.0)); } x = 1.0; mod(); identical(x, cbind(1.0, 2.0));", true);
+	
+	EidosAssertScriptSuccess_I("function (void)mod(void) { x = rbind(x, 2); } x = 1; mod(); x;", 1);
+	EidosAssertScriptSuccess_F("function (void)mod(void) { x = rbind(x, 2.0); } x = 1.0; mod(); x;", 1.0);
+	EidosAssertScriptSuccess_L("function (void)mod(void) { defineGlobal('x', rbind(x, 2)); } x = 1; mod(); identical(x, rbind(1, 2));", true);
+	EidosAssertScriptSuccess_L("function (void)mod(void) { defineGlobal('x', rbind(x, 2.0)); } x = 1.0; mod(); identical(x, rbind(1.0, 2.0));", true);
 	
 #if EIDOS_HAS_OVERFLOW_BUILTINS
 	EidosAssertScriptRaise("x = 5e18; x = x + 5e18;", 16, "overflow with the binary");
@@ -827,10 +840,15 @@ void _RunKeywordForInTests(void)
 	EidosAssertScriptSuccess("x=0; for (y in float(0)) x=x+1; x;", gStaticEidosValue_Integer0);
 	EidosAssertScriptSuccess_I("x=0; for (y in 33) x=x+y; x;", 33);
 	EidosAssertScriptSuccess("x=0; for (y in 33) x=x+1; x;", gStaticEidosValue_Integer1);
+	EidosAssertScriptSuccess_I("x=0; for (y in 0:0) x=x+1; x;", 1);
+	EidosAssertScriptSuccess_I("x=0; for (y in 0:1) x=x+1; x;", 2);
+	EidosAssertScriptSuccess_I("x=0; for (y in 1:0) x=x+1; x;", 2);
+	EidosAssertScriptSuccess_I("x=0; for (y in 0:4) x=x+1; x;", 5);
+	EidosAssertScriptSuccess_I("x=0; for (y in 4:0) x=x+1; x;", 5);
 	EidosAssertScriptSuccess_I("x=0; for (y in 1:10) x=x+y; x;", 55);
 	EidosAssertScriptSuccess_I("x=0; for (y in 1:10) x=x+1; x;", 10);
-	EidosAssertScriptSuccess_I("x=0; for (y in 1:10) { x=x+y; y = 7; } x;", 55);
-	EidosAssertScriptSuccess_I("x=0; for (y in 1:10) { x=x+1; y = 7; } x;", 10);
+	EidosAssertScriptRaise("x=0; for (y in 1:10) { x=x+y; y = 7; } x;", 32, "cannot be redefined");
+	EidosAssertScriptRaise("x=0; for (y in 1:10) { x=x+1; y = 7; } x;", 32, "cannot be redefined");
 	EidosAssertScriptSuccess_I("x=0; for (y in 10:1) x=x+y; x;", 55);
 	EidosAssertScriptSuccess_I("x=0; for (y in 10:1) x=x+1; x;", 10);
 	EidosAssertScriptSuccess_F("x=0; for (y in 1.0:10) x=x+y; x;", 55.0);
@@ -842,7 +860,10 @@ void _RunKeywordForInTests(void)
 	EidosAssertScriptSuccess_I("x=0; for (y in _Test(7)) x=x+y._yolk; x;", 7);
 	EidosAssertScriptSuccess_I("x=0; for (y in rep(_Test(7),3)) x=x+y._yolk; x;", 21);
 	EidosAssertScriptRaise("x=0; y=0:2; for (y[0] in 2:4) x=x+sum(y); x;", 18, "unexpected token");	// lvalue must be an identifier, at present
+	EidosAssertScriptRaise("x=0; y=0:2; for (y.z in 2:4) x=x+sum(y); x;", 18, "unexpected token");	// lvalue must be an identifier, at present
 	EidosAssertScriptRaise("x=0; for (y in NULL) x;", 5, "does not allow NULL");
+	EidosAssertScriptSuccess_I("x=0; q=integer(0); for (y in seqAlong(q)) x=x+1; x;", 0);
+	EidosAssertScriptSuccess_I("x=0; q=float(0); for (y in seqAlong(q)) x=x+1; x;", 0);
 	EidosAssertScriptSuccess_I("x=0; q=11:20; for (y in seqAlong(q)) x=x+y; x;", 45);
 	EidosAssertScriptSuccess_I("x=0; q=11:20; for (y in seqAlong(q)) x=x+1; x;", 10);
 	EidosAssertScriptRaise("x=0; q=11:20; for (y in seqAlong(q, 5)) x=x+y; x;", 24, "too many arguments supplied");
@@ -872,6 +893,29 @@ void _RunKeywordForInTests(void)
 	EidosAssertScriptRaise("for (i in matrix(1:3):matrix(5:7)) i;", 21, "must have size() == 1");
 	EidosAssertScriptSuccess_I("x = 0; for (i in seqAlong(matrix(1))) x=x+i; x;", 0);
 	EidosAssertScriptSuccess_I("x = 0; for (i in seqAlong(matrix(1:3))) x=x+i; x;", 3);
+	
+	// protection against changing loop index variables
+	EidosAssertScriptRaise("for (x in 1:10) x = 5;", 18, "cannot be redefined");
+	EidosAssertScriptRaise("for (x in 1:10) x[0] = 5;", 21, "cannot be redefined");
+	EidosAssertScriptRaise("for (x in 1:10) x = c(x, 5);", 18, "cannot be redefined");
+	EidosAssertScriptRaise("for (x in 1:10) x = x + 1;", 18, "cannot be redefined");
+	EidosAssertScriptRaise("for (x in 1:10) defineGlobal('x', 75);", 16, "cannot be redefined");
+	EidosAssertScriptRaise("for (x in 1:10) for (x in 2:5) y = 1;", 21, "cannot be redefined");
+	
+	// interaction between the loop index variable and outside code
+	EidosAssertScriptSuccess_I("x=0; y=100; for (y in 1:10) x=x+y; x;", 55);
+	EidosAssertScriptSuccess_I("x=0; y=10:20; for (y in 1:10) x=x+y; x;", 55);
+	EidosAssertScriptSuccess_I("x=0; for (y in 1:10) x=x+y; y=100; x;", 55);
+	EidosAssertScriptSuccess_L("x=0; for (y in 1:10) x=x+y; y==10;", true);
+	EidosAssertScriptRaise("x=0; defineConstant('y', 100); for (y in 1:10) x=x+y; x;", 36, "cannot be redefined");
+	EidosAssertScriptSuccess_I("x=0; defineGlobal('y', 100); for (y in 1:10) x=x+y; x;", 55);
+	EidosAssertScriptSuccess_I("function (integer$)foo(integer$ i) { return i+1; } x=0; for (i in 1:5) x = x + foo(i); x;", 20);
+	
+	// multiple 'in' clauses
+	EidosAssertScriptSuccess_L("x = 0; y = 0; for (i in 1:10, j in 11:20) { x=x+i; y=y+j; } ((x == 55) & (y == 155));", true);
+	EidosAssertScriptSuccess_L("x = 0; y = 0; for (i in integer(0), j in float(0)) { x=x+i; y=y+j; } ((x == 0) & (y == 0));", true);
+	EidosAssertScriptRaise("x = 0; y = 0; for (i in 1:10, j in 11:21) ;", 14, "same number of iterations");
+	EidosAssertScriptSuccess_L("for (i in 1:3, j in c(_Test(1), _Test(2), _Test(3))) ; T;", true);
 }
 
 #pragma mark next

@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 2/22/2020.
-//  Copyright (c) 2020-2023 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2020-2024 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -30,6 +30,12 @@
 #include <QtGlobal>
 #include <QWindow>
 #include <QDebug>
+
+#include <algorithm>
+#include <utility>
+#include <string>
+#include <vector>
+#include <map>
 
 #include "QtSLiMWindow.h"
 #include "QtSLiMExtras.h"
@@ -201,8 +207,6 @@ static QImage imageForMutationOrInteractionType(MutationType *mut_type, Interact
     QPointF min_label_point = painter.transform().map(QPointF(bounds.x() + 7 - min_label_halfwidth, label_y));
     QPointF half_label_point = painter.transform().map(QPointF(bounds.x() + 39 - half_label_halfwidth, label_y));
     QPointF max_label_point = painter.transform().map(QPointF(custom_axis_max ? bounds.x() + 72 - max_label_width : bounds.x() + 71 - max_label_halfwidth, label_y));
-    
-    label_y = painter.transform().map(QPointF(0, label_y)).y();
     
     painter.setWorldMatrixEnabled(false);
     painter.drawText(min_label_point, axis_min_label);
@@ -1103,19 +1107,27 @@ QVariant QtSLiMEidosBlockTableModel::data(const QModelIndex &p_index, int role) 
             {
                 if (scriptBlock->type_ == SLiMEidosBlockType::SLiMEidosUserDefinedFunction)
                     return QVariant("—");
-                else if (scriptBlock->start_tick_ == -1)
+                else if (!scriptBlock->tick_range_evaluated_)
+                    return QVariant("?");
+                else if (scriptBlock->tick_range_is_sequence_ == false)
+                    return QVariant("...");
+                else if (scriptBlock->tick_start_ == -1)
                     return QVariant("MIN");
                 else
-                    return QVariant(QString("%1").arg(scriptBlock->start_tick_));
+                    return QVariant(QString("%1").arg(scriptBlock->tick_start_));
             }
             else if (p_index.column() == 2)
             {
                 if (scriptBlock->type_ == SLiMEidosBlockType::SLiMEidosUserDefinedFunction)
                     return QVariant("—");
-                else if (scriptBlock->end_tick_ == SLIM_MAX_TICK + 1)
+                else if (!scriptBlock->tick_range_evaluated_)
+                    return QVariant("?");
+                else if (scriptBlock->tick_range_is_sequence_ == false)
+                    return QVariant("...");
+                else if (scriptBlock->tick_end_ == SLIM_MAX_TICK + 1)
                     return QVariant("MAX");
                 else
-                    return QVariant(QString("%1").arg(scriptBlock->end_tick_));
+                    return QVariant(QString("%1").arg(scriptBlock->tick_end_));
             }
             else if (p_index.column() == 3)
             {

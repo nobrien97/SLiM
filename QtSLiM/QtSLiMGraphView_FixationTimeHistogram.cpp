@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 3/30/2020.
-//  Copyright (c) 2020-2023 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2020-2024 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -19,6 +19,8 @@
 
 #include "QtSLiMGraphView_FixationTimeHistogram.h"
 
+#include <string>
+
 #include "QtSLiMWindow.h"
 
 
@@ -27,7 +29,9 @@ QtSLiMGraphView_FixationTimeHistogram::QtSLiMGraphView_FixationTimeHistogram(QWi
     histogramBinCount_ = 10;
     //allowBinCountRescale_ = true;     // not supported yet
     
-    xAxisMax_ = 1000;
+    x1_ = 1000;
+    
+    xAxisMax_ = x1_;
     xAxisMajorTickInterval_ = 200;
     xAxisMinorTickInterval_ = 100;
     xAxisMajorTickModulus_ = 2;

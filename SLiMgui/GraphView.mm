@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 2/27/15.
-//  Copyright (c) 2015-2023 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2015-2024 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -1088,6 +1088,11 @@
 {
 	SLiMWindowController *controller = [self slimWindowController];
 	Community &community = *controller->community;
+	
+	// We can't get the estimated last tick until tick ranges are known
+	if (community.Tick() < 1)
+		return;
+	
 	slim_tick_t lastTick = community.EstimatedLastTick();
 	
 	// The last tick could be just about anything, so we need some smart axis setup code here – a problem we neglect elsewhere

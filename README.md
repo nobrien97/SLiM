@@ -4,11 +4,8 @@
 
 
 
-<p align="center">
-	SLiM: Selection on Linked Mutations
-</p>
 <p align="justify">
-	SLiM is an evolutionary simulation framework that combines a powerful engine for population genetic simulations with the capability of modeling arbitrarily complex evolutionary scenarios. Simulations are configured via the integrated Eidos scripting language that allows interactive control over practically every aspect of the simulated evolutionary scenarios. The underlying individual-based simulation engine is highly optimized to enable modeling of entire chromosomes in large populations. We also provide a graphical user interface on macOS and Linux for easy simulation set-up, interactive runtime control, and dynamical visualization of simulation output.
+	SLiM is an evolutionary simulation framework that combines a powerful engine for population genetic simulations with the capability of modeling arbitrarily complex evolutionary scenarios. Simulations are configured via the integrated Eidos scripting language that allows interactive control over practically every aspect of the simulated scenarios. The underlying individual-based simulation engine is highly optimized to enable modeling of entire chromosomes in large populations. We also provide a graphical user interface called SLiMgui on macOS, Linux, and Windows for easy simulation set-up, interactive runtime control, and dynamic visualization of simulation output.
 </p>
 
 GitHub Actions | Fedora Copr | Conda
@@ -25,7 +22,7 @@ GitHub Actions | Fedora Copr | Conda
 License
 ----------
 
-Copyright (c) 2016-2022 Philipp Messer.  All rights reserved.
+Copyright (c) 2016-2024 Philipp Messer.  All rights reserved.
 
 SLiM is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
 
@@ -41,67 +38,40 @@ SLiM is under active development, and our goal is to make it as broadly useful a
 Installation
 ------------
 <em>Looking for Binary Packages / Installers?</em>
-<table>
-<thead>
-<tr>
-<th>macOS</th>
-<th>Windows 10</th>
-<th>Fedora, Red Hat Enterprise, CentOS, and openSUSE</th>
-<th>Debian & Ubuntu</th>
-<th>Ubuntu 20.04 LTS (Focal Fossa)</th>
-<th>Arch Linux</th>
-</tr>
-</thead>
-<tbody>
-<!-- Icon-only Row -->
-<tr>
-<!-- macOS -->
-<td align="center"><a href="http://benhaller.com/slim/SLiM_OSX_Installer.pkg" target="_blank" rel="noopener noreferrer"><img src="https://raw.githubusercontent.com/JunaidQadirB/font-os/master/vectors/apple.svg" width="64" height="64"></a></td>
 
-<!-- Windows 10 -->
-<td align="center"><a href="https://github.com/MesserLab/SLiM-Extras/blob/master/installation/Windows10Installation.md" target="_blank" rel="noopener noreferrer"><img src="https://raw.githubusercontent.com/JunaidQadirB/font-os/master/vectors/win10.svg" alt="Windows 10" width="64" height="64"></a></td>
+The following subsections summarize what methods for acquiring SLiM (and SLiMgui) are available.  Building from sources is also an option on all platforms; see the next section.  Chapter 2 of the SLiM manual contains much more detail on installation and building of SLiM.  The manual and other SLiM resources can be found at [http://messerlab.org/slim/](http://messerlab.org/slim/#Downloads).
 
-<!-- Fedora -->
-<!-- Fedora copr Logo SVG tag upstream: https://pagure.io/copr/copr/blob/main/f/doc/img/copr-logo.svg-->
-<td align="center"><a href="https://copr.fedorainfracloud.org/coprs/bacarson/SLiM-Selection_on_Linked_Mutations/" target="_blank" rel="noopener noreferrer"><img src="https://raw.githubusercontent.com/JunaidQadirB/font-os/master/vectors/fedora.svg" alt="Fedora" width="64" height="64"><img src="https://raw.githubusercontent.com/JunaidQadirB/font-os/master/vectors/opensuse.svg" alt="openSUSE" width="64" height="64"></a></td>
+##### macOS
+Download and double-click the macOS Installer from the SLiM home page at https://messerlab.org/slim/#Downloads.  It will install the `slim` and `eidos` command-line tools, as well as SLiMgui.
 
-<!-- Debian & Ubuntu Shell Script -->
-<td align="center"><a href="https://github.com/MesserLab/SLiM-Extras/blob/master/installation/DebianUbuntuInstall.sh" target="_blank" rel="noopener noreferrer"><img src="https://raw.githubusercontent.com/JunaidQadirB/font-os/master/vectors/debian.svg" alt="Debian" width="64" height="64"></a></td>
+##### Linux
+###### Arch & Manjaro
+Any Arch-based distributions *which support the AUR* should be compatible.
 
-<!-- Ubuntu PPA -->
-<td align="center"><a href="https://launchpad.net/~bryce-a-carson/+archive/ubuntu/slim-sim" target="_blank" rel="noopener noreferrer"><img src="https://raw.githubusercontent.com/JunaidQadirB/font-os/master/vectors/ubuntu.svg" alt="Ubuntu" width="64" height="64"></a></td>
+https://aur.archlinux.org/packages/slim-simulator/
 
-<!-- Arch Linux -->
-<td align="center"><a href="https://aur.archlinux.org/packages/slim-simulator/" target="_blank" rel="noopener noreferrer"><img src="https://raw.githubusercontent.com/JunaidQadirB/font-os/master/vectors/archlinux.svg" alt="Arch" width="64" height="64"></a></td>
+###### Fedora, Red Hat, openSUSE
+Derivative distributions are not guaranteed compatibility with these binary packages. Enable the repository for your operating system; you might also try using the source RPM package to rebuild the package for your system to give you an excellent integration for any RPM-based distribution.
 
-</tr>
+https://copr.fedorainfracloud.org/coprs/bacarson/SLiM-Selection_on_Linked_Mutations/
 
-<!-- Text-only Row -->
-<tr>
+###### Debian & Ubuntu (and any derivatives using dpkg)
+A shell script using the facilities of `dpkg` is available. It uses the CMake install target to integrate SLiMgui with the desktop environment. It has the advantage over building from source that it will check build dependencies for you, and it will automatically remove build artifacts from `/tmp`. Source the script with `curl` following the instructions in the manual.
 
-<!-- macOS -->
-<td align="center"><a href="http://benhaller.com/slim/SLiM_OSX_Installer.pkg" target="_blank" rel="noopener noreferrer">Messer Lab Website</a></td>
+https://raw.githubusercontent.com/MesserLab/SLiM-Extras/master/installation/DebianUbuntuInstall.sh
 
-<!-- Windows 10 -->
-<td align="center"><a href="https://github.com/MesserLab/SLiM-Extras/blob/master/installation/Windows10Installation.md" target="_blank" rel="noopener noreferrer">SLiM-Extras MD Document</a></td>
+##### Windows (10 & 11)
+###### Native package (using MSYS2)
+If you have MSYS2 installed, you can do `pacman -Syu` to update its information (see the SLiM manual for further information).  You can then install SLiM and SLiMgui with:
 
-<!-- Fedora -->
-<td align="center"><a href="https://copr.fedorainfracloud.org/coprs/bacarson/SLiM-Selection_on_Linked_Mutations/" target="_blank" rel="noopener noreferrer">Copper Repository</a></td>
+`pacman -S mingw-w64-x86_64-slim-simulator`
 
-<!-- Debian & Ubuntu Shell Script -->
-<td align="center"><a href="https://github.com/MesserLab/SLiM-Extras/blob/master/installation/DebianUbuntuInstall.sh" target="_blank" rel="noopener noreferrer">SLiM-Extras MD Document</a></td>
+###### WSL2 installation guide
+The SLiM manual provides detailed instructions on building and installing SLiM and SLiMgui under the WSL2.
 
-<!-- Ubuntu PPA -->
-<td align="center"><a href="https://launchpad.net/~bryce-a-carson/+archive/ubuntu/slim-sim" target="_blank" rel="noopener noreferrer">Launchpad (PPA)</a></td>
 
-<!-- Arch Linux -->
-<td align="center"><a href="https://aur.archlinux.org/packages/slim-simulator/" target="_blank" rel="noopener noreferrer">Arch User Repository</a></td>
 
-</tr>
-</tbody>
-</table>
-
-Compilation of SLiM from source
+Compilation of SLiM from Source
 ----------------------------------
 
-See chapter two of the SLiM manual for more information about building and installing, including instructions on building SLiMgui (the graphical modeling environment for SLiM) on various platforms.  The manual and other SLiM resources can be found at [http://messerlab.org/slim/](http://messerlab.org/slim/).
+You can build both SLiM and SLiMgui from sources.  This can be useful, in particular, if you wish to run a recent development version of SLiM, rather than the last released version.  See chapter 2 of the SLiM manual for more information on building from sources on various platforms.

@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 2/28/2022.
-//  Copyright (c) 2022-2023 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2022-2024 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -72,6 +72,7 @@ private:
 	std::vector<SLiMEidosBlock*> scheduled_interaction_deregs_;						// NOT OWNED: interaction() callbacks in script_blocks_ that are scheduled for deregistration
 	
 	// a cache of the last tick for the simulation, for speed
+	bool all_tick_ranges_evaluated_ = false;										// false until all tick ranges have been determined
 	bool last_script_block_tick_cached_ = false;
 	slim_tick_t last_script_block_tick_;											// the last tick in which a bounded script block is scheduled to run
 	
@@ -197,6 +198,7 @@ public:
 	
 	void InitializeFromFile(std::istream &p_infile);								// parse an input file; call after construction
 	void InitializeRNGFromSeed(unsigned long int *p_override_seed_ptr);				// call after InitializeFromFile(), generally
+	void FinishInitialization(void);												// call last, after InitializeRNGFromSeed()
 	
 	void TabulateSLiMMemoryUsage_Community(SLiMMemoryUsage_Community *p_usage, EidosSymbolTable *p_current_symbols);		// used by outputUsage() and SLiMgui profiling
 	
@@ -217,6 +219,7 @@ public:
 	bool SubpopulationNameInUse(const std::string &p_subpop_name);					// not whether a SLiM subpop with this name currently exists, but whether the name is "in use"
 	
 	Subpopulation *SubpopulationWithID(slim_objectid_t p_subpop_id);
+	Subpopulation *SubpopulationWithName(const std::string &p_subpop_name);
 	MutationType *MutationTypeWithID(slim_objectid_t p_muttype_id);
 	GenomicElementType *GenomicElementTypeWithID(slim_objectid_t p_getype_id);
 	SLiMEidosBlock *ScriptBlockWithID(slim_objectid_t p_script_block_id);
@@ -238,13 +241,13 @@ public:
 	
 	// Checking for species identity; these return nullptr if the objects do not all belong to the same species
 	// Calls to these methods, and other such species checks, should be labeled SPECIES CONSISTENCY CHECK to make them easier to find
-	static Species *SpeciesForIndividualsVector(Individual **individuals, int value_count);
+	static Species *SpeciesForIndividualsVector(const Individual * const *individuals, int value_count);
 	static Species *SpeciesForIndividuals(EidosValue *value);
 	
-	static Species *SpeciesForGenomesVector(Genome **genomes, int value_count);
+	static Species *SpeciesForGenomesVector(const Genome * const *genomes, int value_count);
 	static Species *SpeciesForGenomes(EidosValue *value);
 	
-	static Species *SpeciesForMutationsVector(Mutation **mutations, int value_count);
+	static Species *SpeciesForMutationsVector(const Mutation * const *mutations, int value_count);
 	static Species *SpeciesForMutations(EidosValue *value);
 	
 	// Running ticks
@@ -259,6 +262,9 @@ public:
 	bool _RunOneTickWF(void);														// called by _RunOneTick() to run a tick (WF models)
 	bool _RunOneTickNonWF(void);													// called by _RunOneTick() to run a tick (nonWF models)
 	
+	EidosValue_SP _EvaluateTickRangeNode(const EidosASTNode *p_node, std::string &p_error_string);	// evaluate a node that represents a tick range expression
+	void EvaluateScriptBlockTickRanges(void);										// evaluate tick range expressions to find when a block is scheduled
+	void FlagUnevaluatedScriptBlockTickRanges(void);								// error for script blocks whose tick range is unevaluated
 	slim_tick_t FirstTick(void);													// derived from the first tick in which an Eidos block is registered
 	slim_tick_t EstimatedLastTick(void);											// derived from the last tick in which an Eidos block is registered
 	void SimulationHasFinished(void);
@@ -354,6 +360,7 @@ public:
 	virtual EidosValue_SP ExecuteInstanceMethod(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter) override;
 	
 	EidosValue_SP ExecuteMethod_createLogFile(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter);
+	EidosValue_SP ExecuteMethod_estimatedLastTick(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter);
 	EidosValue_SP ExecuteMethod_deregisterScriptBlock(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter);
 	EidosValue_SP ExecuteMethod_genomicElementTypesWithIDs(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter);
 	EidosValue_SP ExecuteMethod_interactionTypesWithIDs(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter);
@@ -361,6 +368,7 @@ public:
 	EidosValue_SP ExecuteMethod_scriptBlocksWithIDs(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter);
 	EidosValue_SP ExecuteMethod_speciesWithIDs(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter);
 	EidosValue_SP ExecuteMethod_subpopulationsWithIDs(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter);
+	EidosValue_SP ExecuteMethod_subpopulationsWithNames(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter);
 	EidosValue_SP ExecuteMethod_outputUsage(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter);
 	EidosValue_SP ExecuteMethod_registerFirstEarlyLateEvent(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter);
 	EidosValue_SP ExecuteMethod_registerInteractionCallback(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter);

@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 8/3/2019.
-//  Copyright (c) 2019-2023 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2019-2024 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -37,12 +37,14 @@ public:
     int appStartupPref(void) const;               // 0 == do nothing, 1 == create a new window, 2 == run an open panel
     bool forceDarkModePref(void);
     bool forceFusionStylePref(void);
+    bool useOpenGLPref(void);
     QFont displayFontPref(double *tabWidth = nullptr) const;
     bool scriptSyntaxHighlightPref(void) const;
     bool outputSyntaxHighlightPref(void) const;
     bool showLineNumbersPref(void) const;
     bool highlightCurrentLinePref(void) const;
     bool autosaveOnRecyclePref(void) const;
+    bool reloadOnSafeExternalEditsPref(void) const;
     bool showSaveIfUntitledPref(void) const;
     
     // Change preferences values in ways other than the Preferences panel itself
@@ -52,12 +54,14 @@ public:
 signals:
     // Get notified when a pref value changes
     void appStartupPrefChanged(void);
+    void useOpenGLPrefChanged(void);
     void displayFontPrefChanged(void);
     void scriptSyntaxHighlightPrefChanged(void);
     void outputSyntaxHighlightPrefChanged(void);
     void showLineNumbersPrefChanged(void);
     void highlightCurrentLinePrefChanged(void);
     void autosaveOnRecyclePrefChanged(void);
+    void reloadOnSafeExternalEditsChanged(void);
     void showSaveIfUntitledPrefChanged(void);
     
 private:
@@ -71,6 +75,7 @@ private slots:
     void startupRadioChanged();
     void forceDarkModeToggled();
     void forceFusionStyleToggled();
+    void useOpenGLToggled();
     void fontChanged(const QFont &font);
     void fontSizeChanged(int newSize);
     void syntaxHighlightScriptToggled();
@@ -78,6 +83,7 @@ private slots:
     void showLineNumbersToggled();
     void highlightCurrentLineToggled();
     void autosaveOnRecycleToggled();
+    void reloadOnSafeExternalEditsToggled();
     void showSaveIfUntitledToggled();
     void resetSuppressedClicked();
     

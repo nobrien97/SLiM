@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 1/21/15.
-//  Copyright (c) 2015-2023 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2015-2024 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -46,6 +46,7 @@
 #include <stdexcept>
 #include <sys/stat.h>
 #include <ctime>
+#include <csignal>
 
 
 @implementation SLiMWindowController
@@ -546,6 +547,7 @@
 		community = new Community();
 		community->InitializeFromFile(infile);
 		community->InitializeRNGFromSeed(nullptr);
+		community->FinishInitialization();
 		
 		// Swap out our RNG
 #ifndef _OPENMP
@@ -889,8 +891,10 @@
 	Species *displaySpecies = [self focalDisplaySpecies];
 	
 	// Flush any buffered output to files every full update, so that the user sees changes to the files without too much delay
+	// NOTE THAT THE WORKING DIRECTORY HAS BEEN CHANGED BACK AT THIS POINT!
 	if (fullUpdate)
-		Eidos_FlushFiles();
+		if (!Eidos_FlushFiles())
+			raise(SIGTRAP);			// could be improved, but for SLiMguiLegacy this is OK
 	
 	// Check whether the simulation has terminated due to an error; if so, show an error message with a delayed perform
 	[self checkForSimulationTermination];
@@ -5015,19 +5019,27 @@
 				{
 					if (scriptBlock->type_ == SLiMEidosBlockType::SLiMEidosUserDefinedFunction)
 						return @"—";
-					else if (scriptBlock->start_tick_ == -1)
+					else if (!scriptBlock->tick_range_evaluated_)
+						return @"?";
+					else if (scriptBlock->tick_range_is_sequence_ == false)
+						return @"...";
+					else if (scriptBlock->tick_start_ == -1)
 						return @"MIN";
 					else
-						return [NSString stringWithFormat:@"%lld", (long long int)scriptBlock->start_tick_];
+						return [NSString stringWithFormat:@"%lld", (long long int)scriptBlock->tick_start_];
 				}
 				else if (aTableColumn == scriptBlocksEndColumn)
 				{
 					if (scriptBlock->type_ == SLiMEidosBlockType::SLiMEidosUserDefinedFunction)
 						return @"—";
-					else if (scriptBlock->end_tick_ == SLIM_MAX_TICK + 1)
+					else if (!scriptBlock->tick_range_evaluated_)
+						return @"?";
+					else if (scriptBlock->tick_range_is_sequence_ == false)
+						return @"...";
+					else if (scriptBlock->tick_end_ == SLIM_MAX_TICK + 1)
 						return @"MAX";
 					else
-						return [NSString stringWithFormat:@"%lld", (long long int)scriptBlock->end_tick_];
+						return [NSString stringWithFormat:@"%lld", (long long int)scriptBlock->tick_end_];
 				}
 				else if (aTableColumn == scriptBlocksTypeColumn)
 				{

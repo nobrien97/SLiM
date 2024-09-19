@@ -3,7 +3,7 @@
 //  Eidos
 //
 //  Created by Ben Haller on 6/28/15.
-//  Copyright (c) 2015-2023 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2015-2024 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -1080,36 +1080,18 @@ void Eidos_WarmUp(void)
 		// Make the shared EidosValue pool
 		size_t maxEidosValueSize = sizeof(EidosValue_NULL);
 		maxEidosValueSize = std::max(maxEidosValueSize, sizeof(EidosValue_Logical));
-		maxEidosValueSize = std::max(maxEidosValueSize, sizeof(EidosValue_Logical_const));
 		maxEidosValueSize = std::max(maxEidosValueSize, sizeof(EidosValue_String));
-		maxEidosValueSize = std::max(maxEidosValueSize, sizeof(EidosValue_String_vector));
-		maxEidosValueSize = std::max(maxEidosValueSize, sizeof(EidosValue_String_singleton));
 		maxEidosValueSize = std::max(maxEidosValueSize, sizeof(EidosValue_Int));
-		maxEidosValueSize = std::max(maxEidosValueSize, sizeof(EidosValue_Int_vector));
-		maxEidosValueSize = std::max(maxEidosValueSize, sizeof(EidosValue_Int_singleton));
 		maxEidosValueSize = std::max(maxEidosValueSize, sizeof(EidosValue_Float));
-		maxEidosValueSize = std::max(maxEidosValueSize, sizeof(EidosValue_Float_vector));
-		maxEidosValueSize = std::max(maxEidosValueSize, sizeof(EidosValue_Float_singleton));
 		maxEidosValueSize = std::max(maxEidosValueSize, sizeof(EidosValue_Object));
-		maxEidosValueSize = std::max(maxEidosValueSize, sizeof(EidosValue_Object_vector));
-		maxEidosValueSize = std::max(maxEidosValueSize, sizeof(EidosValue_Object_singleton));
 		
 //		std::cout << "sizeof(EidosValue) ==                  " << sizeof(EidosValue) << std::endl;
 //		std::cout << "sizeof(EidosValue_NULL) ==             " << sizeof(EidosValue_NULL) << std::endl;
 //		std::cout << "sizeof(EidosValue_Logical) ==          " << sizeof(EidosValue_Logical) << std::endl;
-//		std::cout << "sizeof(EidosValue_Logical_const) ==    " << sizeof(EidosValue_Logical_const) << std::endl;
 //		std::cout << "sizeof(EidosValue_String) ==           " << sizeof(EidosValue_String) << std::endl;
-//		std::cout << "sizeof(EidosValue_String_vector) ==    " << sizeof(EidosValue_String_vector) << std::endl;
-//		std::cout << "sizeof(EidosValue_String_singleton) == " << sizeof(EidosValue_String_singleton) << std::endl;
 //		std::cout << "sizeof(EidosValue_Int) ==              " << sizeof(EidosValue_Int) << std::endl;
-//		std::cout << "sizeof(EidosValue_Int_vector) ==       " << sizeof(EidosValue_Int_vector) << std::endl;
-//		std::cout << "sizeof(EidosValue_Int_singleton) ==    " << sizeof(EidosValue_Int_singleton) << std::endl;
 //		std::cout << "sizeof(EidosValue_Float) ==            " << sizeof(EidosValue_Float) << std::endl;
-//		std::cout << "sizeof(EidosValue_Float_vector) ==     " << sizeof(EidosValue_Float_vector) << std::endl;
-//		std::cout << "sizeof(EidosValue_Float_singleton) ==  " << sizeof(EidosValue_Float_singleton) << std::endl;
 //		std::cout << "sizeof(EidosValue_Object) ==           " << sizeof(EidosValue_Object) << std::endl;
-//		std::cout << "sizeof(EidosValue_Object_vector) ==    " << sizeof(EidosValue_Object_vector) << std::endl;
-//		std::cout << "sizeof(EidosValue_Object_singleton) == " << sizeof(EidosValue_Object_singleton) << std::endl;
 //		std::cout << "maxEidosValueSize ==                   " << maxEidosValueSize << std::endl;
 		
 		gEidosValuePool = new EidosObjectPool("EidosObjectPool(EidosValue)", maxEidosValueSize);
@@ -1117,44 +1099,101 @@ void Eidos_WarmUp(void)
 		// Make the shared EidosASTNode pool
 		gEidosASTNodePool = new EidosObjectPool("EidosObjectPool(EidosASTNode)", sizeof(EidosASTNode));
 		
-		// Allocate global permanents
-		gStaticEidosValueVOID = EidosValue_VOID::Static_EidosValue_VOID();
+		// Allocate global permanents.  All of these constants should be marked as constant here.
+		gStaticEidosValueVOID = EidosValue_VOID_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_VOID());
+		gStaticEidosValueVOID->SetInvisible(true);
+		gStaticEidosValueVOID->MarkAsConstant();
 		
-		gStaticEidosValueNULL = EidosValue_NULL::Static_EidosValue_NULL();
-		gStaticEidosValueNULLInvisible = EidosValue_NULL::Static_EidosValue_NULL_Invisible();
+		gStaticEidosValueNULL = EidosValue_NULL_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_NULL());
+		gStaticEidosValueNULL->MarkAsConstant();
+		
+		gStaticEidosValueNULLInvisible = EidosValue_NULL_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_NULL());
+		gStaticEidosValueNULLInvisible->SetInvisible(true);
+		gStaticEidosValueNULLInvisible->MarkAsConstant();
+		
+		gStaticEidosValue_LogicalT = EidosValue_Logical_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Logical({true}));
+		gStaticEidosValue_LogicalT->MarkAsConstant();
+		
+		gStaticEidosValue_LogicalF = EidosValue_Logical_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Logical({false}));
+		gStaticEidosValue_LogicalF->MarkAsConstant();
 		
 		gStaticEidosValue_Logical_ZeroVec = EidosValue_Logical_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Logical());
-		gStaticEidosValue_Integer_ZeroVec = EidosValue_Int_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Int_vector());
-		gStaticEidosValue_Float_ZeroVec = EidosValue_Float_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float_vector());
-		gStaticEidosValue_String_ZeroVec = EidosValue_String_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String_vector());
+		gStaticEidosValue_Logical_ZeroVec->MarkAsConstant();
 		
-		gStaticEidosValue_LogicalT = EidosValue_Logical_const::Static_EidosValue_Logical_T();
-		gStaticEidosValue_LogicalF = EidosValue_Logical_const::Static_EidosValue_Logical_F();
+		gStaticEidosValue_Integer_ZeroVec = EidosValue_Int_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Int());
+		gStaticEidosValue_Integer_ZeroVec->MarkAsConstant();
 		
-		gStaticEidosValue_Integer0 = EidosValue_Int_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Int_singleton(0));
-		gStaticEidosValue_Integer1 = EidosValue_Int_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Int_singleton(1));
-		gStaticEidosValue_Integer2 = EidosValue_Int_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Int_singleton(2));
-		gStaticEidosValue_Integer3 = EidosValue_Int_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Int_singleton(3));
+		gStaticEidosValue_Float_ZeroVec = EidosValue_Float_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float());
+		gStaticEidosValue_Float_ZeroVec->MarkAsConstant();
 		
-		gStaticEidosValue_Float0 = EidosValue_Float_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float_singleton(0.0));
-		gStaticEidosValue_Float0Point5 = EidosValue_Float_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float_singleton(0.5));
-		gStaticEidosValue_Float1 = EidosValue_Float_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float_singleton(1.0));
-		gStaticEidosValue_Float10 = EidosValue_Float_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float_singleton(10.0));
-		gStaticEidosValue_FloatINF = EidosValue_Float_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float_singleton(std::numeric_limits<double>::infinity()));
-		gStaticEidosValue_FloatNAN = EidosValue_Float_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float_singleton(std::numeric_limits<double>::quiet_NaN()));
-		gStaticEidosValue_FloatE = EidosValue_Float_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float_singleton(M_E));
-		gStaticEidosValue_FloatPI = EidosValue_Float_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float_singleton(M_PI));
+		gStaticEidosValue_String_ZeroVec = EidosValue_String_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String());
+		gStaticEidosValue_String_ZeroVec->MarkAsConstant();
 		
-		gStaticEidosValue_StringEmpty = EidosValue_String_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String_singleton(""));
-		gStaticEidosValue_StringSpace = EidosValue_String_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String_singleton(" "));
-		gStaticEidosValue_StringAsterisk = EidosValue_String_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String_singleton("*"));
-		gStaticEidosValue_StringDoubleAsterisk = EidosValue_String_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String_singleton("**"));
-		gStaticEidosValue_StringComma = EidosValue_String_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String_singleton(","));
-		gStaticEidosValue_StringPeriod = EidosValue_String_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String_singleton("."));
-		gStaticEidosValue_StringDoubleQuote = EidosValue_String_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String_singleton("\""));
-		gStaticEidosValue_String_ECMAScript = EidosValue_String_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String_singleton("ECMAScript"));
-		gStaticEidosValue_String_indices = EidosValue_String_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String_singleton("indices"));
-		gStaticEidosValue_String_average = EidosValue_String_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String_singleton("average"));
+		gStaticEidosValue_Integer0 = EidosValue_Int_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Int(0));
+		gStaticEidosValue_Integer0->MarkAsConstant();
+		
+		gStaticEidosValue_Integer1 = EidosValue_Int_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Int(1));
+		gStaticEidosValue_Integer1->MarkAsConstant();
+		
+		gStaticEidosValue_Integer2 = EidosValue_Int_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Int(2));
+		gStaticEidosValue_Integer2->MarkAsConstant();
+		
+		gStaticEidosValue_Integer3 = EidosValue_Int_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Int(3));
+		gStaticEidosValue_Integer3->MarkAsConstant();
+		
+		gStaticEidosValue_Float0 = EidosValue_Float_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float(0.0));
+		gStaticEidosValue_Float0->MarkAsConstant();
+		
+		gStaticEidosValue_Float0Point5 = EidosValue_Float_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float(0.5));
+		gStaticEidosValue_Float0Point5->MarkAsConstant();
+		
+		gStaticEidosValue_Float1 = EidosValue_Float_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float(1.0));
+		gStaticEidosValue_Float1->MarkAsConstant();
+		
+		gStaticEidosValue_Float10 = EidosValue_Float_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float(10.0));
+		gStaticEidosValue_Float10->MarkAsConstant();
+		
+		gStaticEidosValue_FloatINF = EidosValue_Float_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float(std::numeric_limits<double>::infinity()));
+		gStaticEidosValue_FloatINF->MarkAsConstant();
+		
+		gStaticEidosValue_FloatNAN = EidosValue_Float_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float(std::numeric_limits<double>::quiet_NaN()));
+		gStaticEidosValue_FloatNAN->MarkAsConstant();
+		
+		gStaticEidosValue_FloatE = EidosValue_Float_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float(M_E));
+		gStaticEidosValue_FloatE->MarkAsConstant();
+		
+		gStaticEidosValue_FloatPI = EidosValue_Float_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float(M_PI));
+		gStaticEidosValue_FloatPI->MarkAsConstant();
+		
+		gStaticEidosValue_StringEmpty = EidosValue_String_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String(""));
+		gStaticEidosValue_StringEmpty->MarkAsConstant();
+		
+		gStaticEidosValue_StringSpace = EidosValue_String_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String(" "));
+		gStaticEidosValue_StringSpace->MarkAsConstant();
+		
+		gStaticEidosValue_StringAsterisk = EidosValue_String_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String("*"));
+		gStaticEidosValue_StringAsterisk->MarkAsConstant();
+		
+		gStaticEidosValue_StringDoubleAsterisk = EidosValue_String_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String("**"));
+		gStaticEidosValue_StringDoubleAsterisk->MarkAsConstant();
+		
+		gStaticEidosValue_StringComma = EidosValue_String_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String(","));
+		gStaticEidosValue_StringComma->MarkAsConstant();
+		
+		gStaticEidosValue_StringPeriod = EidosValue_String_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String("."));
+		gStaticEidosValue_StringPeriod->MarkAsConstant();
+		
+		gStaticEidosValue_StringDoubleQuote = EidosValue_String_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String("\""));
+		gStaticEidosValue_StringDoubleQuote->MarkAsConstant();
+		
+		gStaticEidosValue_String_ECMAScript = EidosValue_String_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String("ECMAScript"));
+		gStaticEidosValue_String_ECMAScript->MarkAsConstant();
+		
+		gStaticEidosValue_String_indices = EidosValue_String_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String("indices"));
+		gStaticEidosValue_String_indices->MarkAsConstant();
+		
+		gStaticEidosValue_String_average = EidosValue_String_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String("average"));
+		gStaticEidosValue_String_average->MarkAsConstant();
 		
 		// Create the global class objects for all Eidos classes, from superclass to subclass
 		// This breaks encapsulation, kind of, but it needs to be done here, in order, so that superclass objects exist,
@@ -1169,7 +1208,8 @@ void Eidos_WarmUp(void)
 		
 		// This has to be allocated after gEidosObject_Class has been initialized above; the other global permanents must be initialized
 		// before that point, however, since properties and method signatures may use some of those global permanent values
-		gStaticEidosValue_Object_ZeroVec = EidosValue_Object_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Object_vector(gEidosObject_Class));
+		gStaticEidosValue_Object_ZeroVec = EidosValue_Object_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Object(gEidosObject_Class));
+		gStaticEidosValue_Object_ZeroVec->MarkAsConstant();
 		
 		// Set up the built-in function map, which is immutable
 		EidosInterpreter::CacheBuiltInFunctionMap();
@@ -1287,6 +1327,7 @@ EidosValue_SP Eidos_ValueForCommandLineExpression(std::string &p_value_expressio
 	EidosInterpreter interpreter(script, symbol_table, function_map, nullptr, std::cout, std::cerr);	// we're at the command line, so we assume we're using stdout/stderr
 	
 	value = interpreter.EvaluateInterpreterBlock(false, true);	// do not print output, return the last statement value
+	value->MarkAsConstant();
 	
 	return value;
 }
@@ -1723,6 +1764,11 @@ EidosTerminate::EidosTerminate(const EidosToken *p_error_token)
 		PushErrorPositionFromToken(p_error_token);
 }
 
+EidosTerminate::EidosTerminate(const EidosErrorPosition &p_error_position)
+{
+	gEidosErrorContext.errorPosition = p_error_position;
+}
+
 EidosTerminate::EidosTerminate(bool p_print_backtrace) : print_backtrace_(p_print_backtrace)
 {
 }
@@ -2141,8 +2187,8 @@ std::string Eidos_ResolvedPath(const std::string &p_path)
 {
 	std::string path = p_path;
 	
-	// if there is a leading '~', replace it with the user's home directory; not sure if this works on Windows... It doesn't..
-	#ifndef _WIN32
+	// if there is a leading '~', replace it with the user's home directory; this does not work on Windows
+#ifndef _WIN32
 	if ((path.length() > 0) && (path[0] == '~'))
 	{
 		long bufsize = sysconf(_SC_GETPW_R_SIZE_MAX);
@@ -2178,20 +2224,74 @@ std::string Eidos_ResolvedPath(const std::string &p_path)
 			}
 		}
 	}
-	#else
+#else
 	if ((path.length() > 0) && (path[0] == '~'))
 	{
 		EIDOS_TERMINATION << "ERROR (Eidos_ResolvedPath): Could not resolve ~ in path because it is not supported on Windows." << EidosTerminate();
 	}
-	#endif	
+#endif	
 	
 	return path;
+}
+
+// generate a canonical absolute path corresponding to the provided path
+std::string Eidos_AbsolutePath(const std::string &p_path)
+{
+	// Resolve a ~ at the start of the path
+	std::string resolved_file_path = Eidos_ResolvedPath(p_path);
+	
+	// A zero-length path is an error
+	if (resolved_file_path.length() == 0)
+		EIDOS_TERMINATION << "ERROR (Eidos_AbsolutePath): resolved path is zero-length." << EidosTerminate();
+	
+	// Convert to an absolute path so we do not depend on the current working directory, which could change
+#ifdef _WIN32
+	// On Windows, absolute paths start with a drive identifier from "A:" to "Z:", and then a path separator "/" or "\"
+	// Note that we do not presently support absolute paths from the "current drive", like "\Program Files\Custom Utilities\StringFinder.exe"
+	// We also do not support relative paths from per-drive current directories, like "C:Projects\apilibrary\apilibrary.sln"
+	// I'm not sure what happens if such paths are used, nor what ought to happen, since I don't really understand Windows paths well.
+	// Our support for Windows-style paths could thus be improxed; FIXME.  See https://docs.microsoft.com/en-us/dotnet/standard/io/file-path-formats
+	bool is_absolute_path = ((resolved_file_path.length() >= 3) && (resolved_file_path[0] >= 'A') && (resolved_file_path[0] <= 'Z') && (resolved_file_path[1] == ':') && ((resolved_file_path[2] == '/') || (resolved_file_path[2] == '\\')));
+#else
+	// On other platforms, absolute paths start with a "/"
+	bool is_absolute_path = ((resolved_file_path.length() >= 1) && (resolved_file_path[0] == '/'));
+#endif
+	
+	if (!is_absolute_path)
+	{
+		std::string current_dir = Eidos_CurrentDirectory();
+		size_t current_dir_length = current_dir.length();
+		
+		if (current_dir_length > 0)
+		{
+			// Figure out whether we need to append a slash to the CWD or not
+#ifdef _WIN32
+			if ((current_dir[current_dir_length - 1] == '/') || (current_dir[current_dir_length - 1] == '\\'))
+#else
+			if (current_dir[current_dir_length - 1] == '/')
+#endif
+				resolved_file_path = current_dir + resolved_file_path;
+			else
+				resolved_file_path = current_dir + "/" + resolved_file_path;	// append / in all cases to avoid quoting issues
+		}
+		else
+		{
+			EIDOS_TERMINATION << "ERROR (Eidos_AbsolutePath): the current working directory seems to be invalid." << EidosTerminate();
+		}
+	}
+	
+	return resolved_file_path;
 }
 
 // Get the filename (or a trailing directory name) from a path
 std::string Eidos_LastPathComponent(const std::string &p_path)
 {
 	std::string path = Eidos_StripTrailingSlash(p_path);
+	
+#ifdef _WIN32
+	// replace \ with / first, so the split works correctly with both separators
+	std::replace(path.begin(), path.end(), '\\', '/'); 
+#endif
 	
 	auto components = Eidos_string_split(path, "/");
 	
@@ -2215,6 +2315,10 @@ std::string Eidos_CurrentDirectory(void)
 	errno = 0;
 	char *buf = getcwd(path_buffer, MAXPATHLEN * 8 * sizeof(char));
 	
+	// BCH 7/19/2024: Arguably we should convert \ to / here on Windows, as
+	// Eidos_TemporaryDirectory() does, but I'm not going to make that breaking
+	// change unless someone complains.
+	
 	if (!buf)
 	{
 		std::cout << "Eidos_CurrentDirectory(): Unable to get the current working directory (error " << errno << ")" << std::endl;
@@ -2228,7 +2332,12 @@ std::string Eidos_CurrentDirectory(void)
 std::string Eidos_StripTrailingSlash(const std::string &p_path)
 {
 	int path_length = (int)p_path.length();
+	
+#ifdef _WIN32
+	bool path_ends_in_slash = (path_length > 0) && ((p_path[path_length-1] == '/') || (p_path[path_length-1] == '\\'));
+#else
 	bool path_ends_in_slash = (path_length > 0) && (p_path[path_length-1] == '/');
+#endif
 	
 	if (path_ends_in_slash)
 	{
@@ -2296,7 +2405,7 @@ bool Eidos_CreateDirectory(const std::string &p_path, std::string *p_error_strin
 // This is /tmp/ (with trailing slash!) on macOS and Linux, but will be elsewhere on Windows.  Should be used instead of /tmp/ everywhere.
 std::string Eidos_TemporaryDirectory(void)
 {
-	#ifdef _WIN32
+#ifdef _WIN32
 	std::string temp_path;
 	char charPath[MAX_PATH];
 	if (GetTempPathA(MAX_PATH, charPath))
@@ -2307,9 +2416,9 @@ std::string Eidos_TemporaryDirectory(void)
 	// which is understood by both linux and Windows.
 	std::replace(temp_path.begin(), temp_path.end(), '\\', '/'); 
 	return temp_path;
-	#else
+#else
 	return "/tmp/";
-	#endif
+#endif
 }
 
 bool Eidos_TemporaryDirectoryExists(void)
@@ -2539,42 +2648,49 @@ int Eidos_mkstemps_directory(char *p_pattern, int p_suffix_len)
 std::unordered_map<std::string, std::string> gEidosBufferedZipAppendData;
 
 // This flushes the bytes in outstring to the file at file_path, with gzip append
+// If an error occurs, it returns false; it should not raise
 bool _Eidos_FlushZipBuffer(const std::string &file_path, const std::string &outstring)
 {
 	THREAD_SAFETY_IN_ACTIVE_PARALLEL("_Eidos_FlushZipBuffer():  filesystem write");
 	
 	//std::cout << "_Eidos_FlushZipBuffer() called for " << file_path << std::endl;
 	
-	gzFile gzf = gzopen(file_path.c_str(), "ab");
-	
-	if (!gzf)
-		return false;
-	
 	const char *outcstr = outstring.c_str();
 	size_t outcstr_length = outstring.length();
 	
-	// do the writing with zlib
-	bool success = false;
-	int retval = gzbuffer(gzf, 128*1024L);	// bigger buffer for greater speed
+	if (outcstr_length == 0)
+		return true;
 	
-	if (retval != -1)
+	gzFile gzf = gzopen(file_path.c_str(), "ab");
+	
+	if (!gzf)
 	{
-		retval = gzwrite(gzf, outcstr, (unsigned)outcstr_length);
-		
-		if ((retval != 0) || (outcstr_length == 0))	// writing 0 bytes returns 0, which is supposed to be an error code
-		{
-			retval = gzclose_w(gzf);
-			
-			if (retval == Z_OK)
-				success = true;
-		}
+		//std::cerr << "errno == " << errno << std::endl;
+		return false;
 	}
 	
-	return success;
+	// do the writing with zlib
+	int retval = gzbuffer(gzf, 128*1024L);	// bigger buffer for greater speed
+	
+	if (retval == -1)
+		return false;
+	
+	retval = gzwrite(gzf, outcstr, (unsigned)outcstr_length);
+	
+	if (retval == 0)
+		return false;
+	
+	retval = gzclose_w(gzf);
+	
+	if (retval != Z_OK)
+		return false;
+	
+	return true;
 }
 #endif
 
 // This flushes a given file, if it is buffering zip output
+// This raises if an error occurs
 void Eidos_FlushFile(const std::string &p_file_path)
 {
 	THREAD_SAFETY_IN_ACTIVE_PARALLEL("Eidos_FlushFile():  filesystem write");
@@ -2595,25 +2711,35 @@ void Eidos_FlushFile(const std::string &p_file_path)
 }
 
 // This flushes all outstanding buffered zip data to the appropriate files
-void Eidos_FlushFiles(void)
+// This returns false if an error occurs
+bool Eidos_FlushFiles(void)
 {
 	THREAD_SAFETY_IN_ACTIVE_PARALLEL("Eidos_FlushFiles():  filesystem write");
 	
 #if EIDOS_BUFFER_ZIP_APPENDS
 	// Write out buffered data in gEidosBufferedZipAppendData to the appropriate files, using zlib's gzip append mode
+	bool success = true;
+	
 	for (auto &buffer_pair : gEidosBufferedZipAppendData)
 	{
 		bool result = _Eidos_FlushZipBuffer(buffer_pair.first, buffer_pair.second);
 		
 		if (!result)
 		{
-			// Note that we do this without a raise, because we often want to flush when we're already handling a raise; simpler to just log, the user will figure it out...
+			// Note that we do this without a raise, because we often want to flush when we're already handling a raise,
+			// and also we want to try to flush all of our files before halting, not halt on the first flush failure.
+			// The caller should report the error to the user in some way, if this stderr log is insufficient.
 			std::cerr << std::endl << "ERROR (Eidos_FlushFiles): Flush of gzip data to file " << buffer_pair.first << " failed!" << std::endl;
+			success = false;
 		}
 	}
 	
 	gEidosBufferedZipAppendData.clear();
+	
+	return success;
 #endif
+	
+	return true;
 }
 
 void Eidos_WriteToFile(const std::string &p_file_path, const std::vector<const std::string *> &p_contents, bool p_append, bool p_compress, EidosFileFlush p_flush_option)
@@ -3366,6 +3492,68 @@ bool Eidos_RegexWorks(void)
 	return regex_works;
 }
 
+bool Eidos_ContainsIllegalUnicode(const std::string &symbol_name)
+{
+	bool contains_illegal = false;
+	
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunknown-warning-option"
+#pragma GCC diagnostic ignored "-Wbidi-chars"
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wunknown-warning-option"
+#pragma clang diagnostic ignored "-Wbidi-chars"
+	// BCH 8/14/2023: Note that seven lines are commented out below.  They are correct, but they
+	// produce a warning "unpaired UTF-8 bidirectional control character detected [-Wbidi-chars=]",
+	// and disabling the bidi-chars warning does not suppress that warning, annoyingly.  This is
+	// very edge anyhow, so I'm commenting these lines out for now.  A better fix should be
+	// possible, but it doesn't seem worth worrying about for now.
+	contains_illegal = contains_illegal || (symbol_name.find("\u2000") != std::string::npos);
+	contains_illegal = contains_illegal || (symbol_name.find("\u2001") != std::string::npos);
+	contains_illegal = contains_illegal || (symbol_name.find("\u2002") != std::string::npos);
+	contains_illegal = contains_illegal || (symbol_name.find("\u2003") != std::string::npos);
+	contains_illegal = contains_illegal || (symbol_name.find("\u2004") != std::string::npos);
+	contains_illegal = contains_illegal || (symbol_name.find("\u2005") != std::string::npos);
+	contains_illegal = contains_illegal || (symbol_name.find("\u2006") != std::string::npos);
+	contains_illegal = contains_illegal || (symbol_name.find("\u2007") != std::string::npos);
+	contains_illegal = contains_illegal || (symbol_name.find("\u2008") != std::string::npos);
+	contains_illegal = contains_illegal || (symbol_name.find("\u2009") != std::string::npos);
+	contains_illegal = contains_illegal || (symbol_name.find("\u200a") != std::string::npos);
+	contains_illegal = contains_illegal || (symbol_name.find("\u200b") != std::string::npos);
+	contains_illegal = contains_illegal || (symbol_name.find("\u200c") != std::string::npos);
+	contains_illegal = contains_illegal || (symbol_name.find("\u200d") != std::string::npos);
+	contains_illegal = contains_illegal || (symbol_name.find("\u200e") != std::string::npos);
+	contains_illegal = contains_illegal || (symbol_name.find("\u200f") != std::string::npos);
+	contains_illegal = contains_illegal || (symbol_name.find("\u2028") != std::string::npos);
+	contains_illegal = contains_illegal || (symbol_name.find("\u2029") != std::string::npos);
+	//contains_illegal = contains_illegal || (symbol_name.find("\u202a") != std::string::npos);
+	//contains_illegal = contains_illegal || (symbol_name.find("\u202b") != std::string::npos);
+	contains_illegal = contains_illegal || (symbol_name.find("\u202c") != std::string::npos);
+	//contains_illegal = contains_illegal || (symbol_name.find("\u202d") != std::string::npos);
+	//contains_illegal = contains_illegal || (symbol_name.find("\u202e") != std::string::npos);
+	contains_illegal = contains_illegal || (symbol_name.find("\u202f") != std::string::npos);
+	contains_illegal = contains_illegal || (symbol_name.find("\u205f") != std::string::npos);
+	contains_illegal = contains_illegal || (symbol_name.find("\u2060") != std::string::npos);
+	contains_illegal = contains_illegal || (symbol_name.find("\u2061") != std::string::npos);
+	contains_illegal = contains_illegal || (symbol_name.find("\u2062") != std::string::npos);
+	contains_illegal = contains_illegal || (symbol_name.find("\u2063") != std::string::npos);
+	contains_illegal = contains_illegal || (symbol_name.find("\u2064") != std::string::npos);
+	contains_illegal = contains_illegal || (symbol_name.find("\u2065") != std::string::npos);
+	//contains_illegal = contains_illegal || (symbol_name.find("\u2066") != std::string::npos);
+	//contains_illegal = contains_illegal || (symbol_name.find("\u2067") != std::string::npos);
+	//contains_illegal = contains_illegal || (symbol_name.find("\u2068") != std::string::npos);
+	contains_illegal = contains_illegal || (symbol_name.find("\u2069") != std::string::npos);
+	contains_illegal = contains_illegal || (symbol_name.find("\u206a") != std::string::npos);
+	contains_illegal = contains_illegal || (symbol_name.find("\u206b") != std::string::npos);
+	contains_illegal = contains_illegal || (symbol_name.find("\u206c") != std::string::npos);
+	contains_illegal = contains_illegal || (symbol_name.find("\u206d") != std::string::npos);
+	contains_illegal = contains_illegal || (symbol_name.find("\u206e") != std::string::npos);
+	contains_illegal = contains_illegal || (symbol_name.find("\u206f") != std::string::npos);
+#pragma clang diagnostic pop
+#pragma GCC diagnostic pop
+	
+	return contains_illegal;
+}
+
 
 // *******************************************************************************************************************
 //
@@ -3629,8 +3817,11 @@ void Eidos_calc_sha_256(uint8_t hash[32], const void *input, size_t len)
 void Eidos_hash_to_string(char string[65], const uint8_t hash[32])
 {
 	size_t i;
+	size_t buf_left = 65;
+	
 	for (i = 0; i < 32; i++) {
-		string += snprintf(string, 65, "%02x", hash[i]);
+		string += snprintf(string, buf_left, "%02x", hash[i]);
+		buf_left -= 2;
 	}
 }	
 
@@ -3769,6 +3960,10 @@ const std::string &gEidosStr_la = EidosRegisteredString("la", gEidosID_laplace);
 const std::string &gEidosStr_x = EidosRegisteredString("x", gEidosID_x);
 const std::string &gEidosStr_y = EidosRegisteredString("y", gEidosID_y);
 const std::string &gEidosStr_z = EidosRegisteredString("z", gEidosID_z);
+const std::string &gEidosStr_xy = EidosRegisteredString("xy", gEidosID_xy);
+const std::string &gEidosStr_xz = EidosRegisteredString("xz", gEidosID_xz);
+const std::string &gEidosStr_yz = EidosRegisteredString("yz", gEidosID_yz);
+const std::string &gEidosStr_xyz = EidosRegisteredString("xyz", gEidosID_xyz);
 const std::string &gEidosStr_color = EidosRegisteredString("color", gEidosID_color);
 const std::string &gEidosStr_filePath = EidosRegisteredString("filePath", gEidosID_filePath);
 
@@ -4597,7 +4792,7 @@ void Eidos_GetColorComponents(const std::string &p_color_name, float *p_red_comp
 			EIDOS_TERMINATION << "ERROR (Eidos_GetColorComponents): color specification '" << p_color_name << "' is malformed." << EidosTerminate();
 		}
 	}
-	else
+	else if (p_color_name.length() > 0)
 	{
 		for (EidosNamedColor *color_table = gEidosNamedColors; color_table->name; ++color_table)
 		{
@@ -4611,7 +4806,10 @@ void Eidos_GetColorComponents(const std::string &p_color_name, float *p_red_comp
 		}
 	}
 	
-	EIDOS_TERMINATION << "ERROR (Eidos_GetColorComponents): color named '" << p_color_name << "' could not be found." << EidosTerminate();
+	if (p_color_name.length() == 0)
+		EIDOS_TERMINATION << "ERROR (Eidos_GetColorComponents): color strings may not be zero-length." << EidosTerminate();
+	else
+		EIDOS_TERMINATION << "ERROR (Eidos_GetColorComponents): color named '" << p_color_name << "' could not be found." << EidosTerminate();
 }
 
 void Eidos_GetColorComponents(const std::string &p_color_name, uint8_t *p_red_component, uint8_t *p_green_component, uint8_t *p_blue_component)
@@ -4635,7 +4833,7 @@ void Eidos_GetColorComponents(const std::string &p_color_name, uint8_t *p_red_co
 			EIDOS_TERMINATION << "ERROR (Eidos_GetColorComponents): color specification '" << p_color_name << "' is malformed." << EidosTerminate();
 		}
 	}
-	else
+	else if (p_color_name.length() > 0)
 	{
 		for (EidosNamedColor *color_table = gEidosNamedColors; color_table->name; ++color_table)
 		{
@@ -4649,7 +4847,10 @@ void Eidos_GetColorComponents(const std::string &p_color_name, uint8_t *p_red_co
 		}
 	}
 	
-	EIDOS_TERMINATION << "ERROR (Eidos_GetColorComponents): color named '" << p_color_name << "' could not be found." << EidosTerminate();
+	if (p_color_name.length() == 0)
+		EIDOS_TERMINATION << "ERROR (Eidos_GetColorComponents): color strings may not be zero-length." << EidosTerminate();
+	else
+		EIDOS_TERMINATION << "ERROR (Eidos_GetColorComponents): color named '" << p_color_name << "' could not be found." << EidosTerminate();
 }
 
 void Eidos_GetColorString(double p_red, double p_green, double p_blue, char *p_string_buffer)

@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 3/27/2020.
-//  Copyright (c) 2020-2023 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2020-2024 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -18,6 +18,8 @@
 //	You should have received a copy of the GNU General Public License along with SLiM.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "QtSLiMGraphView_1DPopulationSFS.h"
+
+#include <string>
 
 #include "QtSLiMWindow.h"
 

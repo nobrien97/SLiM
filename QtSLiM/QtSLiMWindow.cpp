@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 7/11/2019.
-//  Copyright (c) 2019-2023 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2019-2024 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -48,6 +48,7 @@
 #include "QtSLiMGraphView_SubpopFitnessDists.h"
 #include "QtSLiMGraphView_MultispeciesPopSizeOverTime.h"
 #include "QtSLiMHaplotypeManager.h"
+#include "QtSLiMGraphView_CustomPlot.h"
 
 #include <QCoreApplication>
 #include <QFontDatabase>
@@ -61,7 +62,9 @@
 #include <QSettings>
 #include <QCheckBox>
 #include <QCloseEvent>
+#if (QT_VERSION < QT_VERSION_CHECK(6, 0, 0))
 #include <QDesktopWidget>
+#endif
 #include <QStandardPaths>
 #include <QToolTip>
 #include <QHBoxLayout>
@@ -74,9 +77,16 @@
 #include <QScreen>
 #include <QMetaMethod>
 #include <QLabel>
+#include <QActionGroup>
 
 #include <unistd.h>
 #include <sys/stat.h>
+
+#include <utility>
+#include <map>
+#include <string>
+#include <algorithm>
+#include <vector>
 
 #include "individual.h"
 #include "eidos_test.h"
@@ -222,6 +232,7 @@ QtSLiMWindow::QtSLiMWindow(QtSLiMWindow::ModelType modelType, bool includeCommen
         untitledScriptString = (modelType == QtSLiMWindow::ModelType::WF) ? defaultWFScriptString_NC() : defaultNonWFScriptString_NC();
     
     lastSavedString = QString::fromStdString(untitledScriptString);
+    lastSavedDate = QDateTime::currentDateTime();
     scriptChangeObserved = false;
     
     ui->scriptTextEdit->setPlainText(lastSavedString);
@@ -256,6 +267,7 @@ QtSLiMWindow::QtSLiMWindow(const QString &recipeName, const QString &recipeScrip
     
     // set up the initial script
     lastSavedString = recipeScript;
+    lastSavedDate = QDateTime::currentDateTime();
     scriptChangeObserved = false;
     
     ui->scriptTextEdit->setPlainText(recipeScript);
@@ -336,27 +348,30 @@ void QtSLiMWindow::init(void)
     if (qtSLiMAppDelegate->launchedFromShell())
         sim_working_dir = qtSLiMAppDelegate->QtSLiMCurrentWorkingDirectory();
     else
-    #ifdef _WIN32
+#ifdef _WIN32
         sim_working_dir = QStandardPaths::writableLocation(QStandardPaths::DesktopLocation).toStdString();
-    #else
+#else
         sim_working_dir = Eidos_ResolvedPath("~/Desktop");
-    #endif
+#endif
     
     // Check that our chosen working directory actually exists; if not, use ~
     struct stat buffer;
     
     if (stat(sim_working_dir.c_str(), &buffer) != 0)
-    #ifdef _WIN32
+#ifdef _WIN32
         sim_working_dir = QStandardPaths::writableLocation(QStandardPaths::HomeLocation).toStdString();
-    #else
+#else
         sim_working_dir = Eidos_ResolvedPath("~");
-    #endif
+#endif
     
     sim_requested_working_dir = sim_working_dir;	// return to the working dir on recycle unless the user overrides it
     
     // Wire up things that set the window to be modified.
     connect(ui->scriptTextEdit, &QPlainTextEdit::textChanged, this, &QtSLiMWindow::documentWasModified);
     connect(ui->scriptTextEdit, &QPlainTextEdit::textChanged, this, &QtSLiMWindow::scriptTexteditChanged);
+    
+    // Watch for app activation to check for external modification of our file
+    connect(qApp, &QApplication::applicationStateChanged, this, &QtSLiMWindow::appStateChanged);
     
     // Watch for changes to the selection in the population tableview
     connect(ui->subpopTableView->selectionModel(), &QItemSelectionModel::selectionChanged, this, &QtSLiMWindow::subpopSelectionDidChange);
@@ -370,7 +385,7 @@ void QtSLiMWindow::init(void)
     // but since this seems to be fragile, I'm going to leave *both* approaches in the code here, maybe which
     // approach works depends on the Qt version or the platform or something.  Forward in all directions!
     ui->tickLineEdit->setFocusPolicy(Qt::FocusPolicy::NoFocus);
-    QTimer::singleShot(0, [this]() { ui->tickLineEdit->setFocusPolicy(Qt::FocusPolicy::StrongFocus); });
+    QTimer::singleShot(0, this, [this]() { ui->tickLineEdit->setFocusPolicy(Qt::FocusPolicy::StrongFocus); });
     ui->scriptTextEdit->setFocus();
     
     // watch for a change to light mode / dark mode, to customize display of the play speed slider for example
@@ -601,19 +616,18 @@ void QtSLiMWindow::initializeUI(void)
     
     // fix the layout of the window
     ui->scriptHeaderLayout->setSpacing(4);
-    ui->scriptHeaderLayout->setMargin(0);
+    ui->scriptHeaderLayout->setContentsMargins(0, 0, 0, 0);
     ui->scriptHeaderLabel->setContentsMargins(8, 0, 15, 0);
 
     ui->outputHeaderLayout->setSpacing(4);
-    ui->outputHeaderLayout->setMargin(0);
+    ui->outputHeaderLayout->setContentsMargins(0, 0, 0, 0);
     ui->outputHeaderLabel->setContentsMargins(8, 0, 15, 0);
 
     ui->playControlsLayout->setSpacing(8);
-    ui->playControlsLayout->setMargin(0);
+    ui->playControlsLayout->setContentsMargins(0, 0, 0, 0);
     
     // substitute a custom layout subclass for playControlsLayout to lay out the profile button specially
     {
-        QtSLiMPlayControlsLayout *newPlayControlsLayout = new QtSLiMPlayControlsLayout();
         int indexOfPlayControlsLayout = -1;
         
         // QLayout::indexOf(QLayoutItem *layoutItem) wasn't added until 5.12, oddly
@@ -623,6 +637,7 @@ void QtSLiMWindow::initializeUI(void)
         
         if (indexOfPlayControlsLayout >= 0)
         {
+            QtSLiMPlayControlsLayout *newPlayControlsLayout = new QtSLiMPlayControlsLayout();
             ui->topRightLayout->insertItem(indexOfPlayControlsLayout, newPlayControlsLayout);
             newPlayControlsLayout->setParent(ui->topRightLayout);   // surprising that insertItem() doesn't do this...; but this sets our parentWidget also, correctly
             
@@ -635,7 +650,7 @@ void QtSLiMWindow::initializeUI(void)
             
             // Transfer properties of the old layout
             newPlayControlsLayout->setSpacing(ui->playControlsLayout->spacing());
-            newPlayControlsLayout->setMargin(ui->playControlsLayout->margin());
+            newPlayControlsLayout->setContentsMargins(ui->playControlsLayout->contentsMargins());
             
             // Get rid of the old layout
             ui->topRightLayout->removeItem(ui->playControlsLayout);
@@ -656,6 +671,12 @@ void QtSLiMWindow::initializeUI(void)
     
     ui->outputTextEdit->setScriptType(QtSLiMTextEdit::NoScriptType);
     ui->outputTextEdit->setSyntaxHighlightType(QtSLiMTextEdit::OutputHighlighting);
+    
+    // set up the script block label, to the right of the Jump menu
+    QtSLiMPreferencesNotifier &prefsNotifier = QtSLiMPreferencesNotifier::instance();
+    
+    connect(&prefsNotifier, &QtSLiMPreferencesNotifier::displayFontPrefChanged, this, &QtSLiMWindow::displayFontPrefChanged);
+    displayFontPrefChanged();
     
     // set button states
     ui->toggleDrawerButton->setChecked(false);
@@ -723,6 +744,17 @@ void QtSLiMWindow::initializeUI(void)
     
     // Set up the Window menu, which updates on demand
     connect(ui->menuWindow, &QMenu::aboutToShow, this, &QtSLiMWindow::updateWindowMenu);
+}
+
+void QtSLiMWindow::displayFontPrefChanged(void)
+{
+    // Xcode doesn't use its monospace for this, and it does look a bit out of place in the UI
+    // So let's try it allowing the font to remain the default system font...?
+//    QtSLiMPreferencesNotifier &prefs = QtSLiMPreferencesNotifier::instance();
+//    QFont displayFont = prefs.displayFontPref(nullptr);
+    
+//    displayFont.setPointSize(13);
+//    ui->scriptBlockLabel->setFont(displayFont);
 }
 
 void QtSLiMWindow::applicationPaletteChanged(void)
@@ -932,6 +964,50 @@ void QtSLiMWindow::invalidateUI(void)
     }
 }
 
+QtSLiMGraphView *QtSLiMWindow::graphViewWithTitle(QString title)
+{
+    // This searches through our child views for a graph window with the requested title
+    const QObjectList &child_objects = children();
+    
+    for (QObject *child_object : child_objects)
+    {
+        QWidget *child_widget = qobject_cast<QWidget *>(child_object);
+        
+        if (child_widget && child_widget->isVisible() && (child_widget->windowFlags() & Qt::Window))
+        {
+            QtSLiMGraphView *graphView = graphViewForGraphWindow(child_widget);
+            
+            if (graphView && (graphView->graphTitle() == title))
+                return graphView;
+        }
+    }
+    
+    return nullptr;
+}
+
+int QtSLiMWindow::graphViewCount(void)
+{
+    // This searches through our child views for graph windows and returns a count
+    int count = 0;
+    
+    const QObjectList &child_objects = children();
+    
+    for (QObject *child_object : child_objects)
+    {
+        QWidget *child_widget = qobject_cast<QWidget *>(child_object);
+        
+        if (child_widget && child_widget->isVisible() && (child_widget->windowFlags() & Qt::Window))
+        {
+            QtSLiMGraphView *graphView = graphViewForGraphWindow(child_widget);
+            
+            if (graphView)
+                count++;
+        }
+    }
+    
+    return count;
+}
+
 const QColor &QtSLiMWindow::blackContrastingColorForIndex(int index)
 {
     static std::vector<QColor> colorArray;
@@ -1040,6 +1116,14 @@ void QtSLiMWindow::closeEvent(QCloseEvent *p_event)
         // We used to save the window size/position here, but now that is done in moveEvent() / resizeEvent()
         p_event->accept();
         
+        // In case we are playing when we get closed, emit a signal to un-highlight the app icon
+        if (continuousPlayOn_)
+        {
+            continuousPlayOn_ = false;
+            //updateUIEnabling();           // not needed, the window is going away anyway
+            emit playStateChanged();
+        }
+        
         // On macOS, we turn off the automatic quit on last window close, for Qt 5.15.2.
         // In that case, we no longer get freed when we close, because we need to stick around
         // to make the global menubar work; see QtSLiMWindow::init().  So when we're closing,
@@ -1111,7 +1195,7 @@ bool QtSLiMWindow::isScriptModified(void)
     // We used to use Qt's isWindowModified() change-tracking system.  Unfortunately, apparently that is broken on Debian;
     // see https://github.com/MesserLab/SLiM/issues/370.  It looks like Qt internally calls textChanged() and modifies the
     // document when it shouldn't, resulting in untitled documents being marked dirty.  So now we check whether the
-    // script string has been changed from was was last saved to disk, or from their initial state if they are not
+    // script string has been changed from when it was last saved to disk, or from its initial state if it is not
     // based on a disk file.  Once a change has been observed, the document stays dirty; it doesn't revert to clean if
     // the script string goes back to its original state (although smart, that would be non-standard).  BCH 10/24/2023
     if (scriptChangeObserved)
@@ -1221,6 +1305,7 @@ void QtSLiMWindow::loadFile(const QString &fileName)
     QString contents = in.readAll();
     
     lastSavedString = contents;
+    lastSavedDate = QDateTime::currentDateTime();
     scriptChangeObserved = false;
     
     ui->scriptTextEdit->setPlainText(contents);
@@ -1250,6 +1335,7 @@ void QtSLiMWindow::loadRecipe(const QString &recipeName, const QString &recipeSc
     clearOutputClicked();
     
     lastSavedString = recipeScript;
+    lastSavedDate = QDateTime::currentDateTime();
     scriptChangeObserved = false;
     
     ui->scriptTextEdit->setPlainText(recipeScript);
@@ -1277,6 +1363,7 @@ bool QtSLiMWindow::saveFile(const QString &fileName)
     }
     
     lastSavedString = ui->scriptTextEdit->toPlainText();
+    lastSavedDate = QDateTime::currentDateTime();
     scriptChangeObserved = false;
 
     QTextStream out(&file);
@@ -1336,8 +1423,101 @@ void QtSLiMWindow::tile(const QMainWindow *previous)
     if (!topFrameWidth)
         topFrameWidth = 40;
     const QPoint position = previous->pos() + 2 * QPoint(topFrameWidth, topFrameWidth);
+    
+#if (QT_VERSION < QT_VERSION_CHECK(6, 0, 0))
+    // In some versions of Qt5, such as 5.9.5, QScreen did not yet exist
     if (QApplication::desktop()->availableGeometry(this).contains(rect().bottomRight() + position))
+#else
+    if (this->screen()->availableGeometry().contains(rect().bottomRight() + position))
+#endif
         move(position);
+}
+
+void QtSLiMWindow::appStateChanged(Qt::ApplicationState state)
+{
+    if (state == Qt::ApplicationState::ApplicationActive)
+    {
+        // the motivation for listening to these state changes is to check for externally-edited
+        // documents; that can only happen for files that have been saved to disk
+        if (!isUntitled && !isRecipe && !isTransient && !isZombieWindow_ && currentFile.length() && lastSavedDate.isValid())
+        {
+            if (QFile::exists(currentFile))
+            {
+                QFileInfo fileInfo(currentFile);
+                QString filename = fileInfo.fileName();         // last path component, for showing to the user
+                QDateTime modDate = fileInfo.lastModified();
+                
+                if (modDate > lastSavedDate)
+                {
+                    // check for readability different file contents
+                    QFile file(currentFile);
+                    
+                    if (!file.open(QFile::ReadOnly | QFile::Text)) {
+                        QMessageBox::warning(this, "SLiMgui", QString("File %1 appears to have been modified externally (on disk), but cannot be read; you may wish to check permissions.").arg(filename));
+                        return;
+                    }
+                    
+                    QTextStream in(&file);
+                    QString contents = in.readAll();
+                    
+                    if (contents == lastSavedString)
+                    {
+                        // the mod date was tweaked, but the file contents are the same; silently update our mod date
+                        //qDebug() << "no mod: date changed but identical contents";
+                        lastSavedDate = modDate;
+                        return;
+                    }
+                    
+                    //qDebug() << "EXTERNAL MOD!";
+                    
+                    // The file has changed externally; we need to ask the user what to do
+                    QMessageBox::StandardButton ret = QMessageBox::No;
+                    
+                    if (isScriptModified())
+                    {
+                        // If the script in SLiMgui has been changed (i.e., there are unsaved changes), reloading
+                        // is quite dangerous so we require user confirmation with a default of No.
+                        QString prompt = QString("File %1 has been modified externally (on disk); do you wish to reload it?\n\nThere are unsaved changes in SLiMgui; if you reload, those changes will be lost!").arg(filename);
+                        
+                        ret = QMessageBox::critical(this, "SLiMgui", prompt, QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+                    }
+                    else
+                    {
+                        // If that is not the case, we can suggest the reload as a safer operation with a default
+                        // of Yes.  In this case, we also allow the user to auto-confirm in Preferences.
+                        QtSLiMPreferencesNotifier &prefsNotifier = QtSLiMPreferencesNotifier::instance();
+                        
+                        if (prefsNotifier.reloadOnSafeExternalEditsPref())
+                        {
+                            ret = QMessageBox::Yes;
+                        }
+                        else
+                        {
+                            QString prompt = QString("File %1 has been modified externally (on disk); do you wish to reload it?\n\n(There are no unsaved changes in SLiMgui that would be lost.  In the Preferences panel you can choose to automatically reload, in this case.)").arg(filename);
+                            
+                            ret = QMessageBox::question(this, "SLiMgui", prompt, QMessageBox::Yes | QMessageBox::No, QMessageBox::Yes);
+                        }
+                    }
+                    
+                    if (ret == QMessageBox::Yes)
+                        loadFile(currentFile);
+                }
+                else
+                {
+                    //qDebug() << "no mod: mod date equal";
+                }
+            }
+            else
+            {
+                QMessageBox::warning(this, "SLiMgui", QString("File %1 no longer exists on disk; you may wish to re-save or close.").arg(QDir::toNativeSeparators(currentFile)));
+                return;
+            }
+        }
+        else
+        {
+            //qDebug() << "no mod: unsaved file";
+        }
+    }
 }
 
 
@@ -1861,6 +2041,8 @@ void QtSLiMWindow::startNewSimulationFromScript(void)
         community = new Community();
         community->InitializeFromFile(infile);
         community->InitializeRNGFromSeed(nullptr);
+        community->FinishInitialization();
+        
         community->SetDebugPoints(&ui->scriptTextEdit->debuggingPoints());
 
 		// Swap out our RNG
@@ -2070,6 +2252,12 @@ void QtSLiMWindow::updateOutputViews(void)
     if (!newErrors.empty())
     {
         QString str = QString::fromStdString(newErrors);
+        
+        // BCH 7/17/2024: Decided to send debug output to the main window also, not just the debug output tab
+        // of the debug window; otherwise important messages get lost.  So the main window shows both.
+        ui->outputTextEdit->moveCursor(QTextCursor::End);
+        ui->outputTextEdit->insertPlainText(str);
+        ui->outputTextEdit->moveCursor(QTextCursor::End);
         
         if (debugWindow)
         {
@@ -2435,8 +2623,22 @@ void QtSLiMWindow::updateAfterTickFull(bool fullUpdate)
     updateChromosomeViewSetup();
     
     // Flush any buffered output to files every full update, so that the user sees changes to the files without too much delay
+    // NOTE THAT THE WORKING DIRECTORY HAS BEEN CHANGED BACK AT THIS POINT!
 	if (fullUpdate)
-		Eidos_FlushFiles();
+    {
+		bool flush_success = Eidos_FlushFiles();
+        
+        if (!flush_success)
+        {
+            // Showing a message right here is a bit disruptive to the flow of the code; for example, if the step button is pressed,
+            // it will stick down and bad things will happen.  So we need to actually halt the simulation with the error.  We might
+            // as well do that with the standard error termination mechanism.  Hopefully this will never be hit anyway.  BCH 3/18/2024
+            gEidosTermination.clear();
+            gEidosTermination.str("");
+            gEidosTermination << "ERROR (Eidos_FlushFiles): A compressed file buffer failed to write out to disk.  Please check file paths, filesystem writeability and permissions, available disk space, and other possible causes of file I/O problems.\n";
+            gEidosErrorContext = EidosErrorContext{{-1, -1, -1, -1}, nullptr, false};
+        }
+    }
 	
 	// Check whether the simulation has terminated due to an error; if so, show an error message with a delayed perform
 	checkForSimulationTermination();
@@ -2444,17 +2646,25 @@ void QtSLiMWindow::updateAfterTickFull(bool fullUpdate)
 	// The rest of the code here needs to be careful about the invalid state; we do want to update our controls when invalid, but sim is nil.
     bool inInvalidState = (!community || !community->simulation_valid_ || invalidSimulation());
     
-	if (fullUpdate)
+    if (fullUpdate)
+        updateOutputViews();
+    
+    // Minimal population table updating.  When the list of subpops changes, we always need to redisplay, otherwise the display
+    // list is outdated and might contain deallocated Subpopulations.  Other than that, though, we only want to redisplay
+    // on full updates, because reloading and redisplaying the tableview can be quite expensive.  The QtSLiMPopulationTableModel
+    // keeps a cache of its display list, and we can use that to see whether a redisplay is needed or not.
+    std::vector<Subpopulation *> newDisplaySubpops = listedSubpopulations();
+    
+    if (fullUpdate || populationTableModel_->needsUpdateForDisplaySubpops(newDisplaySubpops))
 	{
-		// FIXME it would be good for this updating to be minimal; reloading the tableview every time, etc., is quite wasteful...
-		updateOutputViews();
-		
+        //qDebug() << "UPDATING TABLE";
+        
 		// Reloading the subpop tableview is tricky, because we need to preserve the selection across the reload, while also noting that the selection is forced
 		// to change when a subpop goes extinct.  The current selection is noted in the gui_selected_ ivar of each subpop.  So what we do here is reload the tableview
 		// while suppressing our usual update of our selection state, and then we try to re-impose our selection state on the new tableview content.  If a subpop
 		// went extinct, we will fail to notice the selection change; but that is OK, since we force an update of populationView and chromosomeZoomed below anyway.
-		reloadingSubpopTableview = true;
-        populationTableModel_->reloadTable();
+		reloadingSubpopTableview = true;                        // suppresses QtSLiMWindow::subpopSelectionDidChange()
+        populationTableModel_->reloadTable(newDisplaySubpops);  // invalidates newDisplaySubpops with std::swap()
 		
         int subpopCount = populationTableModel_->rowCount();
         
@@ -2486,6 +2696,10 @@ void QtSLiMWindow::updateAfterTickFull(bool fullUpdate)
         if ((ui->subpopTableView->selectionModel()->selectedRows().size() == 0) && subpopCount)
             ui->subpopTableView->selectAll();
 	}
+    else
+    {
+        //qDebug() << "skipping unnecessary table update";
+    }
 	
 	// Now update our other UI, some of which depends upon the state of subpopTableView
     ui->individualsWidget->update();
@@ -2876,8 +3090,10 @@ void QtSLiMWindow::updateMenuEnablingSHARED(QWidget *p_focusWidget)
     
     // actions handled by QtSLiMScriptTextEdit only
     QtSLiMScriptTextEdit *scriptEdit = dynamic_cast<QtSLiMScriptTextEdit*>(p_focusWidget);
-    bool isModifiableScriptTextEdit = (scriptEdit && !scriptEdit->isReadOnly());
+    bool isScriptTextEdit = (!!scriptEdit);
+    bool isModifiableScriptTextEdit = (isScriptTextEdit && !scriptEdit->isReadOnly());
     
+    ui->actionCopyAsHTML->setEnabled(isScriptTextEdit);
     ui->actionShiftLeft->setEnabled(isModifiableScriptTextEdit);
     ui->actionShiftRight->setEnabled(isModifiableScriptTextEdit);
     ui->actionCommentUncomment->setEnabled(isModifiableScriptTextEdit);
@@ -2904,14 +3120,26 @@ void QtSLiMWindow::updateWindowMenu(void)
     // Clear out old actions, up to the separator
     do
     {
-        QAction *lastAction = ui->menuWindow->actions().last();
+        const QList<QAction *> actions = ui->menuWindow->actions();
+        QAction *lastAction = actions.last();
         
         if (!lastAction)
             break;
         if ((lastAction->objectName().length() == 0) || (lastAction->objectName() == "action"))
             break;
         
+        // I have seen this loop fail to terminate, because apparently asking for an action
+        // to be removed sometimes fails.  So now we watch the number of actions and make
+        // sure it goes down, otherwise we bail.  BCH 1/29/2024
+        int actionCount = actions.count();
+        
         ui->menuWindow->removeAction(lastAction);
+        
+        if (ui->menuWindow->actions().count() >= actionCount)
+        {
+            qDebug() << "QtSLiMWindow::updateWindowMenu() menu clearing terminating due to malfunction";
+            break;
+        }
     }
     while (true);
     
@@ -3058,7 +3286,7 @@ void QtSLiMWindow::displayProfileResults(void)
     
     profile_window->setLayout(window_layout);
     
-    window_layout->setMargin(0);
+    window_layout->setContentsMargins(0, 0, 0, 0);
     window_layout->setSpacing(0);
     window_layout->addWidget(textEdit);
     
@@ -3091,8 +3319,12 @@ void QtSLiMWindow::displayProfileResults(void)
     QFont optimaFont;
     {
         // We want a body font of Optima on the Mac; on non-Mac platforms we'll just use the default system font for now
+#if (QT_VERSION < QT_VERSION_CHECK(6, 0, 0))
         QFontDatabase fontdb;
         QStringList families = fontdb.families();
+#else
+        QStringList families = QFontDatabase::families();
+#endif
         
         // Use filter() to look for matches, since the foundry can be appended after the name (why isn't this easier??)
         if (families.filter("Optima").size() > 0)              // good on Mac
@@ -3527,7 +3759,7 @@ void QtSLiMWindow::displayProfileResults(void)
 		EidosFunctionMap &function_map = community->FunctionMap();
 		std::vector<const EidosFunctionSignature *> userDefinedFunctions;
 		
-		for (auto functionPairIter : function_map)
+		for (const auto &functionPairIter : function_map)
 		{
 			const EidosFunctionSignature *signature = functionPairIter.second.get();
 			
@@ -4367,6 +4599,22 @@ void QtSLiMWindow::finish_eidos_pauseExecution(void)
 	}
 }
 
+EidosValue_SP QtSLiMWindow::eidos_logFileData(LogFile *logFile, EidosValue *column_value)
+{
+    // start by flushing any pending output to the debug output window
+    updateOutputViews();
+    
+    // then fetch the data from the debug output window
+    QtSLiMDebugOutputWindow *debugOutput = debugOutputWindow();
+    
+    if (column_value->Type() == EidosValueType::kValueInt)
+        return debugOutput->dataForColumn(logFile, column_value->IntAtIndex_NOCAST(0, nullptr));
+    else
+        return debugOutput->dataForColumn(logFile, column_value->StringAtIndex_NOCAST(0, nullptr));
+    
+    return gStaticEidosValueNULL;
+}
+
 void QtSLiMWindow::eidos_openDocument(QString path)
 {
     if (path.endsWith(".pdf", Qt::CaseInsensitive))
@@ -4387,6 +4635,146 @@ void QtSLiMWindow::eidos_pauseExecution(void)
         
         QMetaObject::invokeMethod(this, "finish_eidos_pauseExecution", Qt::QueuedConnection);   // this will actually stop continuous play
 	}
+}
+
+QtSLiMGraphView_CustomPlot *QtSLiMWindow::eidos_createPlot(QString title, double *x_range, double *y_range, QString x_label, QString y_label, double width, double height, bool horizontalGrid, bool verticalGrid, bool fullBox, double axisLabelSize, double tickLabelSize)
+{
+    QtSLiMGraphView *graphView = graphViewWithTitle(title);
+    QtSLiMGraphView_CustomPlot *customPlot = nullptr;
+    QWidget *graphWindow = nullptr;
+    bool createdWindow = false;
+    
+    if (graphView)
+    {
+        customPlot = dynamic_cast<QtSLiMGraphView_CustomPlot *>(graphView);
+        
+        if (!customPlot)
+            EIDOS_TERMINATION << "ERROR (SLiMgui::ExecuteMethod_createPlot): a plot window exists with the given title, but it is not a custom plot window." << EidosTerminate(nullptr);
+        
+        graphWindow = graphView->window();
+    }
+    else
+    {
+        customPlot = new QtSLiMGraphView_CustomPlot(this, this);
+        
+        // width/height are 0 if they were NULL in the Eidos call; supply the default size here
+        if (width == 0)
+            width = 300;
+        
+        if (height == 0)
+            height = 300;
+        
+        if ((width < 250) || (height < 250))
+            EIDOS_TERMINATION << "ERROR (SLiMgui::ExecuteMethod_createPlot): createPlot() requires the window width and height to be at least 250 pixels." << EidosTerminate(nullptr);
+        
+        graphWindow = graphWindowWithView(customPlot, width, height);
+        createdWindow = true;
+    }
+    
+    if (customPlot && graphWindow)
+    {
+        customPlot->controllerRecycled();
+        customPlot->setTitle(title);
+        customPlot->setXLabel(x_label);
+        customPlot->setYLabel(y_label);
+        customPlot->setDataRanges(x_range, y_range);
+        customPlot->setShowHorizontalGrid(horizontalGrid);
+        customPlot->setShowVerticalGrid(verticalGrid);
+        customPlot->setShowFullBox(fullBox);
+        
+        if (axisLabelSize > 0)
+            customPlot->setAxisLabelSize(axisLabelSize);
+        
+        if (tickLabelSize > 0)
+            customPlot->setTickLabelSize(tickLabelSize);
+        
+        if (createdWindow)
+        {
+            graphWindow->show();
+            graphWindow->raise();
+            graphWindow->activateWindow();
+        }
+    }
+    else
+    {
+        qApp->beep();
+    }
+    
+    return customPlot;
+}
+
+QtSLiMGraphView_CustomPlot *QtSLiMWindow::eidos_plotWithTitle(QString title)
+{
+    QtSLiMGraphView *graphView = graphViewWithTitle(title);
+    QtSLiMGraphView_CustomPlot *customPlot = nullptr;
+    
+    if (graphView)
+    {
+        customPlot = dynamic_cast<QtSLiMGraphView_CustomPlot *>(graphView);
+        
+        if (customPlot)
+        {
+            Plot *plotobj = customPlot->eidosPlotObject();
+            
+            if (plotobj)
+                return customPlot;
+        }
+        
+        EIDOS_TERMINATION << "ERROR (SLiMgui::ExecuteMethod_plotWithTitle): a plot window exists with the given title, but it is not a custom plot window created with createPlot()." << EidosTerminate(nullptr);
+    }
+    else
+    {
+        // when there is no plot window with the given title, it is not an error
+        return nullptr;
+    }
+}
+
+void QtSLiMWindow::plotLogFileData_1D(QString title, QString y_title, double *y_values, int data_count)
+{
+    // To plot logfile data, we call through to the same APIs as for Eidos-based plotting
+    QtSLiMGraphView_CustomPlot *plot = eidos_createPlot(title, nullptr, nullptr, "time", y_title, 0, 0, -1, -1, -1, -1, -1);
+    
+    double *x_values = (double *)malloc(data_count * sizeof(double));
+    for (int i = 0; i < data_count; ++i)
+        x_values[i] = i;
+    
+    std::vector<QColor> *color = new std::vector<QColor>;
+    color->emplace_back(255, 0, 0, 255);
+    
+    std::vector<double> *lwd = new std::vector<double>;
+    lwd->push_back(1.5);
+    
+    plot->addLineData(x_values, y_values, data_count, color, lwd);     // takes buffers from us
+}
+
+void QtSLiMWindow::plotLogFileData_2D(QString title, QString x_title, QString y_title, double *x_values, double *y_values, int data_count, bool makeScatterPlot)
+{
+    // To plot logfile data, we call through to the same APIs as for Eidos-based plotting
+    QtSLiMGraphView_CustomPlot *plot = eidos_createPlot(title, nullptr, nullptr, x_title, y_title, 0, 0, -1, -1, -1, -1, -1);
+    
+    std::vector<QColor> *color = new std::vector<QColor>;
+    color->emplace_back(0, 0, 0, 255);
+    
+    std::vector<double> *lwd = new std::vector<double>;
+    lwd->push_back(1.0);
+    
+    if (makeScatterPlot)
+    {
+        std::vector<int> *symbol = new std::vector<int>;
+        symbol->push_back(16);
+        
+        std::vector<QColor> *border = new std::vector<QColor>;
+        border->emplace_back(0, 0, 0, 255);
+        
+        std::vector<double> *size = new std::vector<double>;
+        size->push_back(0.5);
+        
+        plot->addPointData(x_values, y_values, data_count, symbol, color, border, lwd, size);      // takes buffers from us
+    }
+    else
+    {
+        plot->addLineData(x_values, y_values, data_count, color, lwd);                             // takes buffers from us
+    }
 }
 
 
@@ -4860,6 +5248,14 @@ void QtSLiMWindow::chromosomeActionRunMenu(void)
     chromosomeActionReleased();
 }
 
+#if (QT_VERSION < QT_VERSION_CHECK(6, 0, 0))
+// In some versions of Qt5, such as 5.9.5, QChar::FormFeed did not yet exist
+#define Eidos_FormFeed 0x0C
+#else
+// In Qt6, QChar::FormFeed is the preferred symbol for this
+#define Eidos_FormFeed QChar::FormFeed
+#endif
+
 void QtSLiMWindow::jumpToPopupButtonRunMenu(void)
 {
     QPlainTextEdit *scriptTE = ui->scriptTextEdit;
@@ -4907,7 +5303,7 @@ void QtSLiMWindow::jumpToPopupButtonRunMenu(void)
             
             // Exclude comments that contain newlines and similar characters
             if ((comment.indexOf(QChar::LineFeed) != -1) ||
-                    (comment.indexOf(0x0C) != -1) ||
+                    (comment.indexOf(Eidos_FormFeed) != -1) ||
                     (comment.indexOf(QChar::CarriageReturn) != -1) ||
                     (comment.indexOf(QChar::ParagraphSeparator) != -1) ||
                     (comment.indexOf(QChar::LineSeparator) != -1))
@@ -5091,8 +5487,8 @@ void QtSLiMWindow::jumpToPopupButtonRunMenu(void)
                 // Remove everything including and after the first newline
                 if (decl.indexOf(QChar::LineFeed) != -1)
                     decl.truncate(decl.indexOf(QChar::LineFeed));
-                if (decl.indexOf(0x0C) != -1)                       // form feed; apparently QChar::FormFeed did not exist in older Qt versions
-                    decl.truncate(decl.indexOf(0x0C));
+                if (decl.indexOf(Eidos_FormFeed) != -1)
+                    decl.truncate(decl.indexOf(Eidos_FormFeed));
                 if (decl.indexOf(QChar::CarriageReturn) != -1)
                     decl.truncate(decl.indexOf(QChar::CarriageReturn));
                 if (decl.indexOf(QChar::ParagraphSeparator) != -1)
@@ -5201,6 +5597,145 @@ void QtSLiMWindow::jumpToPopupButtonRunMenu(void)
     jumpToPopupButtonReleased();
 }
 
+void QtSLiMWindow::setScriptBlockLabelTextFromSelection(void)
+{
+    // this does a subset of the parsing logic of QtSLiMWindow::jumpToPopupButtonRunMenu()
+    // it is used to get the label text for the script block label, to the right of the Jump button
+    QPlainTextEdit *scriptTE = ui->scriptTextEdit;
+    QString currentScriptString = scriptTE->toPlainText();
+    QByteArray utf8bytes = currentScriptString.toUtf8();
+    const char *cstr = utf8bytes.constData();
+    
+    QTextCursor selection_cursor(scriptTE->textCursor());
+    int selStart = selection_cursor.selectionStart();
+    int selEnd = selection_cursor.selectionEnd();
+    
+    if (cstr)
+    {
+        // Figure out whether we have multispecies avatars, and thus want to use the "low brightness symbol" emoji for "ticks all" blocks.
+        // This emoji provides nicely lined up spacing in the menu, and indicates "ticks all" clearly; seems better than nothing.  It would
+        // be even better, perhaps, to have a spacer of emoji width, to make things line up without having a symbol displayed; unfortunately
+        // such a spacer does not seem to exist.  https://stackoverflow.com/questions/66496671/is-there-a-blank-unicode-character-matching-emoji-width
+        QString ticksAllAvatar;
+        
+        if (community && community->is_explicit_species_ && (community->all_species_.size() > 0))
+        {
+            bool hasAvatars = false;
+            
+            for (Species *species : community->all_species_)
+                if (species->avatar_.length() > 0)
+                    hasAvatars = true;
+            
+            if (hasAvatars)
+                ticksAllAvatar = QString::fromUtf8("\xF0\x9F\x94\x85");     // "low brightness symbol", https://www.compart.com/en/unicode/U+1F505
+        }
+        
+        SLiMEidosScript script(cstr);
+        
+        try {
+            script.Tokenize(true, false);            // make bad tokens as needed, do not keep nonsignificant tokens
+            script.ParseSLiMFileToAST(true);        // make bad nodes as needed (i.e. never raise, and produce a correct tree)
+            
+            // Extract SLiMEidosBlocks from the parse tree
+            const EidosASTNode *root_node = script.AST();
+            QString specifierAvatar;
+            
+            for (EidosASTNode *script_block_node : root_node->children_)
+            {
+                // handle species/ticks specifiers, which are identifier token nodes at the top level of the AST with one child
+                if ((script_block_node->token_->token_type_ == EidosTokenType::kTokenIdentifier) && (script_block_node->children_.size() == 1))
+                {
+                    EidosASTNode *specifierChild = script_block_node->children_[0];
+                    std::string specifierSpeciesName = specifierChild->token_->token_string_;
+                    Species *specifierSpecies = (community ? community->SpeciesWithName(specifierSpeciesName) : nullptr);
+                    
+                    if (specifierSpecies && specifierSpecies->avatar_.length())
+                        specifierAvatar = QString::fromStdString(specifierSpecies->avatar_);
+                    else if (!specifierSpecies && (specifierSpeciesName == "all"))
+                        specifierAvatar = ticksAllAvatar;
+                    
+                    continue;
+                }
+                
+                // Create the block and use it to find the string from the start of its declaration to the start of its code
+                SLiMEidosBlock *new_script_block = new SLiMEidosBlock(script_block_node);
+                int32_t decl_start = new_script_block->root_node_->token_->token_UTF16_start_;
+                int32_t code_end = new_script_block->compound_statement_node_->token_->token_UTF16_end_;
+                
+                if ((selStart >= decl_start) && (selStart <= code_end) && (selEnd <= code_end + 2))     // +2 allows a selection through the end brace and one more character (typically a newline)
+                {
+                    int32_t code_start = new_script_block->compound_statement_node_->token_->token_UTF16_start_;
+                    QString decl = currentScriptString.mid(decl_start, code_start - decl_start);
+                    
+                    // Remove everything including and after the first newline
+                    if (decl.indexOf(QChar::LineFeed) != -1)
+                        decl.truncate(decl.indexOf(QChar::LineFeed));
+                    if (decl.indexOf(Eidos_FormFeed) != -1)
+                        decl.truncate(decl.indexOf(Eidos_FormFeed));
+                    if (decl.indexOf(QChar::CarriageReturn) != -1)
+                        decl.truncate(decl.indexOf(QChar::CarriageReturn));
+                    if (decl.indexOf(QChar::ParagraphSeparator) != -1)
+                        decl.truncate(decl.indexOf(QChar::ParagraphSeparator));
+                    if (decl.indexOf(QChar::LineSeparator) != -1)
+                        decl.truncate(decl.indexOf(QChar::LineSeparator));
+                    
+                    // Extract a comment at the end and put it after a em-dash in the string
+                    int simpleCommentStart = decl.indexOf("//");
+                    int blockCommentStart = decl.indexOf("/*");
+                    QString comment;
+                    
+                    if ((simpleCommentStart != -1) && ((blockCommentStart == -1) || (simpleCommentStart < blockCommentStart)))
+                    {
+                        // extract a simple comment
+                        comment = decl.right(decl.length() - simpleCommentStart - 2);
+                        decl.truncate(simpleCommentStart);
+                    }
+                    else if ((blockCommentStart != -1) && ((simpleCommentStart == -1) || (blockCommentStart < simpleCommentStart)))
+                    {
+                        // extract a block comment
+                        comment = decl.right(decl.length() - blockCommentStart - 2);
+                        decl.truncate(blockCommentStart);
+                        
+                        int blockCommentEnd = comment.indexOf("*/");
+                        
+                        if (blockCommentEnd != -1)
+                            comment.truncate(blockCommentEnd);
+                    }
+                    
+                    // Calculate the end of the declaration string; trim off whitespace at the end
+                    decl = decl.trimmed();
+                    
+                    // Remove trailing whitespace, replace tabs with spaces, etc.
+                    decl = decl.simplified();
+                    comment = comment.trimmed();
+                    
+                    if (comment.length() > 0)
+                        decl = decl + "  —  " + comment;
+                               
+                               // If a species/ticks specifier was previously seen that provides us with an avatar, prepend that
+                               if (specifierAvatar.length())
+                        {
+                            decl = specifierAvatar + " " + decl;
+                            specifierAvatar.clear();
+                        }
+                    
+                    delete new_script_block;
+                        
+                    ui->scriptBlockLabel->setText(decl);
+                    return;
+                }
+                
+                delete new_script_block;
+            }
+        }
+        catch (...)
+        {
+        }
+    }
+    
+    ui->scriptBlockLabel->setText(QString(""));
+}
+
 void QtSLiMWindow::clearOutputClicked(void)
 {
     isTransient = false;    // Since the user has taken an interest in the window, clear the document's transient status
@@ -5288,35 +5823,34 @@ void QtSLiMWindow::displayGraphClicked(void)
             {
                 if (action == ui->actionGraph_1D_Population_SFS)
                     graphView = new QtSLiMGraphView_1DPopulationSFS(this, this);
-                if (action == ui->actionGraph_1D_Sample_SFS)
+                else if (action == ui->actionGraph_1D_Sample_SFS)
                     graphView = new QtSLiMGraphView_1DSampleSFS(this, this);
-                if (action == ui->actionGraph_2D_Population_SFS)
+                else if (action == ui->actionGraph_2D_Population_SFS)
                     graphView = new QtSLiMGraphView_2DPopulationSFS(this, this);
-                if (action == ui->actionGraph_2D_Sample_SFS)
+                else if (action == ui->actionGraph_2D_Sample_SFS)
                     graphView = new QtSLiMGraphView_2DSampleSFS(this, this);
-                if (action == ui->actionGraph_Mutation_Frequency_Trajectories)
+                else if (action == ui->actionGraph_Mutation_Frequency_Trajectories)
                     graphView = new QtSLiMGraphView_FrequencyTrajectory(this, this);
-                if (action == ui->actionGraph_Mutation_Loss_Time_Histogram)
+                else if (action == ui->actionGraph_Mutation_Loss_Time_Histogram)
                     graphView = new QtSLiMGraphView_LossTimeHistogram(this, this);
-                if (action == ui->actionGraph_Mutation_Fixation_Time_Histogram)
+                else if (action == ui->actionGraph_Mutation_Fixation_Time_Histogram)
                     graphView = new QtSLiMGraphView_FixationTimeHistogram(this, this);
-                if (action == ui->actionGraph_Population_Fitness_Distribution)
+                else if (action == ui->actionGraph_Population_Fitness_Distribution)
                     graphView = new QtSLiMGraphView_PopFitnessDist(this, this);
-                if (action == ui->actionGraph_Subpopulation_Fitness_Distributions)
+                else if (action == ui->actionGraph_Subpopulation_Fitness_Distributions)
                     graphView = new QtSLiMGraphView_SubpopFitnessDists(this, this);
-                if (action == ui->actionGraph_Fitness_Time)
+                else if (action == ui->actionGraph_Fitness_Time)
                     graphView = new QtSLiMGraphView_FitnessOverTime(this, this);
-                if (action == ui->actionGraph_Age_Distribution)
+                else if (action == ui->actionGraph_Age_Distribution)
                     graphView = new QtSLiMGraphView_AgeDistribution(this, this);
-                if (action == ui->actionGraph_Lifetime_Reproduce_Output)
+                else if (action == ui->actionGraph_Lifetime_Reproduce_Output)
                     graphView = new QtSLiMGraphView_LifetimeReproduction(this, this);
-                if (action == ui->actionGraph_Population_Size_Time)
+                else if (action == ui->actionGraph_Population_Size_Time)
                     graphView = new QtSLiMGraphView_PopSizeOverTime(this, this);
-                if (action == ui->actionGraph_Population_Visualization)
+                else if (action == ui->actionGraph_Population_Visualization)
                     graphView = new QtSLiMGraphView_PopulationVisualization(this, this);
             }
-            
-            if (action == ui->actionGraph_Multispecies_Population_Size_Time)
+            else if (action == ui->actionGraph_Multispecies_Population_Size_Time)
                 graphView = new QtSLiMGraphView_MultispeciesPopSizeOverTime(this, this);
             
             if (graphView)
@@ -5340,7 +5874,7 @@ void QtSLiMWindow::displayGraphClicked(void)
 
 static bool rectIsOnscreen(QRect windowRect)
 {
-    QList<QScreen *> screens = QGuiApplication::screens();
+    const QList<QScreen *> screens = QGuiApplication::screens();
     
     for (QScreen *screen : screens)
     {
@@ -5355,7 +5889,17 @@ static bool rectIsOnscreen(QRect windowRect)
 
 void QtSLiMWindow::positionNewSubsidiaryWindow(QWidget *p_window)
 {
-    // force geometry calculation, which is lazy
+    // If all previous graph windows have been closed, reset our positioning.  This scheme could be much smarter;
+    // we could actually try to avoid the specific rectangles covered by existing subsidiary windows.
+    if (graphViewCount() == 0)
+    {
+        openedGraphCount_left = 0;
+        openedGraphCount_right = 0;
+        openedGraphCount_top = 0;
+        openedGraphCount_bottom = 0;
+    }
+    
+    // Force geometry calculation, which is lazy
     p_window->setAttribute(Qt::WA_DontShowOnScreen, true);
     p_window->show();
     p_window->hide();
@@ -5499,7 +6043,7 @@ QWidget *QtSLiMWindow::imageWindowWithPath(const QString &path)
     QVBoxLayout *topLayout = new QVBoxLayout;
     
     image_window->setLayout(topLayout);
-    topLayout->setMargin(0);
+    topLayout->setContentsMargins(0, 0, 0, 0);
     topLayout->setSpacing(0);
     topLayout->addWidget(imageView);
     
@@ -5519,12 +6063,12 @@ QWidget *QtSLiMWindow::imageWindowWithPath(const QString &path)
     
     // Set up a context menu for copy/open
     QMenu *contextMenu = new QMenu("image_menu", imageView);
-    contextMenu->addAction("Copy Image", [path]() {
+    contextMenu->addAction("Copy Image", this, [path]() {
         QImage watched_image(path);     // get the current image from the filesystem
         QClipboard *clipboard = QGuiApplication::clipboard();
         clipboard->setImage(watched_image);
     });
-    contextMenu->addAction("Copy File Path", [path]() {
+    contextMenu->addAction("Copy File Path", this, [path]() {
         QClipboard *clipboard = QGuiApplication::clipboard();
         clipboard->setText(path);
     });
@@ -5532,7 +6076,7 @@ QWidget *QtSLiMWindow::imageWindowWithPath(const QString &path)
     // Reveal in Finder / Show in Explorer: see https://stackoverflow.com/questions/3490336
     // Note there is no good solution on Linux, so we do "Open File" instead
     #if defined(Q_OS_MACOS)
-    contextMenu->addAction("Reveal in Finder", [path]() {
+    contextMenu->addAction("Reveal in Finder", this, [path]() {
         const QFileInfo fileInfo(path);
         QStringList scriptArgs;
         scriptArgs << QLatin1String("-e") << QString::fromLatin1("tell application \"Finder\" to reveal POSIX file \"%1\"").arg(fileInfo.canonicalFilePath());
@@ -5578,7 +6122,7 @@ QWidget *QtSLiMWindow::imageWindowWithPath(const QString &path)
     return image_window;
 }
 
-QWidget *QtSLiMWindow::graphWindowWithView(QtSLiMGraphView *graphView)
+QWidget *QtSLiMWindow::graphWindowWithView(QtSLiMGraphView *graphView, double windowWidth, double windowHeight)
 {
     isTransient = false;    // Since the user has taken an interest in the window, clear the document's transient status
     
@@ -5588,7 +6132,7 @@ QWidget *QtSLiMWindow::graphWindowWithView(QtSLiMGraphView *graphView)
     
     graph_window->setWindowTitle(title);
     graph_window->setMinimumSize(250, 250);
-    graph_window->resize(300, 300);
+    graph_window->resize(windowWidth, windowHeight);
 #ifdef __APPLE__
     // set the window icon only on macOS; on Linux it changes the app icon as a side effect
     graph_window->setWindowIcon(QIcon());
@@ -5598,7 +6142,7 @@ QWidget *QtSLiMWindow::graphWindowWithView(QtSLiMGraphView *graphView)
     QVBoxLayout *topLayout = new QVBoxLayout;
     
     graph_window->setLayout(topLayout);
-    topLayout->setMargin(0);
+    topLayout->setContentsMargins(0, 0, 0, 0);
     topLayout->setSpacing(0);
     topLayout->addWidget(graphView);
     
@@ -5608,7 +6152,7 @@ QWidget *QtSLiMWindow::graphWindowWithView(QtSLiMGraphView *graphView)
     {
         buttonLayout = new QHBoxLayout;
         
-        buttonLayout->setMargin(5);
+        buttonLayout->setContentsMargins(5, 5, 5, 5);
         buttonLayout->setSpacing(5);
         topLayout->addLayout(buttonLayout);
         

@@ -3,7 +3,7 @@
 //  EidosScribe
 //
 //  Created by Ben Haller on 6/13/15.
-//  Copyright (c) 2015-2023 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2015-2024 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -36,6 +36,7 @@
 #include <iostream>
 #include <sstream>
 #include <stdexcept>
+#include <csignal>
 
 
 // User defaults keys
@@ -447,7 +448,9 @@ NSString *EidosDefaultsSuppressScriptCheckSuccessPanelKey = @"EidosSuppressScrip
 		[self validateSymbolTableAndFunctionMap];
 	
 	// Flush buffered output to files after every script execution, so the user sees the results
-	Eidos_FlushFiles();
+	// NOTE THAT THE WORKING DIRECTORY HAS BEEN CHANGED BACK AT THIS POINT!
+	if (!Eidos_FlushFiles())
+		raise(SIGTRAP);			// could be improved, but for SLiMguiLegacy this is OK
 	
 	return [NSString stringWithUTF8String:output.c_str()];
 }

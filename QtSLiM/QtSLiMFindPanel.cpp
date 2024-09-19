@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 3/24/2020.
-//  Copyright (c) 2020-2023 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2020-2024 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -28,8 +28,10 @@
 #include <QTextBlock>
 #include <QDebug>
 
+#include <utility>
+
 #include "QtSLiMAppDelegate.h"
-#include "QtSLiMWindow.h"
+#include "QtSLiMExtras.h"
 
 
 QtSLiMFindPanel &QtSLiMFindPanel::instance(void)

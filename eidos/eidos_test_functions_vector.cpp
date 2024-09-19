@@ -3,7 +3,7 @@
 //  Eidos
 //
 //  Created by Ben Haller on 7/11/20.
-//  Copyright (c) 2020-2023 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2020-2024 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -67,9 +67,9 @@ void _RunFunctionVectorConstructionTests_a_through_r(void)
 	EidosAssertScriptSuccess_I("c(object(), _Test(7))._yolk;", 7);
 	EidosAssertScriptSuccess_I("c(_Test(7), object())._yolk;", 7);
 	EidosAssertScriptSuccess("c(object(), object());", gStaticEidosValue_Object_ZeroVec);
-	//EidosAssertScriptSuccess("c(object(), object());", EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Object_vector(gEidosTestElement_Class)));		// should fail
-	EidosAssertScriptSuccess("c(object(), _Test(7)[F]);", EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Object_vector(gEidosTestElement_Class)));
-	EidosAssertScriptSuccess("c(_Test(7)[F], object());", EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Object_vector(gEidosTestElement_Class)));
+	//EidosAssertScriptSuccess("c(object(), object());", EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Object(gEidosTestElement_Class)));		// should fail
+	EidosAssertScriptSuccess("c(object(), _Test(7)[F]);", EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Object(gEidosTestElement_Class)));
+	EidosAssertScriptSuccess("c(_Test(7)[F], object());", EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Object(gEidosTestElement_Class)));
 	
 	// float()
 	EidosAssertScriptSuccess("float(0);", gStaticEidosValue_Float_ZeroVec);
@@ -129,7 +129,7 @@ void _RunFunctionVectorConstructionTests_a_through_r(void)
 	EidosAssertScriptSuccess("rep(3, 0);", gStaticEidosValue_Integer_ZeroVec);
 	EidosAssertScriptSuccess("rep(3.5, 0);", gStaticEidosValue_Float_ZeroVec);
 	EidosAssertScriptSuccess("rep('foo', 0);", gStaticEidosValue_String_ZeroVec);
-	EidosAssertScriptSuccess("rep(_Test(7), 0);", EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Object_vector(gEidosTestElement_Class)));
+	EidosAssertScriptSuccess("rep(_Test(7), 0);", EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Object(gEidosTestElement_Class)));
 	EidosAssertScriptSuccess_NULL("rep(NULL, 2);");
 	EidosAssertScriptSuccess_LV("rep(T, 2);", {true, true});
 	EidosAssertScriptSuccess_IV("rep(3, 2);", {3, 3});
@@ -161,7 +161,7 @@ void _RunFunctionVectorConstructionTests_a_through_r(void)
 	EidosAssertScriptSuccess("repEach(3, 0);", gStaticEidosValue_Integer_ZeroVec);
 	EidosAssertScriptSuccess("repEach(3.5, 0);", gStaticEidosValue_Float_ZeroVec);
 	EidosAssertScriptSuccess("repEach('foo', 0);", gStaticEidosValue_String_ZeroVec);
-	EidosAssertScriptSuccess("repEach(_Test(7), 0);", EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Object_vector(gEidosTestElement_Class)));
+	EidosAssertScriptSuccess("repEach(_Test(7), 0);", EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Object(gEidosTestElement_Class)));
 	EidosAssertScriptSuccess_NULL("repEach(NULL, 2);");
 	EidosAssertScriptSuccess_LV("repEach(T, 2);", {true, true});
 	EidosAssertScriptSuccess_IV("repEach(3, 2);", {3, 3});
@@ -265,6 +265,22 @@ void _RunFunctionVectorConstructionTests_s_through_z(void)
 	EidosAssertScriptRaise("setSeed(1); sample(1:5, 5, T, -1:3);", 12, "requires all weights to be");
 	EidosAssertScriptRaise("setSeed(1); sample(1:5, 5, T, 1:6);", 12, "to be the same length");
 	EidosAssertScriptRaise("setSeed(1); sample(1:5, 5, T, 1);", 12, "to be the same length");
+	
+	EidosAssertScriptSuccess_L("sample(1:1000, 10, replace=T, weights=runif(1000)); T;", true);				// code path only
+	EidosAssertScriptSuccess_L("sample(1:1000, 10, replace=T, weights=rdunif(1000, 0, 1000)); T;", true);	// code path only
+	EidosAssertScriptSuccess_L("sample(1.0:1000, 10, replace=T, weights=runif(1000)); T;", true);			// code path only
+	EidosAssertScriptSuccess_L("sample(1.0:1000, 10, replace=T, weights=rdunif(1000, 0, 1000)); T;", true);	// code path only
+	EidosAssertScriptSuccess_L("sample(((1:1000) % 2) == 1, 10, replace=T, weights=runif(1000)); T;", true);	// code path only
+	EidosAssertScriptSuccess_L("sample(((1:1000) % 2) == 1, 10, replace=T, weights=rdunif(1000, 0, 1000)); T;", true);	// code path only
+	EidosAssertScriptRaise("sample(1:1000, 10, replace=T, weights=c(runif(999), -1));", 0, "requires all weights to be");
+	EidosAssertScriptRaise("sample(1:1000, 10, replace=T, weights=c(rdunif(999, 0, 1000), -1));", 0, "requires all weights to be");
+	EidosAssertScriptRaise("sample(1:1000, 10, replace=T, weights=rep(0, 1000));", 0, "weights summing to");
+	EidosAssertScriptRaise("sample(1:1000, 10, replace=T, weights=rep(0.0, 1000));", 0, "weights summing to");
+	
+	EidosAssertScriptSuccess_I("sum(sample(((0:100) % 2) == 1, 101, replace=F));", 50);
+	EidosAssertScriptSuccess_I("sum(sample(((0:100) % 2) == 0, 101, replace=F));", 51);
+	EidosAssertScriptSuccess_I("sum(sample(0:100, 101, replace=F));", 5050);
+	EidosAssertScriptSuccess_F("sum(sample(0.0:100, 101, replace=F));", 5050);
 	
 	// seq()
 	EidosAssertScriptSuccess_IV("seq(1, 5);", {1, 2, 3, 4, 5});

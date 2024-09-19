@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 12/26/14.
-//  Copyright (c) 2014-2023 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2014-2024 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -100,9 +100,12 @@ static const char *SLIM_TREES_FILE_VERSION = "0.8";				// SLiM 4.0.x onward, wit
 #pragma mark -
 
 Species::Species(Community &p_community, slim_objectid_t p_species_id, const std::string &p_name) :
-	self_symbol_(EidosStringRegistry::GlobalStringIDForString(p_name), EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Object_singleton(this, gSLiM_Species_Class))),
+	self_symbol_(EidosStringRegistry::GlobalStringIDForString(p_name), EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Object(this, gSLiM_Species_Class))),
     x_experiments_enabled_(false), model_type_(p_community.model_type_), community_(p_community), population_(*this), name_(p_name), species_id_(p_species_id)
 {
+	// self_symbol_ is always a constant, but can't be marked as such on construction
+	self_symbol_.second->MarkAsConstant();
+	
 #ifdef SLIMGUI
 	// Pedigree recording is always enabled when running under SLiMgui, so that the various graphs all work
 	// However, as with tree-sequence recording, the fact that it is enabled is not user-visible unless the user enables it
@@ -320,7 +323,7 @@ void Species::_CleanAllReferencesToSpecies(EidosInterpreter *p_interpreter)
 					{
 						for (int i = 0; i < symbol_object->Count(); ++i)
 						{
-							Subpopulation *element = (Subpopulation *)symbol_object->ObjectElementAtIndex(i, nullptr);
+							Subpopulation *element = (Subpopulation *)symbol_object->ObjectElementAtIndex_NOCAST(i, nullptr);
 							
 							if (&element->species_ == this)
 							{
@@ -333,7 +336,7 @@ void Species::_CleanAllReferencesToSpecies(EidosInterpreter *p_interpreter)
 					{
 						for (int i = 0; i < symbol_object->Count(); ++i)
 						{
-							Genome *element = (Genome *)symbol_object->ObjectElementAtIndex(i, nullptr);
+							Genome *element = (Genome *)symbol_object->ObjectElementAtIndex_NOCAST(i, nullptr);
 							
 							if (&element->individual_->subpopulation_->species_ == this)
 							{
@@ -346,7 +349,7 @@ void Species::_CleanAllReferencesToSpecies(EidosInterpreter *p_interpreter)
 					{
 						for (int i = 0; i < symbol_object->Count(); ++i)
 						{
-							Individual *element = (Individual *)symbol_object->ObjectElementAtIndex(i, nullptr);
+							Individual *element = (Individual *)symbol_object->ObjectElementAtIndex_NOCAST(i, nullptr);
 							
 							if (&element->subpopulation_->species_ == this)
 							{
@@ -359,7 +362,7 @@ void Species::_CleanAllReferencesToSpecies(EidosInterpreter *p_interpreter)
 					{
 						for (int i = 0; i < symbol_object->Count(); ++i)
 						{
-							Mutation *element = (Mutation *)symbol_object->ObjectElementAtIndex(i, nullptr);
+							Mutation *element = (Mutation *)symbol_object->ObjectElementAtIndex_NOCAST(i, nullptr);
 							
 							if (&element->mutation_type_ptr_->species_ == this)
 							{
@@ -372,7 +375,7 @@ void Species::_CleanAllReferencesToSpecies(EidosInterpreter *p_interpreter)
 					{
 						for (int i = 0; i < symbol_object->Count(); ++i)
 						{
-							Substitution *element = (Substitution *)symbol_object->ObjectElementAtIndex(i, nullptr);
+							Substitution *element = (Substitution *)symbol_object->ObjectElementAtIndex_NOCAST(i, nullptr);
 							
 							if (&element->mutation_type_ptr_->species_ == this)
 							{
@@ -423,8 +426,8 @@ slim_tick_t Species::InitializePopulationFromFile(const std::string &p_file_stri
     // have to persist the list of known ids/names in metadata, which isn't worth the effort.
 	// BCH 3/13/2022: Note that now in multispecies, we forget only the names/ids that we ourselves
 	// have used; the other species in the community still remember and block their own usages.
-    subpop_ids_.clear();
-	subpop_names_.clear();
+	used_subpop_ids_.clear();
+	used_subpop_names_.clear();
 	
 	// Read in the file.  The SLiM file-reading methods are not tree-sequence-aware, so we bracket them
 	// with calls that fix the tree sequence recording state around them.  The treeSeq output methods
@@ -680,10 +683,9 @@ slim_tick_t Species::_InitializePopulationFromTextFile(const char *p_file, Eidos
 		iss >> sub;		// prevalence, which we discard
 		
 		int8_t nucleotide = -1;
-		if (iss && !iss.eof())
+		if (iss && (iss >> sub))
 		{
 			// fetch the nucleotide field if it is present
-			iss >> sub;
 			if (sub == "A") nucleotide = 0;
 			else if (sub == "C") nucleotide = 1;
 			else if (sub == "G") nucleotide = 2;
@@ -945,7 +947,12 @@ slim_tick_t Species::_InitializePopulationFromTextFile(const char *p_file, Eidos
 #endif
 					
 					current_mutrun_index = mutrun_index;
-					current_mutrun = genome.WillModifyRun(current_mutrun_index, mutrun_context);
+					
+					// We use WillModifyRun_UNSHARED() because we know that these runs are unshared (unless empty);
+					// we created them empty, nobody has modified them but us, and we process each genome separately.
+					// However, using WillModifyRun() would generally be fine since we hit this call only once
+					// per mutrun per genome anyway, as long as the mutations are sorted by position.
+					current_mutrun = genome.WillModifyRun_UNSHARED(current_mutrun_index, mutrun_context);
 				}
 				
 				current_mutrun->emplace_back(mutation);
@@ -1654,7 +1661,12 @@ slim_tick_t Species::_InitializePopulationFromBinaryFile(const char *p_file, Eid
 #endif
 					
 					current_mutrun_index = mutrun_index;
-					current_mutrun = genome.WillModifyRun(current_mutrun_index, mutrun_context);
+					
+					// We use WillModifyRun_UNSHARED() because we know that these runs are unshared (unless empty);
+					// we created them empty, nobody has modified them but us, and we process each genome separately.
+					// However, using WillModifyRun() would generally be fine since we hit this call only once
+					// per mutrun per genome anyway, as long as the mutations are sorted by position.
+					current_mutrun = genome.WillModifyRun_UNSHARED(current_mutrun_index, mutrun_context);
 				}
 				
 				current_mutrun->emplace_back(mutation);
@@ -1773,6 +1785,16 @@ void Species::DeleteAllMutationRuns(void)
 		MutationRunContext &mutrun_context = SpeciesMutationRunContextForThread(threadnum);
 		MutationRun::DeleteMutationRunContext(mutrun_context);
 	}
+}
+
+Subpopulation *Species::SubpopulationWithName(const std::string &p_subpop_name) {
+	for (auto subpop_iter : population_.subpops_)
+	{
+		Subpopulation *subpop = subpop_iter.second;
+		if (subpop->name_ == p_subpop_name)
+			return subpop;
+	}
+	return nullptr;
 }
 
 
@@ -2698,8 +2720,8 @@ void Species::CacheNucleotideMatrices(void)
 		
 		if (ge_type->mutation_matrix_)
 		{
-			EidosValue_Float_vector *mm = ge_type->mutation_matrix_.get();
-			double *mm_data = mm->data();
+			EidosValue_Float *mm = ge_type->mutation_matrix_.get();
+			const double *mm_data = mm->data();
 			
 			if (mm->Count() == 16)
 			{
@@ -2742,8 +2764,8 @@ void Species::CacheNucleotideMatrices(void)
 		
 		if (ge_type->mutation_matrix_)
 		{
-			EidosValue_Float_vector *mm = ge_type->mutation_matrix_.get();
-			double *mm_data = mm->data();
+			EidosValue_Float *mm = ge_type->mutation_matrix_.get();
+			const double *mm_data = mm->data();
 			
 			if (mm->Count() == 16)
 			{
@@ -3104,24 +3126,48 @@ slim_popsize_t *Species::BorrowShuffleBuffer(slim_popsize_t p_buffer_size)
 	if (shuffle_buf_borrowed_)
 		EIDOS_TERMINATION << "ERROR (Species::BorrowShuffleBuffer): (internal error) shuffle buffer already borrowed." << EidosTerminate();
 	
+#if DEBUG_SHUFFLE_BUFFER
+	// guarantee allocation of a buffer, even with a requested size of 0, so we have a place to put our overrun barriers
+	if ((p_buffer_size > shuffle_buf_capacity_) || !shuffle_buffer_)
+#else
 	if (p_buffer_size > shuffle_buf_capacity_)
+#endif
 	{
 		if (shuffle_buffer_)
 			free(shuffle_buffer_);
 		shuffle_buf_capacity_ = p_buffer_size * 2;		// double capacity so we reallocate less often
+#if DEBUG_SHUFFLE_BUFFER
+		// room for an extra value at the start and end
+		shuffle_buffer_ = (slim_popsize_t *)malloc((shuffle_buf_capacity_ + 2) * sizeof(slim_popsize_t));
+#else
 		shuffle_buffer_ = (slim_popsize_t *)malloc(shuffle_buf_capacity_ * sizeof(slim_popsize_t));
+#endif
 		shuffle_buf_size_ = 0;
+		
+		if (!shuffle_buffer_)
+			EIDOS_TERMINATION << "ERROR (Species::BorrowShuffleBuffer): allocation failed (requested size " << p_buffer_size << " entries, allocation size " << (shuffle_buf_capacity_ * sizeof(slim_popsize_t)) << " bytes); you may need to raise the memory limit for SLiM." << EidosTerminate();
 	}
+	
+#if DEBUG_SHUFFLE_BUFFER
+	// put flag values in to detect an overrun
+	slim_popsize_t *buffer_contents = shuffle_buffer_ + 1;
+	
+	shuffle_buffer_[0] = (slim_popsize_t)0xDEADD00D;
+	shuffle_buffer_[p_buffer_size + 1] = (slim_popsize_t)0xDEADD00D;
+#else
+	slim_popsize_t *buffer_contents = shuffle_buffer_;
+#endif
 	
 	if (shuffle_buf_is_enabled_)
 	{
 		// The shuffle buffer is enabled, so we need to reinitialize it with sequential values if it has
 		// changed size (unnecessary if it has not changed size, since the values are just rearranged),
 		// and then shuffle it into a new order.
+		
 		if (p_buffer_size != shuffle_buf_size_)
 		{
 			for (slim_popsize_t i = 0; i < p_buffer_size; ++i)
-				shuffle_buffer_[i] = i;
+				buffer_contents[i] = i;
 			
 			shuffle_buf_size_ = p_buffer_size;
 		}
@@ -3129,7 +3175,7 @@ slim_popsize_t *Species::BorrowShuffleBuffer(slim_popsize_t p_buffer_size)
 		if (shuffle_buf_size_ > 0)
 		{
 			gsl_rng *rng = EIDOS_GSL_RNG(omp_get_thread_num());
-			Eidos_ran_shuffle(rng, shuffle_buffer_, shuffle_buf_size_);
+			Eidos_ran_shuffle(rng, buffer_contents, shuffle_buf_size_);
 		}
 	}
 	else
@@ -3139,18 +3185,36 @@ slim_popsize_t *Species::BorrowShuffleBuffer(slim_popsize_t p_buffer_size)
 		if (p_buffer_size > shuffle_buf_size_)
 		{
 			for (slim_popsize_t i = shuffle_buf_size_; i < p_buffer_size; ++i)
-				shuffle_buffer_[i] = i;
+				buffer_contents[i] = i;
+			
+			shuffle_buf_size_ = p_buffer_size;
 		}
 	}
 	
+#if DEBUG_SHUFFLE_BUFFER
+	// check for correct setup of flag values; entries 1:shuffle_buf_size_ are used
+	if (shuffle_buffer_[0] != (slim_popsize_t)0xDEADD00D)
+		EIDOS_TERMINATION << "ERROR (Species::BorrowShuffleBuffer): (internal error) shuffle buffer overrun at start." << EidosTerminate();
+	if (shuffle_buffer_[shuffle_buf_size_ + 1] != (slim_popsize_t)0xDEADD00D)
+		EIDOS_TERMINATION << "ERROR (Species::BorrowShuffleBuffer): (internal error) shuffle buffer overrun at end." << EidosTerminate();
+#endif
+	
 	shuffle_buf_borrowed_ = true;
-	return shuffle_buffer_;
+	return buffer_contents;
 }
 
 void Species::ReturnShuffleBuffer(void)
 {
 	if (!shuffle_buf_borrowed_)
 		EIDOS_TERMINATION << "ERROR (Species::ReturnShuffleBuffer): (internal error) shuffle buffer was not borrowed." << EidosTerminate();
+	
+#if DEBUG_SHUFFLE_BUFFER
+	// check for correct setup of flag values; entries 1:shuffle_buf_size_ are used
+	if (shuffle_buffer_[0] != (slim_popsize_t)0xDEADD00D)
+		EIDOS_TERMINATION << "ERROR (Species::ReturnShuffleBuffer): (internal error) shuffle buffer overrun at start." << EidosTerminate();
+	if (shuffle_buffer_[shuffle_buf_size_ + 1] != (slim_popsize_t)0xDEADD00D)
+		EIDOS_TERMINATION << "ERROR (Species::ReturnShuffleBuffer): (internal error) shuffle buffer overrun at end." << EidosTerminate();
+#endif
 	
 	shuffle_buf_borrowed_ = false;
 }
@@ -5347,10 +5411,16 @@ void Species::WritePopulationTable(tsk_table_collection_t *p_tables)
 	ret = tsk_population_table_clear(&p_tables->populations);
 	if (ret != 0) handle_error("WritePopulationTable tsk_population_table_clear()", ret);
 
+	// figure out the last subpop id we need to write out to the table; this is the greatest value from (a) the number
+	// of rows in the current population table (to carry over non-SLiM pop table entries we loaded in), (b) the subpop
+	// references found in the node table, which might reference subpops that no longer exist, and (c) the subpop ids
+	// found in our "previously used" information, whcih references every subpop id we have seen during execution.
 	slim_objectid_t last_subpop_id = (slim_objectid_t)population_table_copy->num_rows - 1;	// FIXME note this assumes the number of rows fits into 32 bits
 	for (size_t j = 0; j < p_tables->nodes.num_rows; j++)
 		last_subpop_id = std::max(last_subpop_id, p_tables->nodes.population[j]);
-
+	for (const auto &used_id_name : used_subpop_ids_)
+		last_subpop_id = std::max(last_subpop_id, used_id_name.first);
+	
 	// write out an entry for each subpop
 	slim_objectid_t last_id_written = -1;
 	
@@ -5363,6 +5433,7 @@ void Species::WritePopulationTable(tsk_table_collection_t *p_tables)
 		// binary metadata got translated to JSON by _InstantiateSLiMObjectsFromTables() on read
 		while (last_id_written < subpop_id - 1)
 		{
+			bool got_metadata = false;
 			std::string new_metadata_string("null");
 			
 			if (++last_id_written < (slim_objectid_t) population_table_copy->num_rows)
@@ -5375,6 +5446,7 @@ void Species::WritePopulationTable(tsk_table_collection_t *p_tables)
 				{
 					// The metadata present, if any, is not SLiM metadata, so it should be carried over.
 					new_metadata_string = std::string(tsk_population_object.metadata, tsk_population_object.metadata_length);
+					got_metadata = true;
 				}
 				else
 				{
@@ -5399,9 +5471,29 @@ void Species::WritePopulationTable(tsk_table_collection_t *p_tables)
 						nlohmann::json new_metadata = nlohmann::json::object();
 						new_metadata["name"] = old_metadata["name"];
 						new_metadata_string = new_metadata.dump();
+						got_metadata = true;
 					}
 				}
 			}
+			// BCH 7/20/2024: To fix #447, we have some new logic here.  If we didn't get any useful
+			// metadata from the population table, we're on our own.  If we have previously seen a
+			// subpop with this id at any point, we use the name we last saw for that id.
+			if (!got_metadata)
+			{
+				auto used_id_name_iter = used_subpop_ids_.find(last_id_written);
+				
+				if (used_id_name_iter != used_subpop_ids_.end())
+				{
+					nlohmann::json new_metadata = nlohmann::json::object();
+					new_metadata["name"] = (*used_id_name_iter).second;
+					new_metadata_string = new_metadata.dump();
+					got_metadata = true;
+				}
+			}
+			
+			// otherwise, we will use the "null" metadata we set as the default above,
+			// producing a simple placeholder row that implies the id has never been used.
+			
 			tsk_population_id = tsk_population_table_add_row(
 					&p_tables->populations,
 					new_metadata_string.data(),
@@ -5471,10 +5563,11 @@ void Species::WritePopulationTable(tsk_table_collection_t *p_tables)
 		assert(tsk_population_id == last_id_written);
 	}
 	
-	// finally, write out empty entries for the rest of the table; empty entries are needed
-	// up to largest_subpop_id_ because there could be ancestral nodes that reference them
+	// finally, write out entries for the rest of the table; entries are needed up to
+	// largest_subpop_id_ because there could be ancestral nodes that reference them
 	while (last_id_written < (slim_objectid_t) last_subpop_id)
 	{
+		bool got_metadata = false;
 		std::string new_metadata_string("null");
 		
 		if (++last_id_written < (slim_objectid_t) population_table_copy->num_rows)
@@ -5487,6 +5580,7 @@ void Species::WritePopulationTable(tsk_table_collection_t *p_tables)
 			{
 				// The metadata present, if any, is not SLiM metadata, so it should be carried over; note that
 				new_metadata_string = std::string(tsk_population_object.metadata, tsk_population_object.metadata_length);
+				got_metadata = true;
 			}
 			else
 			{
@@ -5500,7 +5594,23 @@ void Species::WritePopulationTable(tsk_table_collection_t *p_tables)
 					nlohmann::json new_metadata = nlohmann::json::object();
 					new_metadata["name"] = old_metadata["name"];
 					new_metadata_string = new_metadata.dump();
+					got_metadata = true;
 				}
+			}
+		}
+		// BCH 7/20/2024: To fix #447, we have some new logic here.  If we didn't get any useful
+		// metadata from the population table, we're on our own.  If we have previously seen a
+		// subpop with this id at any point, we use the name we last saw for that id.
+		if (!got_metadata)
+		{
+			auto used_id_name_iter = used_subpop_ids_.find(last_id_written);
+			
+			if (used_id_name_iter != used_subpop_ids_.end())
+			{
+				nlohmann::json new_metadata = nlohmann::json::object();
+				new_metadata["name"] = (*used_id_name_iter).second;
+				new_metadata_string = new_metadata.dump();
+				got_metadata = true;
 			}
 		}
 		
@@ -5513,6 +5623,7 @@ void Species::WritePopulationTable(tsk_table_collection_t *p_tables)
 		
 		assert(tsk_population_id == last_id_written);
 	}
+	
 	ret = tsk_population_table_free(population_table_copy);
 	if (ret != 0) handle_error("tsk_population_table_free", ret);
 	free(population_table_copy);
@@ -7684,6 +7795,7 @@ void Species::__CreateSubpopulationsFromTabulation(std::unordered_map<slim_objec
 {
 	// We will keep track of all pedigree IDs used, and check at the end that they do not collide; faster than checking as we go
 	// This could be done with a hash table, but I imagine that would be slower until the number of individuals becomes very large
+	// Also, I'm a bit nervous about putting a large number of consecutive integers into a hash table, re: edge-case performance
 	std::vector<slim_pedigreeid_t> pedigree_id_check;
 	
 	gSLiM_next_pedigree_id = 0;
@@ -7809,12 +7921,12 @@ void Species::__CreateSubpopulationsFromTabulation(std::unordered_map<slim_objec
 		}
 	}
 	
-	// Check for pedigree ID collisions by sorting and looking for duplicates
+	// Check for individual pedigree ID collisions by sorting and looking for duplicates
 	std::sort(pedigree_id_check.begin(), pedigree_id_check.end());
 	const auto duplicate = std::adjacent_find(pedigree_id_check.begin(), pedigree_id_check.end());
 	
 	if (duplicate != pedigree_id_check.end())
-		EIDOS_TERMINATION << "ERROR (Species::__CreateSubpopulationsFromTabulation): the pedigree ID value " << *duplicate << " was used more than once; pedigree IDs must be unique." << EidosTerminate();
+		EIDOS_TERMINATION << "ERROR (Species::__CreateSubpopulationsFromTabulation): the individual pedigree ID value " << *duplicate << " was used more than once; individual pedigree IDs must be unique." << EidosTerminate();
 }
 
 void Species::__ConfigureSubpopulationsFromTables(EidosInterpreter *p_interpreter)
@@ -8371,7 +8483,10 @@ void Species::__AddMutationsFromTreeSequenceToGenomes(std::unordered_map<slim_mu
 					// When parallel, the MutationRunContext depends upon the position in the genome
 					MutationRunContext &mutrun_context = SpeciesMutationRunContextForMutationRunIndex(run_index);
 #endif
-					MutationRun *mutrun = genome->WillModifyRun(run_index, mutrun_context);
+					
+					// We use WillModifyRun_UNSHARED() because we know that these runs are unshared (unless empty);
+					// we created them empty, nobody has modified them but us, and we process each genome separately.
+					MutationRun *mutrun = genome->WillModifyRun_UNSHARED(run_index, mutrun_context);
 					
 					for (tsk_size_t mutid_index = 0; mutid_index < genome_allele_length; ++mutid_index)
 					{
@@ -8396,6 +8511,61 @@ void Species::__AddMutationsFromTreeSequenceToGenomes(std::unordered_map<slim_mu
 	ret = tsk_variant_free(variant);
 	if (ret != 0) handle_error("__AddMutationsFromTreeSequenceToGenomes tsk_variant_free()", ret);
 	free(variant);
+}
+
+void Species::__CheckNodePedigreeIDs(EidosInterpreter *p_interpreter)
+{
+	// Make sure our next pedigree ID is safe; right now it only accounts for pedigree IDs used by individuals, but maybe there
+	// could be nodes in the node table with genome pedigree IDs greater than those in use by individuals, in nonWF models.
+	// See https://github.com/MesserLab/SLiM/pull/420 for an example model that does this very easily.
+	
+	// Also, check for duplicate pedigree IDs, just in case.  __CreateSubpopulationsFromTabulation() does this for individual
+	// pedigree IDs; we do it for node pedigree IDs.  I decided to use a vector with std::sort() to check even though it is
+	// O(n log n), rather than a hash table for O(n), because I'm nervous about hitting a bad edge case with the hash table
+	// due to the nature of the values being inserted.  Shouldn't be a big deal in the grand scheme of things.
+	tsk_node_table_t &node_table = tables_.nodes;
+	tsk_size_t node_count = node_table.num_rows;
+	std::vector<slim_genomeid_t> genome_id_check;
+	
+	for (tsk_size_t j = 0; (size_t)j < node_count; j++)
+	{
+		tsk_size_t offset1 = node_table.metadata_offset[j];
+		tsk_size_t offset2 = node_table.metadata_offset[j + 1];
+		tsk_size_t length = (offset2 - offset1);
+		
+		// allow nodes with other types of metadata; but if the metadata length metches ours, we have to assume it's ours
+		if (length == sizeof(GenomeMetadataRec))
+		{
+			// get the metadata record and check the genome pedigree ID
+			GenomeMetadataRec *metadata_rec = (GenomeMetadataRec *)(node_table.metadata + offset1);
+			slim_genomeid_t genome_id = metadata_rec->genome_id_;
+			
+			genome_id_check.emplace_back(genome_id);	// we will test for collisions below
+			
+			slim_pedigreeid_t pedigree_id = genome_id / 2;			// rounds down to integer
+			
+			if (pedigree_id >= gSLiM_next_pedigree_id)
+			{
+				static bool been_here = false;
+				
+				if (!been_here)
+				{
+					// decided to keep this as a warning; this circumstance is not necessarily pathological, but it probably usually is...
+					p_interpreter->ErrorOutputStream() << "#WARNING (Species::__CheckNodePedigreeIDs): in reading the tree sequence, a node was encountered with a genome pedigree ID that was (after division by 2) greater than the largest individual pedigree ID in the tree sequence.  This is not necessarily an error, but it is highly unusual, and could indicate that the tree sequence file is corrupted.  It may happen due to external manipulations of a tree sequence, or perhaps if an unsimplified tree sequence produced by SLiM is being loaded." << std::endl;
+					been_here = true;
+				}
+				
+				gSLiM_next_pedigree_id = pedigree_id + 1;
+			}
+		}
+	}
+	
+	// Check for genome pedigree ID collisions by sorting and looking for duplicates
+	std::sort(genome_id_check.begin(), genome_id_check.end());
+	const auto duplicate = std::adjacent_find(genome_id_check.begin(), genome_id_check.end());
+	
+	if (duplicate != genome_id_check.end())
+		EIDOS_TERMINATION << "ERROR (Species::__CheckNodePedigreeIDs): the genome pedigree ID value " << *duplicate << " was used more than once; genome pedigree IDs must be unique." << EidosTerminate();
 }
 
 void Species::_InstantiateSLiMObjectsFromTables(EidosInterpreter *p_interpreter, slim_tick_t p_metadata_tick, slim_tick_t p_metadata_cycle, SLiMModelType p_file_model_type, int p_file_version, SUBPOP_REMAP_HASH &p_subpop_map)
@@ -8463,6 +8633,10 @@ void Species::_InstantiateSLiMObjectsFromTables(EidosInterpreter *p_interpreter,
 	ret = tsk_treeseq_free(ts);
 	if (ret != 0) handle_error("_InstantiateSLiMObjectsFromTables tsk_treeseq_free()", ret);
 	free(ts);
+	
+	// Ensure that the next pedigree ID used will not cause a collision with any existing nodes in the node table,
+	// and that there are no duplicate node pedigree IDs in the input file (whether in use or not).
+	__CheckNodePedigreeIDs(p_interpreter);
 	
 	// Set up the remembered genomes by looking though the list of nodes and their individuals
 	if (remembered_genomes_.size() != 0)

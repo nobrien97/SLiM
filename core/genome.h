@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 12/13/14.
-//  Copyright (c) 2014-2023 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2014-2024 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -160,6 +160,7 @@ public:
 	inline __attribute__((always_inline)) slim_genomeid_t GenomeID(void)			{ return genome_id_; }
 	inline __attribute__((always_inline)) void SetGenomeID(slim_genomeid_t p_new_id){ genome_id_ = p_new_id; }	// should basically never be called
 	inline __attribute__((always_inline)) Individual *OwningIndividual(void)		{ return individual_; }
+	inline __attribute__((always_inline)) const Individual *OwningIndividual(void) const { return individual_; }
 	
 	void NullGenomeAccessError(void) const __attribute__((__noreturn__)) __attribute__((cold)) __attribute__((analyzer_noreturn));		// prints an error message, a stacktrace, and exits; called only for DEBUG
 	
@@ -212,9 +213,13 @@ public:
 	}
 	
 	
-	// This should be called before modifying the run at a given index.  It will replicate the run to produce a single-referenced copy
-	// if necessary, thus guaranteeting that the run can be modified legally.  If the run is already single-referenced, it is a no-op.
+	// This should be called before modifying the run at a given index.  It will replicate the run to produce a single-referenced copy,
+	// thus guaranteeing that the run can be modified legally.  The _UNSHARED version avoids making that copy unless the run is empty,
+	// based on a guarantee from the caller that the run is already single-referenced unless it is empty; this variant is used in code
+	// that loads new genetic data into initially empty genomes.  WillModifyRun() used to test the use count of the run to see whether
+	// a copy was needed or not, but that is no longer possible in the new mutation run design where use counts are only valid after tallying.
 	MutationRun *WillModifyRun(slim_mutrun_index_t p_run_index, MutationRunContext &p_mutrun_context);
+	MutationRun *WillModifyRun_UNSHARED(slim_mutrun_index_t p_run_index, MutationRunContext &p_mutrun_context);
 	
 	// This is an alternate version of WillModifyRun().  It labels the upcoming modification as being the result of a bulk operation
 	// being applied across multiple genomes, such that identical input genomes will produce identical output genomes, such as adding

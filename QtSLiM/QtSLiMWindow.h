@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 7/11/2019.
-//  Copyright (c) 2019-2023 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2019-2024 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -25,6 +25,7 @@
 #include <QElapsedTimer>
 #include <QColor>
 #include <QDateTime>
+#include <QApplication>
 
 #include <string>
 #include <vector>
@@ -47,10 +48,13 @@ class QtSLiMTablesDrawer;
 class QItemSelection;
 class SLiMgui;
 class QtSLiMGraphView;
+class QtSLiMGraphView_CustomPlot;
+class Plot;
 class QtSLiMScriptTextEdit;
 class QtSLiMTextEdit;
 class QtSLiMDebugOutputWindow;
 class QtSLiMChromosomeWidget;
+class LogFile;
 
 
 namespace Ui {
@@ -72,6 +76,7 @@ private:
     int slimChangeCount = 0;                    // private change count governing the recycle button's highlight
     
     QString lastSavedString;                    // the last string saved to disk, or initial script string
+    QDateTime lastSavedDate;                    // the date when we last saved, to detect external changes
     bool scriptChangeObserved = false;          // has a change to the script been observed since last saved?
     bool isScriptModified(void);                // uses scriptChangeObserved / lastSavedString to determine modified status
     
@@ -223,6 +228,7 @@ public:
     bool changedSinceRecycle(void);
     void resetSLiMChangeCount(void);
     void scriptTexteditChanged(void);
+    void setScriptBlockLabelTextFromSelection(void);
     
     bool checkScriptSuppressSuccessResponse(bool suppressSuccessResponse);   
     
@@ -230,8 +236,14 @@ public:
     bool checkTerminationForAutofix(QString terminationMessage);
     
     //	Eidos SLiMgui method forwards
+    EidosValue_SP eidos_logFileData(LogFile *logFile, EidosValue *column_value);
     void eidos_openDocument(QString path);
     void eidos_pauseExecution(void);
+    QtSLiMGraphView_CustomPlot *eidos_createPlot(QString title, double *x_range, double *y_range, QString x_label, QString y_label, double width, double height, bool horizontalGrid, bool verticalGrid, bool fullBox, double axisLabelSize, double tickLabelSize);
+    QtSLiMGraphView_CustomPlot *eidos_plotWithTitle(QString title);
+    
+    void plotLogFileData_1D(QString title, QString y_title, double *y_values, int data_count);
+    void plotLogFileData_2D(QString title, QString x_title, QString y_title, double *x_values, double *y_values, int data_count, bool makeScatterPlot);
     
 signals:
     void terminationWithMessage(QString message, EidosErrorContext errorContext);
@@ -273,12 +285,14 @@ public slots:
     //
     
 private slots:
+    void displayFontPrefChanged(void);
     void applicationPaletteChanged(void);
     
     bool save(void);
     bool saveAs(void);
     void revert(void);
     void documentWasModified(void);
+    void appStateChanged(Qt::ApplicationState state);
     
     void playOneStepPressed(void);
     void playOneStepReleased(void);
@@ -330,7 +344,7 @@ protected:
     virtual void resizeEvent(QResizeEvent *p_event) override;
     virtual void showEvent(QShowEvent *p_event) override;
     void positionNewSubsidiaryWindow(QWidget *window);
-    QWidget *graphWindowWithView(QtSLiMGraphView *graphView);
+    QWidget *graphWindowWithView(QtSLiMGraphView *graphView, double windowWidth=300, double windowHeight=300);
     QtSLiMGraphView *graphViewForGraphWindow(QWidget *window);
     
     // used to suppress saving of resize/position info until we are fully constructed
@@ -361,6 +375,8 @@ protected:
 private:
     void glueUI(void);
     void invalidateUI(void);
+    QtSLiMGraphView *graphViewWithTitle(QString title);
+    int graphViewCount(void);
     
     Ui::QtSLiMWindow *ui;
 };

@@ -3,7 +3,7 @@
 //  SLiMgui
 //
 //  Created by Ben Haller on 1/19/19.
-//  Copyright (c) 2019-2023 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2019-2024 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -19,7 +19,7 @@
 
 /*
  
- The class SLiMGUI represents the SLiMgui application's Eidos interface.  It is availabe only when running under SLiMgui.
+ The class SLiMgui represents the SLiMgui application's Eidos interface.  It is available only when running under SLiMgui.
  
  */
 
@@ -50,7 +50,7 @@ private:
 
 public:
 	
-	Community &community_;					// We have a reference to our community object
+	Community &community_;						// We have a reference to our community object
 	SLiMWindowController *controller_;			// We have a reference to the SLiMgui window controller for our simulation
 	
 	EidosSymbolTableEntry self_symbol_;			// for fast setup of the symbol table
@@ -74,8 +74,11 @@ public:
 	virtual void SetProperty(EidosGlobalStringID p_property_id, const EidosValue &p_value) override;
 	
 	virtual EidosValue_SP ExecuteInstanceMethod(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter) override;
+	EidosValue_SP ExecuteMethod_createPlot(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter);
+	EidosValue_SP ExecuteMethod_logFileData(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter);
 	EidosValue_SP ExecuteMethod_openDocument(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter);
 	EidosValue_SP ExecuteMethod_pauseExecution(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter);
+	EidosValue_SP ExecuteMethod_plotWithTitle(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter);
 };
 
 class SLiMgui_Class : public EidosDictionaryUnretained_Class

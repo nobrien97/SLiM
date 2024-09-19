@@ -3,7 +3,7 @@
 //  Eidos
 //
 //  Created by Ben Haller on 4/12/15.
-//  Copyright (c) 2015-2023 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2015-2024 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -153,10 +153,16 @@ EidosSymbolTable::EidosSymbolTable(EidosSymbolTableType p_table_type, EidosSymbo
 			trueConstant = new EidosSymbolTableEntry(gEidosID_T, gStaticEidosValue_LogicalT);
 			falseConstant = new EidosSymbolTableEntry(gEidosID_F, gStaticEidosValue_LogicalF);
 			nullConstant = new EidosSymbolTableEntry(gEidosID_NULL, gStaticEidosValueNULL);
-			piConstant = new EidosSymbolTableEntry(gEidosID_PI, EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float_singleton(M_PI)));
-			eConstant = new EidosSymbolTableEntry(gEidosID_E, EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float_singleton(M_E)));
-			infConstant = new EidosSymbolTableEntry(gEidosID_INF, EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float_singleton(std::numeric_limits<double>::infinity())));
-			nanConstant = new EidosSymbolTableEntry(gEidosID_NAN, EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float_singleton(std::numeric_limits<double>::quiet_NaN())));
+			piConstant = new EidosSymbolTableEntry(gEidosID_PI, EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float(M_PI)));
+			eConstant = new EidosSymbolTableEntry(gEidosID_E, EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float(M_E)));
+			infConstant = new EidosSymbolTableEntry(gEidosID_INF, EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float(std::numeric_limits<double>::infinity())));
+			nanConstant = new EidosSymbolTableEntry(gEidosID_NAN, EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float(std::numeric_limits<double>::quiet_NaN())));
+			
+			// ensure that the constant_ flag is set on all of these values, to prevent modification in all code paths
+			piConstant->second->MarkAsConstant();
+			eConstant->second->MarkAsConstant();
+			infConstant->second->MarkAsConstant();
+			nanConstant->second->MarkAsConstant();
 		}
 		
 		// We can use InitializeConstantSymbolEntry() here since we obey its requirements (see header)
@@ -341,6 +347,37 @@ EidosValue_SP EidosSymbolTable::_GetValue(EidosGlobalStringID p_symbol_name, con
 	EIDOS_TERMINATION << "ERROR (EidosSymbolTable::_GetValue): undefined identifier " << EidosStringRegistry::StringForGlobalStringID(p_symbol_name) << "." << EidosTerminate(p_symbol_token);
 }
 
+EidosValue_SP EidosSymbolTable::_GetValue_SpecialRaise(EidosGlobalStringID p_symbol_name, const EidosToken *p_symbol_token) const
+{
+	// Conceptually, this is a recursive function that walks up the symbol table chain.  Doing the recursive calls
+	// is a bit slow, though, so I have unwrapped the recursion.
+	const EidosSymbolTable *current_table = this;
+	
+	do
+	{
+		// try the current table, if the symbol is within its capacity
+		if (p_symbol_name < current_table->capacity_)
+		{
+			EidosValue_SP slot_value(current_table->slots_[p_symbol_name].symbol_value_SP_);
+			
+			if (slot_value)
+				return slot_value;
+		}
+		
+		// We didn't get a hit, so try our chained table
+		current_table = current_table->chain_symbol_table_;
+	}
+	while (current_table);
+	
+	// This "SpecialRaise" version of _GetValue() raises a special type of exception that can be
+	// caught and ignored.  This facility is used by Community::_EvaluateTickRangeNode() to
+	// implement tolerant evaluation of tick range expressions.  We have to set up the error
+	// info manually here, since "<< EidosTerminate(p_symbol_token)' is not doing it for us.
+	PushErrorPositionFromToken(p_symbol_token);
+	
+	throw SLiMUndefinedIdentifierException(EidosStringRegistry::StringForGlobalStringID(p_symbol_name));
+}
+
 EidosValue *EidosSymbolTable::_GetValue_RAW(EidosGlobalStringID p_symbol_name, const EidosToken *p_symbol_token) const
 {
 	// This follows _GetValue() but returns a raw EidosValue * for temporary use
@@ -365,10 +402,12 @@ EidosValue *EidosSymbolTable::_GetValue_RAW(EidosGlobalStringID p_symbol_name, c
 	EIDOS_TERMINATION << "ERROR (EidosSymbolTable::_GetValue_RAW): undefined identifier " << EidosStringRegistry::StringForGlobalStringID(p_symbol_name) << "." << EidosTerminate(p_symbol_token);
 }
 
-EidosValue_SP EidosSymbolTable::_GetValue_IsConst(EidosGlobalStringID p_symbol_name, const EidosToken *p_symbol_token, bool *p_is_const) const
+EidosValue_SP EidosSymbolTable::_GetValue_IsConstIsLocal(EidosGlobalStringID p_symbol_name, const EidosToken *p_symbol_token, bool *p_is_const, bool *p_is_local) const
 {
-	// This follows _GetValue() but provides the p_is_const flag
+	// This follows _GetValue() but provides the p_is_const and p_is_global flags
 	const EidosSymbolTable *current_table = this;
+	
+	*p_is_local = true;
 	
 	do
 	{
@@ -386,10 +425,11 @@ EidosValue_SP EidosSymbolTable::_GetValue_IsConst(EidosGlobalStringID p_symbol_n
 		
 		// We didn't get a hit, so try our chained table
 		current_table = current_table->chain_symbol_table_;
+		*p_is_local = false;
 	}
 	while (current_table);
 	
-	EIDOS_TERMINATION << "ERROR (EidosSymbolTable::_GetValue_IsConst): undefined identifier " << EidosStringRegistry::StringForGlobalStringID(p_symbol_name) << "." << EidosTerminate(p_symbol_token);
+	EIDOS_TERMINATION << "ERROR (EidosSymbolTable::_GetValue_IsConstIsLocal): undefined identifier " << EidosStringRegistry::StringForGlobalStringID(p_symbol_name) << "." << EidosTerminate(p_symbol_token);
 }
 
 void EidosSymbolTable::_ResizeToFitSymbol(EidosGlobalStringID p_symbol_name)
@@ -461,8 +501,8 @@ void EidosSymbolTable::SetValueForSymbolNoCopy(EidosGlobalStringID p_symbol_name
 	// If a few cases, however, we want to play funny games and prevent that copy from occurring so that we can munge
 	// values directly inside a value we just set in the symbol table.  Evaluate_For() is the worst offender in this
 	// because it wants to set up an index variable once and then munge its value directly each time through the loop,
-	// for speed.  _ProcessSubsetAssignment() also does it in one case, where it needs to change a singleton into a
-	// vector value so that it can do a subscripted assignment.  For that special purpose, this function is provided.
+	// for speed.  For that special purpose, this function is provided.
+	//
 	// DO NOT USE THIS UNLESS YOU KNOW WHAT YOU'RE DOING!  It can lead to seriously weird behavior if used incorrectly.
 	if (p_value->Invisible())
 		EIDOS_TERMINATION << "ERROR (EidosSymbolTable::SetValueForSymbolNoCopy): (internal) no copy requested with invisible value." << EidosTerminate(nullptr);
@@ -551,6 +591,77 @@ void EidosSymbolTable::DefineConstantForSymbol(EidosGlobalStringID p_symbol_name
 	if ((p_value->UseCount() != 1) || p_value->Invisible())
 		p_value = p_value->CopyValues();
 	
+	// Now we have a private value, which we can mark as constant
+	p_value->MarkAsConstant();
+	
+	// Then ask the defined constants table to add the constant
+	definedConstantsTable->InitializeConstantSymbolEntry(p_symbol_name, std::move(p_value));
+}
+
+void EidosSymbolTable::DefineConstantForSymbolNoCopy(EidosGlobalStringID p_symbol_name, EidosValue_SP p_value)
+{
+	THREAD_SAFETY_IN_ACTIVE_PARALLEL("EidosSymbolTable::DefineConstantForSymbolNoCopy(): symbol table change");
+	
+	// So, this is a little weird.  DefineConstantForSymbol() copies the passed value, as explained in its comment above.
+	// If a few cases, however, we want to play funny games and prevent that copy from occurring so that we can munge
+	// values directly inside a value we just set in the symbol table.  Evaluate_For() is the worst offender in this
+	// because it wants to set up an index variable once and then munge its value directly each time through the loop,
+	// for speed.  For that special purpose, this function is provided.
+	//
+	// DO NOT USE THIS UNLESS YOU KNOW WHAT YOU'RE DOING!  It can lead to seriously weird behavior if used incorrectly.
+	if (p_value->Invisible())
+		EIDOS_TERMINATION << "ERROR (EidosSymbolTable::DefineConstantForSymbolNoCopy): (internal) no copy requested with invisible value." << EidosTerminate(nullptr);
+	
+	// First make sure this symbol is not in use as either a variable or a constant
+	// We use SymbolDefinedAnywhere() because defined constants cannot conflict with any symbol defined anywhere, whether
+	// currently in scope or not – as soon as the conflicting scope comes into scope, the conflict will be manifest.
+	if (SymbolDefinedAnywhere(p_symbol_name))
+		EIDOS_TERMINATION << "ERROR (EidosSymbolTable::DefineConstantForSymbolNoCopy): identifier '" << EidosStringRegistry::StringForGlobalStringID(p_symbol_name) << "' is already defined." << EidosTerminate(nullptr);
+	
+	// Search through our chain for a defined constants table; if we don't find one, add one
+	EidosSymbolTable *definedConstantsTable;
+	
+	for (definedConstantsTable = this; definedConstantsTable != nullptr; definedConstantsTable = definedConstantsTable->chain_symbol_table_)
+		if (definedConstantsTable->table_type_ == EidosSymbolTableType::kEidosDefinedConstantsTable)
+			break;
+	
+	if (!definedConstantsTable)
+	{
+		// Find the child of the intrinsic constants table, which should be a global variables table; it should not be a local variables table, because there should
+		// always be a global variables table above any local variables table; this is important, because local variables tables are transient, and we need the child
+		// of the intrinsic constants table to end up being the owner of the defined constants table
+		EidosSymbolTable *childTable;
+		
+		for (childTable = this; childTable != nullptr; childTable = childTable->parent_symbol_table_)
+			if (childTable->parent_symbol_table_ && childTable->parent_symbol_table_->table_type_ == EidosSymbolTableType::kEidosIntrinsicConstantsTable)
+				break;
+		
+		if (!childTable)
+			EIDOS_TERMINATION << "ERROR (EidosSymbolTable::DefineConstantForSymbolNoCopy): (internal) could not find child symbol table of the intrinsic constants table." << EidosTerminate(nullptr);
+		if (childTable->table_type_ != EidosSymbolTableType::kGlobalVariablesTable)
+			EIDOS_TERMINATION << "ERROR (EidosSymbolTable::DefineConstantForSymbolNoCopy): (internal) the child symbol table of the intrinsic constants table must be a global variables table." << EidosTerminate(nullptr);
+		
+		EidosSymbolTable *intrinsicConstantsTable = childTable->parent_symbol_table_;
+		
+		// Make a defined constants table and insert it in between; this table will be
+		// owned by childTable, which will free it whenever childTable is destructed
+		definedConstantsTable = new EidosSymbolTable(EidosSymbolTableType::kEidosDefinedConstantsTable, intrinsicConstantsTable);
+		childTable->parent_symbol_table_ = definedConstantsTable;
+		childTable->parent_symbol_table_owned_ = true;
+		childTable->chain_symbol_table_ = definedConstantsTable;
+		
+		// There may be intervening tables that chain up to the intrinsic constants table;
+		// they need to be fixed to now chain up to the defined constants table instead.
+		EidosSymbolTable *patchTable;
+		
+		for (patchTable = this; patchTable != definedConstantsTable; patchTable = patchTable->parent_symbol_table_)
+			if (patchTable->chain_symbol_table_ == intrinsicConstantsTable)
+				patchTable->chain_symbol_table_ = definedConstantsTable;
+	}
+	
+	// Now we have a private value, which we can mark as constant
+	p_value->MarkAsConstant();
+	
 	// Then ask the defined constants table to add the constant
 	definedConstantsTable->InitializeConstantSymbolEntry(p_symbol_name, std::move(p_value));
 }
@@ -597,6 +708,13 @@ void EidosSymbolTable::DefineGlobalForSymbol(EidosGlobalStringID p_symbol_name, 
 	else
 	{
 		// set the value into the already used slot; no linked list maintenance needed
+		
+		// this is the one place where SymbolTable is aware of the IsIteratorVariable() flag, because
+		// we need to prevent a conflict at the global level, which is hard to do in external code.
+		// Consider this check to have been done by the caller, in terms of API semantics.
+		if (global_variables_table->slots_[p_symbol_name].symbol_value_SP_->IsIteratorVariable())
+			EIDOS_TERMINATION << "ERROR (EidosSymbolTable::DefineGlobalForSymbol): identifier '" << EidosStringRegistry::StringForGlobalStringID(p_symbol_name) << "' cannot be redefined because it is a constant." << EidosTerminate(nullptr);
+		
 		global_variables_table->slots_[p_symbol_name].symbol_value_SP_ = std::move(p_value);
 	}
 }
@@ -679,14 +797,14 @@ void EidosSymbolTable::PrintSymbolTable(std::ostream &p_outstream)
 	{
 		case EidosSymbolTableType::kEidosIntrinsicConstantsTable: p_outstream << "kEidosIntrinsicConstantsTable"; break;
 		case EidosSymbolTableType::kEidosDefinedConstantsTable: p_outstream << "kEidosDefinedConstantsTable"; break;
-		case EidosSymbolTableType::kContextConstantsTable: p_outstream << "kContextConstantsTable"; break;
 		case EidosSymbolTableType::kGlobalVariablesTable: p_outstream << "kGlobalVariablesTable"; break;
+		case EidosSymbolTableType::kContextConstantsTable: p_outstream << "kContextConstantsTable"; break;
 		case EidosSymbolTableType::kLocalVariablesTable: p_outstream << "kLocalVariablesTable"; break;
 		case EidosSymbolTableType::kINVALID_TABLE_TYPE:
 			EIDOS_TERMINATION << "ERROR (EidosSymbolTable::PrintSymbolTable): (internal error) invalid table type." << EidosTerminate(nullptr);
 	}
 	
-	p_outstream << std::endl;
+	p_outstream << (table_type_is_constant_ ? " (constant)" : " (not constant)") << std::endl;
 	
 	for (EidosGlobalStringID symbol = slots_->next_; symbol != 0; symbol = (slots_ + symbol)->next_)
 	{
@@ -704,6 +822,26 @@ void EidosSymbolTable::PrintSymbolTable(std::ostream &p_outstream)
 			p_outstream << "   " << symbol_name << (table_type_is_constant_ ? " => (" : " -> (") << symbol_value->Type() << ") " << *first_value << " " << *second_value << " ... (" << symbol_count << " values)" << std::endl;
 		}
 	}
+}
+
+void EidosSymbolTable::PrintSymbolTableChain(std::ostream &p_outstream)
+{
+	p_outstream << "================================================" << std::endl;
+	this->PrintSymbolTable(p_outstream);
+	
+	EidosSymbolTable *next_in_chain = chain_symbol_table_;
+	
+	while (next_in_chain)
+	{
+		p_outstream << "------------------------------------------------" << std::endl;
+		next_in_chain->PrintSymbolTable(p_outstream);
+		
+		next_in_chain = next_in_chain->chain_symbol_table_;
+	}
+	
+	p_outstream << "------------------------------------------------" << std::endl;
+	p_outstream << "END OF CHAIN" << std::endl;
+	p_outstream << "================================================" << std::endl;
 }
 
 void EidosSymbolTable::AddSymbolsToTypeTable(EidosTypeTable *p_type_table) const
@@ -726,6 +864,7 @@ void EidosSymbolTable::AddSymbolsToTypeTable(EidosTypeTable *p_type_table) const
 	}
 }
 
+// This stream output method for EidosSymbolTable dumps all available symbols
 std::ostream &operator<<(std::ostream &p_outstream, const EidosSymbolTable &p_symbols)
 {
 	std::vector<std::string> read_only_symbol_names = p_symbols.ReadOnlySymbols();

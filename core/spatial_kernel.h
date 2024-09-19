@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 9/9/23.
-//  Copyright (c) 2023 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2023-2024 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -72,13 +72,20 @@ public:
 	
 	// calculate t-distribution PDF values in our fashion, for which the function is normalized to a maximum value
 	// we don't use the GSL for this, because it does two gamma-function calculations that we don't need (they normalize away)
-	static inline double tdist(double x, double max, double nu, double tau) { double x_over_tau = x / tau; return max / pow(1.0 + x_over_tau * x_over_tau / nu, -(nu + 1.0) / 2.0); };
+	static inline double tdist(double x, double max, double nu, double tau) {
+		double x_over_tau = x / tau;
+		return max / pow(1.0 + x_over_tau * x_over_tau / nu, -(nu + 1.0) / 2.0);
+	};
 	
 public:
-	SpatialKernel(const SpatialKernel&) = delete;							// no copying
+	// This static member function should be called before beginning to construct kernels from an argument list
+	// When you then use the constructor below, all arguments must be the same, to avoid missing errors
+	static int PreprocessArguments(int p_dimensionality, double p_maxDistance, const std::vector<EidosValue_SP> &p_arguments, int p_first_kernel_arg, bool p_expect_max_density, SpatialKernelType *p_kernel_type, int *p_k_param_count);
+	
+	SpatialKernel(const SpatialKernel&) = default;							// can copy spatial kernels
 	SpatialKernel& operator=(const SpatialKernel&) = delete;				// no copying
 	SpatialKernel(void) = delete;											// no null construction
-	SpatialKernel(int p_dimensionality, double p_maxDistance, const std::vector<EidosValue_SP> &p_arguments, int p_first_kernel_arg, bool p_expect_max_density);
+	SpatialKernel(int p_dimensionality, double p_maxDistance, const std::vector<EidosValue_SP> &p_arguments, int p_first_kernel_arg, int p_kernel_arg_index, bool p_expect_max_density, SpatialKernelType p_kernel_type, int p_k_param_count);
 	~SpatialKernel(void);
 	
 	void CalculateGridValues(SpatialMap &p_map);

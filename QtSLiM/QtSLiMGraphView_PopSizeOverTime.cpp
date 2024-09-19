@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 8/30/2020.
-//  Copyright (c) 2020-2023 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2020-2024 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -25,13 +25,16 @@
 #include <QPainterPath>
 #include <QDebug>
 
+#include <string>
+#include <algorithm>
+#include <vector>
+
 #include "QtSLiMWindow.h"
-#include "subpopulation.h"
 
 
 QtSLiMGraphView_PopSizeOverTime::QtSLiMGraphView_PopSizeOverTime(QWidget *p_parent, QtSLiMWindow *controller) : QtSLiMGraphView(p_parent, controller)
 {
-    setXAxisRangeFromTick();
+    //setXAxisRangeFromTick();	// the end tick is not yet known
     setDefaultYAxisRange();
     
     xAxisLabel_ = "Tick";
@@ -46,13 +49,15 @@ QtSLiMGraphView_PopSizeOverTime::QtSLiMGraphView_PopSizeOverTime(QWidget *p_pare
     showSubpopulations_ = true;
     drawLines_ = true;
     
-    updateAfterTick();
+    QtSLiMGraphView_PopSizeOverTime::updateAfterTick();
 }
 
 void QtSLiMGraphView_PopSizeOverTime::setDefaultYAxisRange(void)
 {
-    yAxisMin_ = 0.0;
-	yAxisMax_ = 100.0;		// dynamic
+    y0_ = 0.0;
+    y1_ = 100.0;		// dynamic
+    yAxisMin_ = y0_;
+    yAxisMax_ = y1_;
 	yAxisMajorTickInterval_ = 50;
 	yAxisMinorTickInterval_ = 10;
 	yAxisMajorTickModulus_ = 5;
@@ -61,6 +66,8 @@ void QtSLiMGraphView_PopSizeOverTime::setDefaultYAxisRange(void)
 
 QtSLiMGraphView_PopSizeOverTime::~QtSLiMGraphView_PopSizeOverTime()
 {
+    // We are responsible for our own destruction
+    QtSLiMGraphView_PopSizeOverTime::invalidateDrawingCache();
 }
 
 void QtSLiMGraphView_PopSizeOverTime::invalidateDrawingCache(void)
@@ -76,8 +83,8 @@ void QtSLiMGraphView_PopSizeOverTime::controllerRecycled(void)
 	{
 		if (!yAxisIsUserRescaled_)
 			setDefaultYAxisRange();
-		if (!xAxisIsUserRescaled_)
-			setXAxisRangeFromTick();
+		//if (!xAxisIsUserRescaled_)
+		//	setXAxisRangeFromTick();	// the end tick is not yet known
 		
 		update();
 	}
@@ -101,8 +108,12 @@ void QtSLiMGraphView_PopSizeOverTime::updateAfterTick(void)
 {
     Species *graphSpecies = focalDisplaySpecies();
     
-	if (!controller_->invalidSimulation() && graphSpecies && !yAxisIsUserRescaled_)
-	{
+    // BCH 3/20/2024: We set the x axis range each tick, because the end tick is now invalid until after initialize() callbacks
+    if (!controller_->invalidSimulation() && graphSpecies && !xAxisIsUserRescaled_)
+        setXAxisRangeFromTick();
+    
+    if (!controller_->invalidSimulation() && graphSpecies && !yAxisIsUserRescaled_)
+    {
 		Population &pop = graphSpecies->population_;
 		slim_popsize_t maxHistory = 0;
 		bool showSubpops = showSubpopulations_ && (pop.subpop_size_histories_.size() > 2);
@@ -128,6 +139,7 @@ void QtSLiMGraphView_PopSizeOverTime::updateAfterTick(void)
             {
                 maxHistory = (slim_popsize_t)(std::ceil(maxHistory / 100.0) * 100.0);
                 yAxisMax_ = maxHistory;
+                y1_ = yAxisMax_;               // the same as yAxisMax_, for base plots
                 yAxisMajorTickInterval_ = 200;
                 yAxisMinorTickInterval_ = 100;
                 yAxisMajorTickModulus_ = 2;
@@ -136,6 +148,7 @@ void QtSLiMGraphView_PopSizeOverTime::updateAfterTick(void)
             {
                 maxHistory = (slim_popsize_t)(std::ceil(maxHistory / 1000.0) * 1000.0);
                 yAxisMax_ = maxHistory;
+                y1_ = yAxisMax_;               // the same as yAxisMax_, for base plots
                 yAxisMajorTickInterval_ = 2000;
                 yAxisMinorTickInterval_ = 1000;
                 yAxisMajorTickModulus_ = 2;
@@ -144,6 +157,7 @@ void QtSLiMGraphView_PopSizeOverTime::updateAfterTick(void)
             {
                 maxHistory = (slim_popsize_t)(std::ceil(maxHistory / 10000.0) * 10000.0);
                 yAxisMax_ = maxHistory;
+                y1_ = yAxisMax_;               // the same as yAxisMax_, for base plots
                 yAxisMajorTickInterval_ = 20000;
                 yAxisMinorTickInterval_ = 10000;
                 yAxisMajorTickModulus_ = 2;
@@ -152,12 +166,13 @@ void QtSLiMGraphView_PopSizeOverTime::updateAfterTick(void)
             {
                 maxHistory = (slim_popsize_t)(std::ceil(maxHistory / 100000.0) * 100000.0);
                 yAxisMax_ = maxHistory;
+                y1_ = yAxisMax_;               // the same as yAxisMax_, for base plots
                 yAxisMajorTickInterval_ = 200000;
                 yAxisMinorTickInterval_ = 100000;
                 yAxisMajorTickModulus_ = 2;
             }
             
-            invalidateDrawingCache();
+            QtSLiMGraphView_PopSizeOverTime::invalidateDrawingCache();
         }
     }
 	

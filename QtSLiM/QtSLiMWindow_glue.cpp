@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 7/11/2019.
-//  Copyright (c) 2019-2023 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2019-2024 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -26,11 +26,7 @@
 #include <QDebug>
 
 #include "QtSLiMScriptTextEdit.h"
-#include "QtSLiMEidosConsole.h"
-#include "QtSLiMVariableBrowser.h"
-#include "QtSLiMConsoleTextEdit.h"
 #include "QtSLiMAppDelegate.h"
-#include "QtSLiMFindPanel.h"
 
 
 void QtSLiMWindow::glueUI(void)
@@ -114,6 +110,8 @@ void QtSLiMWindow::glueUI(void)
     connect(ui->browserButton, &QPushButton::released, this, &QtSLiMWindow::showBrowserReleased);
     connect(ui->jumpToPopupButton, &QPushButton::pressed, this, &QtSLiMWindow::jumpToPopupButtonPressed);
     connect(ui->jumpToPopupButton, &QPushButton::released, this, &QtSLiMWindow::jumpToPopupButtonReleased);
+    connect(ui->scriptBlockLabel, &QtSLiMEllipsisLabel::pressed, this, &QtSLiMWindow::jumpToPopupButtonPressed);
+    //connect(ui->scriptBlockLabel, &QtSLiMEllipsisLabel::released, this, &QtSLiMWindow::jumpToPopupButtonReleased);    // seems to be unnecessary
     connect(ui->clearOutputButton, &QPushButton::pressed, this, &QtSLiMWindow::clearOutputPressed);
     connect(ui->clearOutputButton, &QPushButton::released, this, &QtSLiMWindow::clearOutputReleased);
     connect(ui->dumpPopulationButton, &QPushButton::pressed, this, &QtSLiMWindow::dumpPopulationPressed);
@@ -132,12 +130,12 @@ void QtSLiMWindow::glueUI(void)
     
     // menu items that are not visible, for hidden shortcuts
     QAction *actionNewWF_commentless = new QAction("New WF (Commentless)", this);
-    actionNewWF_commentless->setShortcut(Qt::CTRL + Qt::AltModifier + Qt::Key_N);
+    actionNewWF_commentless->setShortcut(Qt::ControlModifier | Qt::AltModifier | Qt::Key_N);
     connect(actionNewWF_commentless, &QAction::triggered, qtSLiMAppDelegate, &QtSLiMAppDelegate::dispatch_newWF_commentless);
     addAction(actionNewWF_commentless);
     
     QAction *actionNewNonWF_commentless = new QAction("New nonWF (Commentless)", this);
-    actionNewNonWF_commentless->setShortcut(Qt::CTRL + Qt::SHIFT + Qt::AltModifier + Qt::Key_N);
+    actionNewNonWF_commentless->setShortcut(Qt::ControlModifier | Qt::ShiftModifier | Qt::AltModifier | Qt::Key_N);
     connect(actionNewNonWF_commentless, &QAction::triggered, qtSLiMAppDelegate, &QtSLiMAppDelegate::dispatch_newNonWF_commentless);
     addAction(actionNewNonWF_commentless);
     
@@ -146,6 +144,8 @@ void QtSLiMWindow::glueUI(void)
     connect(ui->actionAboutQtSLiM, &QAction::triggered, qtSLiMAppDelegate, &QtSLiMAppDelegate::dispatch_about);
     connect(ui->actionShowCycle_WF, &QAction::triggered, qtSLiMAppDelegate, &QtSLiMAppDelegate::dispatch_showCycle_WF);
     connect(ui->actionShowCycle_nonWF, &QAction::triggered, qtSLiMAppDelegate, &QtSLiMAppDelegate::dispatch_showCycle_nonWF);
+    connect(ui->actionShowCycle_WF_MS, &QAction::triggered, qtSLiMAppDelegate, &QtSLiMAppDelegate::dispatch_showCycle_WF_MS);
+    connect(ui->actionShowCycle_nonWF_MS, &QAction::triggered, qtSLiMAppDelegate, &QtSLiMAppDelegate::dispatch_showCycle_nonWF_MS);
     connect(ui->actionQtSLiMHelp, &QAction::triggered, qtSLiMAppDelegate, &QtSLiMAppDelegate::dispatch_help);
     connect(ui->actionQuitQtSLiM, &QAction::triggered, qtSLiMAppDelegate, &QtSLiMAppDelegate::dispatch_quit);
     connect(ui->actionNew, &QAction::triggered, qtSLiMAppDelegate, &QtSLiMAppDelegate::dispatch_newWF);
@@ -208,6 +208,7 @@ void QtSLiMWindow::glueUI(void)
     connect(ui->actionAboutStickSoftware, &QAction::triggered, qtSLiMAppDelegate, &QtSLiMAppDelegate::dispatch_helpStickSoftware);
     
     // connect custom menu items
+    connect(ui->actionCopyAsHTML, &QAction::triggered, qtSLiMAppDelegate, &QtSLiMAppDelegate::dispatch_copyAsHTML);
     connect(ui->actionShiftLeft, &QAction::triggered, qtSLiMAppDelegate, &QtSLiMAppDelegate::dispatch_shiftLeft);
     connect(ui->actionShiftRight, &QAction::triggered, qtSLiMAppDelegate, &QtSLiMAppDelegate::dispatch_shiftRight);
     connect(ui->actionCommentUncomment, &QAction::triggered, qtSLiMAppDelegate, &QtSLiMAppDelegate::dispatch_commentUncomment);

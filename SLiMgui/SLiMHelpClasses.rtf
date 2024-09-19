@@ -85,8 +85,8 @@ geneConversionEnabled => (logical$)\
 
 \f4\fs20 \cf0 All of the 
 \f3\fs18 GenomicElement
-\f4\fs20  objects that comprise the chromosome.
-\f5 \
+\f4\fs20  objects that comprise the chromosome\cf2 , in sorted order (not necessarily in the order in which they were defined).
+\f5 \cf0 \
 \pard\pardeftab720\li720\fi-446\ri720\sb180\sa60\partightenfactor0
 
 \f3\fs18 \cf2 \expnd0\expndtw0\kerning0
@@ -532,7 +532,48 @@ It is generally recommended that the parent individual be supplied to this metho
 \
 \pard\pardeftab720\li720\fi-446\ri720\sb180\sa60\partightenfactor0
 
-\f3\fs18 \cf2 \'96\'a0(integer$)setAncestralNucleotides(is\'a0sequence)\
+\f3\fs18 \cf2 \kerning1\expnd0\expndtw0 \'96\'a0(object<GenomicElement>)genomicElementForPosition(integer\'a0positions)\
+\pard\pardeftab720\li547\ri720\sb60\sa60\partightenfactor0
+
+\f4\fs20 \cf2 Returns a vector of 
+\f3\fs18 GenomicElement
+\f4\fs20  objects corresponding to the given vector 
+\f3\fs18 positions
+\f4\fs20 , which contains base positions along the chromosome.  If every position lies within a defined genomic element, the returned vector will have the same length as 
+\f3\fs18 positions
+\f4\fs20 , and will correspond one-to-one with it.  However, if a position in 
+\f3\fs18 positions
+\f4\fs20  is not within a genomic element, no 
+\f3\fs18 GenomicElement
+\f4\fs20  object will be present for it in the returned vector, and so the returned vector will no longer have the same length as 
+\f3\fs18 positions
+\f4\fs20 , and will no longer correspond one-to-one with it.  The method 
+\f3\fs18 hasGenomicElementForPosition()
+\f4\fs20  can be used to detect this circumstance.\
+\pard\pardeftab720\li720\fi-446\ri720\sb180\sa60\partightenfactor0
+
+\f3\fs18 \cf2 \'96\'a0(logical)hasGenomicElementForPosition(integer\'a0positions)\
+\pard\pardeftab720\li547\ri720\sb60\sa60\partightenfactor0
+
+\f4\fs20 \cf2 Returns a 
+\f3\fs18 logical
+\f4\fs20  vector corresponding to the given vector 
+\f3\fs18 positions
+\f4\fs20 , which contains base positions along the chromosome.  The returned vector will have the same length as 
+\f3\fs18 positions
+\f4\fs20 , and will correspond one-to-one with it, containing 
+\f3\fs18 T
+\f4\fs20  if the corresponding position lies inside a genomic element, or 
+\f3\fs18 F
+\f4\fs20  if it does not.  The method 
+\f3\fs18 genomicElementForPosition()
+\f4\fs20  can be used to look up the 
+\f3\fs18 GenomicElement
+\f4\fs20  objects themselves.\
+\pard\pardeftab720\li720\fi-446\ri720\sb180\sa60\partightenfactor0
+
+\f3\fs18 \cf2 \expnd0\expndtw0\kerning0
+\'96\'a0(integer$)setAncestralNucleotides(is\'a0sequence)\
 \pard\pardeftab720\li547\ri720\sb60\sa60\partightenfactor0
 
 \f4\fs20 \cf2 This method, which may be called only in nucleotide-based models, replaces the ancestral nucleotide sequence for the model.  The 
@@ -735,7 +776,9 @@ The recombination intervals are normally a constant in simulations, so be sure y
 
 \f4\fs20 \cf2 All of the 
 \f3\fs18 GenomicElementType
-\f4\fs20  objects defined in the simulation.\
+\f4\fs20  objects defined in the simulation.  These are guaranteed to be in sorted order, by their 
+\f3\fs18 id
+\f4\fs20  property.\
 \pard\pardeftab720\li720\fi-446\ri720\sb180\sa60\partightenfactor0
 
 \f3\fs18 \cf2 allInteractionTypes => (object<InteractionType>)\
@@ -743,7 +786,9 @@ The recombination intervals are normally a constant in simulations, so be sure y
 
 \f4\fs20 \cf2 All of the 
 \f3\fs18 InteractionType
-\f4\fs20  objects defined in the simulation.\
+\f4\fs20  objects defined in the simulation.  These are guaranteed to be in sorted order, by their 
+\f3\fs18 id
+\f4\fs20  property.\
 \pard\pardeftab720\li720\fi-446\ri720\sb180\sa60\partightenfactor0
 
 \f3\fs18 \cf2 allMutationTypes => (object<MutationType>)\
@@ -751,7 +796,9 @@ The recombination intervals are normally a constant in simulations, so be sure y
 
 \f4\fs20 \cf2 All of the 
 \f3\fs18 MutationType
-\f4\fs20  objects defined in the simulation.\
+\f4\fs20  objects defined in the simulation.  These are guaranteed to be in sorted order, by their 
+\f3\fs18 id
+\f4\fs20  property.\
 \pard\pardeftab720\li720\fi-446\ri720\sb180\sa60\partightenfactor0
 
 \f3\fs18 \cf2 allScriptBlocks => (object<SLiMEidosBlock>)\
@@ -759,7 +806,9 @@ The recombination intervals are normally a constant in simulations, so be sure y
 
 \f4\fs20 \cf2 All registered 
 \f3\fs18 SLiMEidosBlock
-\f4\fs20  objects in the simulation.\
+\f4\fs20  objects in the simulation.  These are guaranteed to be in sorted order, by their 
+\f3\fs18 id
+\f4\fs20  property.\
 \pard\pardeftab720\li720\fi-446\ri720\sb180\sa60\partightenfactor0
 
 \f3\fs18 \cf2 allSpecies => (object<Species>)\
@@ -984,6 +1033,14 @@ The
 \f4\fs20  documentation discusses how to configure and use 
 \f3\fs18 LogFile
 \f4\fs20  to write out the data you are interested in from your simulation.\
+\pard\pardeftab720\li720\fi-446\ri720\sb180\sa60\partightenfactor0
+
+\f3\fs18 \cf2 \'96\'a0(integer$)estimatedLastTick(void)\
+\pard\pardeftab720\li547\ri720\sb60\sa60\partightenfactor0
+
+\f4\fs20 \cf2 Returns SLiM\'92s current estimate of the last tick in which the model will execute.  Because script blocks can be added, removed, and rescheduled, and because the simulation may end prematurely (due to a call to 
+\f3\fs18 simulationFinished()
+\f4\fs20 , for example), this is only an estimate, and may change over time.\
 \pard\pardeftab720\li720\fi-446\ri720\sb180\sa60\partightenfactor0
 
 \f3\fs18 \cf0 \'96\'a0(void)deregisterScriptBlock(io<SLiMEidosBlock>\'a0scriptBlocks)\
@@ -1220,21 +1277,20 @@ The
 \f5 \
 \pard\pardeftab397\li720\fi-446\ri720\sb180\sa60\partightenfactor0
 
-\f3\fs18 \cf0 \'96\'a0(object<SLiMEidosBlock>)rescheduleScriptBlock(io<SLiMEidosBlock>$
-\f5 \'a0
-\f3 block, [Ni$\'a0start\'a0=\'a0NULL], [Ni$\'a0end\'a0=\'a0NULL], [Ni\'a0ticks\'a0=\'a0NULL])
-\f5 \
+\f3\fs18 \cf2 \'96\'a0(object<SLiMEidosBlock>$)rescheduleScriptBlock(io<SLiMEidosBlock>$\'a0block, [Ni$\'a0start\'a0=\'a0NULL], [Ni$\'a0end\'a0=\'a0NULL], [Ni\'a0ticks\'a0=\'a0NULL])\
 \pard\pardeftab397\li547\ri720\sb60\sa60\partightenfactor0
 
-\f4\fs20 \cf0 Reschedule the target script block given by 
+\f4\fs20 \cf2 Reschedule the target script block given by 
 \f3\fs18 block
-\f4\fs20  to execute in a specified set of ticks.\cf2   The 
+\f4\fs20  to execute in a specified set of ticks.  The 
 \f3\fs18 block
 \f4\fs20  parameter may be either an 
 \f3\fs18 integer
 \f4\fs20  representing the ID of the desired script block, or a 
 \f3\fs18 SLiMScriptBlock
-\f4\fs20  specified directly.\cf0 \
+\f4\fs20  specified directly.  The target script block, 
+\f3\fs18 block
+\f4\fs20 , is returned.\
 The first way to specify the tick set is with 
 \f3\fs18 start
 \f4\fs20  and 
@@ -1245,52 +1301,17 @@ The first way to specify the tick set is with
 \f3\fs18 start
 \f4\fs20  to 
 \f3\fs18 end
-\f4\fs20 , inclusive.  In this case, 
-\f3\fs18 block
-\f4\fs20  is returned.\
+\f4\fs20 , inclusive.\
 The second way to specify the tick set is using the 
 \f3\fs18 ticks
-\f4\fs20  parameter; this is more flexible but more complicated.  Since script blocks execute across a contiguous span of ticks defined by their 
-\f3\fs18 start
-\f4\fs20  and 
-\f3\fs18 end
-\f4\fs20  properties, this may result in the duplication of 
-\f3\fs18 block
-\f4\fs20 ; one script block will be used for each contiguous span of ticks in 
-\f3\fs18 ticks
-\f5\fs20 .
-\f4   The 
-\f3\fs18 block
-\f4\fs20  object itself will be rescheduled to cover the first such span, whereas duplicates of 
-\f3\fs18 block
-\f4\fs20  will be created to cover subsequent contiguous spans.  A vector containing all of the script blocks scheduled by this method, including 
-\f3\fs18 block
-\f4\fs20 , will be returned; this vector is guaranteed to be sorted by the (ascending) scheduled execution order of the blocks.  Any duplicates of 
-\f3\fs18 block
-\f4\fs20  created will be given values for the 
-\f3\fs18 active
-\f4\fs20 , 
-\f3\fs18 source
-\f4\fs20 , 
-\f3\fs18 tag
-\f4\fs20 , and 
-\f3\fs18 type
-\f4\fs20  properties equal to the current values for 
-\f3\fs18 block
-\f4\fs20 , but will be given an 
-\f3\fs18 id
-\f4\fs20  of 
-\f3\fs18 -1
-\f4\fs20  since script block identifiers must be unique; if it is necessary to find the duplicated blocks again later, their 
-\f3\fs18 tag
-\f4\fs20  property should be used.  The vector supplied for 
+\f4\fs20  parameter, specifying each tick in which the block should execute.  The vector supplied for 
 \f3\fs18 ticks
 \f4\fs20  does not need to be in sorted order, but it must not contain any duplicates.\
-Because this method can create a large number of duplicate script blocks, it can sometimes be better to handle script block scheduling in other ways.  If an 
+It can sometimes be better to handle script block scheduling in other ways.  If an 
 \f3\fs18 early()
-\f4\fs20  event needs to execute every tenth tick over the whole duration of a long model run, for example, it would not be advisable to use a call like 
+\f4\fs20  event needs to execute every tenth tick over the whole duration of a long model run, for example, it might not be advisable to use a call like 
 \f3\fs18 community.rescheduleScriptBlock(s1, ticks=seq(10, 100000, 10))
-\f4\fs20  for that purpose, since that would result in thousands of duplicate script blocks.  Instead, it would be preferable to add a test such as 
+\f4\fs20  for that purpose, since that would make things complicated for SLiM\'92s scheduler.  Instead, it might be preferable to add a test such as 
 \f3\fs18 if (community.tick % 10 != 0) return;
 \f4\fs20  at the beginning of the event.  It is legal to reschedule a script block while the block is executing; a call like 
 \f3\fs18 community.rescheduleScriptBlock(self, community.tick + 10, community.tick + 10);
@@ -1299,31 +1320,18 @@ Whichever way of specifying the tick set is used,
 \f3\fs18 block
 \f4\fs20  may continue to be executed during the current tick cycle stage even after it has been rescheduled, unless it is made inactive using its 
 \f3\fs18 active
-\f4\fs20  property, and similarly, the block may not execute during the current tick cycle stage if it was not already scheduled to do so.  Rescheduling script blocks during the tick and tick cycle stage in which they are executing, or in which they are intended to execute, should be avoided.\cf2   Also, script blocks which are open-ended (i.e., with no specified end tick), are not used in determining whether the end of the simulation has been reached (because then the simulation would run forever); if you reschedule a block to be open-ended, and to start after the end of the last closed-ended block, the rescheduled block will therefore not run at all (just as such a block would not run at all in other circumstances, too).\cf0 \
+\f4\fs20  property, and similarly, the block may not execute during the current tick cycle stage if it was not already scheduled to do so.  Rescheduling script blocks during the tick and tick cycle stage in which they are executing, or in which they are intended to execute, should be avoided.  Also, note that script blocks which are open-ended (i.e., with no specified end tick), are not used in determining whether the end of the simulation has been reached (because then the simulation would run forever).\
 Note that new script blocks can also be created and scheduled using the 
 \f3\fs18 register...()
 \f4\fs20  methods of 
 \f3\fs18 Community
 \f4\fs20  and 
 \f3\fs18 Species
-\f4\fs20 ; by using the same source as a template script block, the template can be duplicated and scheduled for different ticks.  In fact, 
-\f3\fs18 rescheduleScriptBlock()
-\f4\fs20  does essentially that internally.\cf2   In multispecies models, note that all new script blocks created as a side effect of 
-\f3\fs18 rescheduleScriptBlock()
-\f4\fs20  will have the same 
-\f3\fs18 species
-\f4\fs20  and 
-\f3\fs18 ticks
-\f4\fs20  specifier as 
-\f3\fs18 block
-\f4\fs20 ; use the 
-\f3\fs18 register...()
-\f4\fs20  methods to create a new block with a different 
+\f4\fs20 ; by using the same source as a template script block, the template can be duplicated and scheduled for different ticks, perhaps with modifications or variations.  In multispecies models, note that blocks may not run due to their 
 \f3\fs18 species
 \f4\fs20  or 
 \f3\fs18 ticks
-\f4\fs20  specifier.
-\f5 \cf0 \
+\f4\fs20  specifier, even in ticks in which they are scheduled to run.\
 \pard\pardeftab397\li720\fi-446\ri720\sb180\sa60\partightenfactor0
 
 \f3\fs18 \cf2 \'96\'a0(object<SLiMEidosBlock>)scriptBlocksWithIDs(integer\'a0ids)\
@@ -1383,6 +1391,20 @@ Note that new script blocks can also be created and scheduled using the
 \f4\fs20  object can be found with a given 
 \f3\fs18 id
 \f4\fs20 , an error results.\
+\pard\pardeftab397\li720\fi-446\ri720\sb180\sa60\partightenfactor0
+
+\f3\fs18 \cf2 \'96\'a0(object<Subpopulation>)subpopulationsWithNames(string\'a0names)\
+\pard\pardeftab720\li547\ri720\sb60\sa60\partightenfactor0
+
+\f4\fs20 \cf2 Find and return the 
+\f3\fs18 Subpopulation
+\f4\fs20  objects with 
+\f3\fs18 name
+\f4\fs20  values matching the values in 
+\f3\fs18 names
+\f4\fs20 .  If no matching 
+\f3\fs18 Subpopulation
+\f4\fs20  object can be found with a given name, an error results.\
 \pard\pardeftab397\li720\fi-446\ri720\sb180\sa60\partightenfactor0
 
 \f3\fs18 \cf2 \'96\'a0(float$)usage(void)\
@@ -3025,18 +3047,16 @@ See the description of the
 \f4   This method is provided primarily for speed; it executes much faster than the Eidos equivalent above.  Indeed, it is faster than just 
 \f3\fs18 individual.genomes.mutations
 \f4\fs20 , and gives uniquing and sorting on top of that, so it is advantageous unless duplicate entries for homozygous mutations are actually needed.\
-\pard\pardeftab720\li720\fi-446\ri720\sb180\sa60\partightenfactor0
+\pard\pardeftab397\li720\fi-446\ri720\sb180\sa60\partightenfactor0
 
-\f3\fs18 \cf0 x <\'96> (float$)\
-\pard\pardeftab720\li547\ri720\sb60\sa60\partightenfactor0
+\f3\fs18 \cf2 x <\'96> (float$)\
+\pard\pardeftab397\li547\ri720\sb60\sa60\partightenfactor0
 
-\f4\fs20 \cf0 A user-defined 
+\f4\fs20 \cf2 A user-defined 
 \f3\fs18 float
 \f4\fs20  value.  The value of 
 \f3\fs18 x
-\f4\fs20  is initially undefined (i.e., has an effectively random value that could be different every time you run your model); if you wish it to have a defined value, you must arrange that yourself by explicitly setting its value prior to using it elsewhere in your code, typically in a 
-\f3\fs18 modifyChild()
-\f4\fs20  callback.  The value of 
+\f4\fs20  is initially undefined (i.e., has an effectively random value that could be different every time you run your model); if you wish it to have a defined value, you must arrange that yourself by explicitly setting its value prior to using it elsewhere in your code.  The value of 
 \f3\fs18 x
 \f4\fs20  is not used by SLiM unless the optional \'93continuous space\'94 facility is enabled with the 
 \f3\fs18 dimensionality
@@ -3050,19 +3070,69 @@ See the description of the
 \f3\fs18 x
 \f4\fs20  as an additional tag value of type 
 \f3\fs18 float
-\f5\fs20 .\
-\pard\pardeftab720\li720\fi-446\ri720\sb180\sa60\partightenfactor0
+\f4\fs20 .\
+\pard\pardeftab397\li720\fi-446\ri720\sb180\sa60\partightenfactor0
 
-\f3\fs18 \cf0 y <\'96> (float$)\
-\pard\pardeftab720\li547\ri720\sb60\sa60\partightenfactor0
+\f3\fs18 \cf2 xy => (float)\
+\pard\pardeftab397\li547\ri720\sb60\sa60\partightenfactor0
 
-\f4\fs20 \cf0 A user-defined 
+\f4\fs20 \cf2 This property provides joint read-only access to the 
+\f3\fs18 x
+\f4\fs20  and 
+\f3\fs18 y
+\f4\fs20  properties; they are returned as a two-element 
+\f3\fs18 float
+\f4\fs20  vector.  This can be useful in complex spatial models in which the spatiality of interactions/maps differs from the overall dimensionality of the model.  See the documentation for the separate properties 
+\f3\fs18 x
+\f4\fs20  and 
+\f3\fs18 y
+\f4\fs20  for further comments.\
+\pard\pardeftab397\li720\fi-446\ri720\sb180\sa60\partightenfactor0
+
+\f3\fs18 \cf2 xyz => (float)\
+\pard\pardeftab397\li547\ri720\sb60\sa60\partightenfactor0
+
+\f4\fs20 \cf2 This property provides joint read-only access to the 
+\f3\fs18 x
+\f4\fs20 , 
+\f3\fs18 y
+\f4\fs20 , and 
+\f3\fs18 z
+\f4\fs20  properties; they are returned as a three-element 
+\f3\fs18 float
+\f4\fs20  vector.  This can be useful in complex spatial models in which the spatiality of interactions/maps differs from the overall dimensionality of the model.  See the documentation for the separate properties 
+\f3\fs18 x
+\f4\fs20 , 
+\f3\fs18 y
+\f4\fs20 , and 
+\f3\fs18 z
+\f4\fs20  for further comments.\
+\pard\pardeftab397\li720\fi-446\ri720\sb180\sa60\partightenfactor0
+
+\f3\fs18 \cf2 xz => (float)\
+\pard\pardeftab397\li547\ri720\sb60\sa60\partightenfactor0
+
+\f4\fs20 \cf2 This property provides joint read-only access to the 
+\f3\fs18 x
+\f4\fs20  and 
+\f3\fs18 z
+\f4\fs20  properties; they are returned as a two-element 
+\f3\fs18 float
+\f4\fs20  vector.  This can be useful in complex spatial models in which the spatiality of interactions/maps differs from the overall dimensionality of the model.  See the documentation for the separate properties 
+\f3\fs18 x
+\f4\fs20  and 
+\f3\fs18 z
+\f4\fs20  for further comments.\
+\pard\pardeftab397\li720\fi-446\ri720\sb180\sa60\partightenfactor0
+
+\f3\fs18 \cf2 y <\'96> (float$)\
+\pard\pardeftab397\li547\ri720\sb60\sa60\partightenfactor0
+
+\f4\fs20 \cf2 A user-defined 
 \f3\fs18 float
 \f4\fs20  value.  The value of 
 \f3\fs18 y
-\f4\fs20  is initially undefined (i.e., has an effectively random value that could be different every time you run your model); if you wish it to have a defined value, you must arrange that yourself by explicitly setting its value prior to using it elsewhere in your code, typically in a 
-\f3\fs18 modifyChild()
-\f4\fs20  callback.  The value of 
+\f4\fs20  is initially undefined (i.e., has an effectively random value that could be different every time you run your model); if you wish it to have a defined value, you must arrange that yourself by explicitly setting its value prior to using it elsewhere in your code.  The value of 
 \f3\fs18 y
 \f4\fs20  is not used by SLiM unless the optional \'93continuous space\'94 facility is enabled with the 
 \f3\fs18 dimensionality
@@ -3084,19 +3154,33 @@ See the description of the
 \f3\fs18 y
 \f4\fs20  as an additional tag value of type 
 \f3\fs18 float
-\f5\fs20 .\
-\pard\pardeftab720\li720\fi-446\ri720\sb180\sa60\partightenfactor0
+\f4\fs20 .\
+\pard\pardeftab397\li720\fi-446\ri720\sb180\sa60\partightenfactor0
 
-\f3\fs18 \cf0 z <\'96> (float$)\
-\pard\pardeftab720\li547\ri720\sb60\sa60\partightenfactor0
+\f3\fs18 \cf2 yz => (float)\
+\pard\pardeftab397\li547\ri720\sb60\sa60\partightenfactor0
 
-\f4\fs20 \cf0 A user-defined 
+\f4\fs20 \cf2 This property provides joint read-only access to the 
+\f3\fs18 y
+\f4\fs20  and 
+\f3\fs18 z
+\f4\fs20  properties; they are returned as a two-element 
+\f3\fs18 float
+\f4\fs20  vector.  This can be useful in complex spatial models in which the spatiality of interactions/maps differs from the overall dimensionality of the model.  See the documentation for the separate properties 
+\f3\fs18 y
+\f4\fs20  and 
+\f3\fs18 z
+\f4\fs20  for further comments.\
+\pard\pardeftab397\li720\fi-446\ri720\sb180\sa60\partightenfactor0
+
+\f3\fs18 \cf2 z <\'96> (float$)\
+\pard\pardeftab397\li547\ri720\sb60\sa60\partightenfactor0
+
+\f4\fs20 \cf2 A user-defined 
 \f3\fs18 float
 \f4\fs20  value.  The value of 
 \f3\fs18 z
-\f4\fs20  is initially undefined (i.e., has an effectively random value that could be different every time you run your model); if you wish it to have a defined value, you must arrange that yourself by explicitly setting its value prior to using it elsewhere in your code, typically in a 
-\f3\fs18 modifyChild()
-\f4\fs20  callback.  The value of 
+\f4\fs20  is initially undefined (i.e., has an effectively random value that could be different every time you run your model); if you wish it to have a defined value, you must arrange that yourself by explicitly setting its value prior to using it elsewhere in your code.  The value of 
 \f3\fs18 z
 \f4\fs20  is not used by SLiM unless the optional \'93continuous space\'94 facility is enabled with the 
 \f3\fs18 dimensionality
@@ -3114,7 +3198,7 @@ See the description of the
 \f3\fs18 z
 \f4\fs20  as an additional tag value of type 
 \f3\fs18 float
-\f5\fs20 .\
+\f4\fs20 .\
 \pard\pardeftab397\ri720\sb120\sa60\partightenfactor0
 
 \f1\i\fs22 \cf0 5.7.2  
@@ -3316,7 +3400,7 @@ Note that this is an Eidos class method, somewhat unusually, which allows it to 
 \f3\fs18 0
 \f4\fs20 ).  Otherwise, if pedigree tracking is turned on with 
 \f3\fs18 initializeSLiMOptions(keepPedigrees=T)
-\f4\fs20 , this method will use the pedigree information described in section 25.7.1 to construct a relatedness estimate.\
+\f4\fs20 , this method will use the pedigree information to construct a relatedness estimate.\
 More specifically, this method uses the parental pedigree IDs from the pedigree records of a pair of individuals to count the number of shared parents between them, such that full siblings (with all of the same parents) have a count of 
 \f3\fs18 2
 \f4\fs20 , and half siblings (with half of the same parents) have a count of 
@@ -3718,7 +3802,7 @@ This method may be used with either spatial or non-spatial interactions, but wil
 \f4\fs20 , rather than drawing individuals one at a time.  Note that if no individuals exert a non-zero interaction strength upon 
 \f3\fs18 receiver
 \f4\fs20 , the vector returned will be zero-length; it is important to consider this possibility.\
-Beginning in SLiM 5.0, this method has a vectorized mode of operation in which the 
+Beginning in SLiM 4.1, this method has a vectorized mode of operation in which the 
 \f3\fs18 receiver
 \f4\fs20  parameter may be non-singleton.  To switch the method to this mode, pass 
 \f3\fs18 T
@@ -3945,7 +4029,7 @@ To see the point of this method, consider a receiver located near the edge of th
 Note that this method uses interaction eligibility as a criterion; it will not return neighbors that cannot exert an interaction upon the receiver (due to the configured receiver or exerter constraints).  (It will also never return the receiver as a neighbor of itself.)  To find all neighbors of a receiver, whether they can interact with it or not, use 
 \f3\fs18 nearestNeighbors()
 \f4\fs20 .\
-Beginning in SLiM 5.0, this method has a vectorized mode of operation in which the 
+Beginning in SLiM 4.1, this method has a vectorized mode of operation in which the 
 \f3\fs18 receiver
 \f4\fs20  parameter may be non-singleton.  To switch the method to this mode, pass 
 \f3\fs18 T
@@ -4019,7 +4103,7 @@ Beginning in SLiM 5.0, this method has a vectorized mode of operation in which t
 \f3\fs18 nearestInteractingNeighbors()
 \f4\fs20 .\
 \pard\pardeftab543\li547\ri720\sb60\sa60\partightenfactor0
-\cf2 Beginning in SLiM 5.0, this method has a vectorized mode of operation in which the 
+\cf2 Beginning in SLiM 4.1, this method has a vectorized mode of operation in which the 
 \f3\fs18 receiver
 \f4\fs20  parameter may be non-singleton.  To switch the method to this mode, pass 
 \f3\fs18 T
@@ -4146,9 +4230,9 @@ This method is similar to
 \f4\fs20  measure interactions between only subsets of the population.  The parameter 
 \f3\fs18 who
 \f4\fs20  specifies upon whom the specified constraints apply; it may be 
-\f3\fs18 "exerters"
+\f3\fs18 "exerter"
 \f4\fs20  to set constraints upon exerters, 
-\f3\fs18 "receivers"
+\f3\fs18 "receiver"
 \f4\fs20  to set constraints upon receivers, or 
 \f3\fs18 "both"
 \f4\fs20  to set constraints upon both.  If 
@@ -4165,7 +4249,7 @@ This method is similar to
 \f3\fs18 nearestNeighbors()
 \f4\fs20 .  The constraints specified by a given call to 
 \f3\fs18 setConstraints()
-\f4\fs20  override all previously set constraints for the category specified (receivers, exerter, or both).\
+\f4\fs20  override all previously set constraints for the category specified (receivers, exerters, or both).\
 There is a general policy for the remaining arguments: they are 
 \f3\fs18 NULL
 \f4\fs20  by default, and if 
@@ -4299,7 +4383,7 @@ Exerter constraints are applied at
 \f3\fs18 numeric$
 \f4\fs20  scale parameter for a 
 \f1\i t
-\f4\i0 -distribution function.  See section 25.8 above for discussions of these interaction functions.  Non-spatial interactions must use function type 
+\f4\i0 -distribution function.  See the InteractionType class documentation for discussions of these interaction functions.  Non-spatial interactions must use function type 
 \f3\fs18 "f"
 \f4\fs20 , since no distance values are available in that case.\
 The interaction function for an interaction type is normally a constant in simulations; in any case, it cannot be changed when an interaction has already been evaluated, so either it should be set prior to evaluation, or 
@@ -4490,7 +4574,11 @@ Given this automatic invalidation, most simulations have no reason to call
 
 \f4\fs20 \cf2 The interval for automatic logging; a new row of data will be logged every 
 \f3\fs18 logInterval
-\f4\fs20  ticks.  This may be changed with 
+\f4\fs20  ticks.  This may be set with the 
+\f3\fs18 logInterval
+\f4\fs20  parameter to 
+\f3\fs18 createLogFile()
+\f4\fs20  and changed with 
 \f3\fs18 setLogInterval()
 \f4\fs20 .  If automatic logging has been disabled, this property will be 
 \f3\fs18 0
@@ -4539,6 +4627,8 @@ Given this automatic invalidation, most simulations have no reason to call
 
 \f4\fs20 \cf2 Adds a new data column with its name provided by 
 \f3\fs18 columnName
+\f4\fs20 .  The new column will be logged each time that a row is generated, either by automatic logging or by a call to 
+\f3\fs18 logRow()
 \f4\fs20 .  The value for the column, when a given row is generated, will be produced by the code supplied in 
 \f3\fs18 source
 \f4\fs20 , which is expected to return either 
@@ -4577,7 +4667,9 @@ See
 \f3\fs18 species
 \f4\fs20  (the same as the value of the 
 \f3\fs18 cycle
-\f4\fs20  property of that species).  In single-species models, 
+\f4\fs20  property of that species).  The new column will be logged each time that a row is generated, either by automatic logging or by a call to 
+\f3\fs18 logRow()
+\f4\fs20 .  In single-species models, 
 \f3\fs18 species
 \f4\fs20  may be 
 \f3\fs18 NULL
@@ -4591,6 +4683,8 @@ See
 
 \f4\fs20 \cf2 Adds a new data column that provides the cycle stage, named 
 \f3\fs18 cycle_stage
+\f4\fs20 .  The new column will be logged each time that a row is generated, either by automatic logging or by a call to 
+\f3\fs18 logRow()
 \f4\fs20 .  The stage is provided as a 
 \f3\fs18 string
 \f4\fs20 , and will typically be 
@@ -4629,6 +4723,8 @@ See
 \f3\fs18 columnName_mean
 \f4\fs20  and 
 \f3\fs18 columnName_sd
+\f4\fs20 .  The new columns will be logged each time that a row is generated, either by automatic logging or by a call to 
+\f3\fs18 logRow()
 \f4\fs20 .  When a given row is generated, the code supplied in 
 \f3\fs18 source
 \f4\fs20  is expected to return either a zero-length vector of any type including 
@@ -4655,6 +4751,8 @@ See
 
 \f4\fs20 \cf2 Adds a new data column that provides the population sex ratio M:(M+F) for 
 \f3\fs18 species
+\f4\fs20 .  The new column will be logged each time that a row is generated, either by automatic logging or by a call to 
+\f3\fs18 logRow()
 \f4\fs20 .  In single-species models, 
 \f3\fs18 species
 \f4\fs20  may be 
@@ -4671,6 +4769,8 @@ See
 
 \f4\fs20 \cf2 Adds a new data column that provides the total population size for 
 \f3\fs18 species
+\f4\fs20 .  The new column will be logged each time that a row is generated, either by automatic logging or by a call to 
+\f3\fs18 logRow()
 \f4\fs20 .  In single-species models, 
 \f3\fs18 species
 \f4\fs20  may be 
@@ -4687,6 +4787,8 @@ See
 \f3\fs18 subpop
 \f4\fs20 , named 
 \f3\fs18 pX_sex_ratio
+\f4\fs20 .  The new column will be logged each time that a row is generated, either by automatic logging or by a call to 
+\f3\fs18 logRow()
 \f4\fs20 .  If the subpopulation exists but has a size of zero, 
 \f3\fs18 NA
 \f4\fs20  will be written.\
@@ -4699,6 +4801,8 @@ See
 \f3\fs18 subpop
 \f4\fs20 , named 
 \f3\fs18 pX_num_individuals
+\f4\fs20 .  The new column will be logged each time that a row is generated, either by automatic logging or by a call to 
+\f3\fs18 logRow()
 \f4\fs20 .  If the subpopulation exists but has a size of zero, 
 \f3\fs18 0
 \f4\fs20  will be written.\
@@ -4709,6 +4813,8 @@ See
 
 \f4\fs20 \cf2 Adds a new data column with its name provided by 
 \f3\fs18 columnName
+\f4\fs20 .  The new column will be logged each time that a row is generated, either by automatic logging or by a call to 
+\f3\fs18 logRow()
 \f4\fs20 .  The value for the column is initially undefined, and will be written as 
 \f3\fs18 NA
 \f4\fs20 .  A different value may (optionally) be provided by calling 
@@ -4727,7 +4833,9 @@ See
 
 \f4\fs20 \cf2 Adds a new data column, named 
 \f3\fs18 tick
-\f4\fs20 , that provides the tick number for the simulation.
+\f4\fs20 , that provides the tick number for the simulation.  The new column will be logged each time that a row is generated, either by automatic logging or by a call to 
+\f3\fs18 logRow()
+\f4\fs20 .
 \f3\fs18 \
 \pard\pardeftab720\li720\fi-446\ri720\sb180\sa60\partightenfactor0
 \cf2 \'96\'a0(void)clearKeysAndValues(void)\
@@ -5592,10 +5700,397 @@ The species to which the target object belongs.\
 \f4\fs20  Eidos script parameter.  The DFE for a mutation type is normally a constant in simulations, so be sure you know what you are doing.\
 \pard\pardeftab720\ri720\sb360\sa60\partightenfactor0
 
-\f0\b\fs22 \cf0 5.12  Class SLiMEidosBlock\
+\f0\b\fs22 \cf2 5.12  Class Plot\
 \pard\pardeftab720\ri720\sb120\sa60\partightenfactor0
 
-\f1\i\b0 \cf0 5.12.1  
+\f1\i\b0 \cf2 5.12.1  
+\f2\fs18 Plot
+\f1\fs22  properties\
+\pard\pardeftab397\li720\fi-446\ri720\sb180\sa60\partightenfactor0
+
+\f3\i0\fs18 \cf2 title => (string$)\
+\pard\pardeftab720\li547\ri720\sb60\sa60\partightenfactor0
+
+\f4\fs20 \cf2 The title of the plot, as originally passed to 
+\f3\fs18 createPlot()
+\f4\fs20 .  See also the 
+\f3\fs18 plotWithTitle()
+\f4\fs20  method of 
+\f3\fs18 SLiMgui
+\f4\fs20 .\
+\pard\pardeftab720\ri720\sb120\sa60\partightenfactor0
+
+\f1\i\fs22 \cf2 5.12.2  
+\f2\fs18 Plot
+\f1\fs22  methods\
+\pard\pardeftab397\li720\fi-446\ri720\sb180\sa60\partightenfactor0
+
+\f3\i0\fs18 \cf2 \'96\'a0(void)abline([Nif\'a0a\'a0=\'a0NULL], [Nif\'a0b\'a0=\'a0NULL], [Nif\'a0h\'a0=\'a0NULL], [Nif\'a0v\'a0=\'a0NULL], [string\'a0color\'a0=\'a0"red"], [numeric\'a0lwd\'a0=\'a01.0])\
+\pard\pardeftab720\li547\ri720\sb60\sa60\partightenfactor0
+
+\f4\fs20 \cf2 Adds one or more straight lines to the plot.  There are three supported modes of operation for this method.  In the first mode, the lines are specified by 
+\f3\fs18 a
+\f4\fs20  and 
+\f3\fs18 b
+\f4\fs20 , representing the intercepts and slopes of the lines, respectively; in this case, 
+\f3\fs18 a
+\f4\fs20  and 
+\f3\fs18 b
+\f4\fs20  may be the same length, or one of them may be a singleton to provide a single value used for all of the lines specified by the other.  In the second mode, the lines are specified by 
+\f3\fs18 h
+\f4\fs20 , representing the 
+\f1\i y
+\f4\i0 -values of horizontal lines.  In the third mode, the lines are specified by 
+\f3\fs18 v
+\f4\fs20 , representing the 
+\f1\i x
+\f4\i0 -values of vertical lines.  These modes are mutually exclusive and cannot be mixed within one call to 
+\f3\fs18 abline()
+\f4\fs20 .  The new lines will be plotted on top of any previously added data.\
+The lines will be drawn in colors and line widths specified by 
+\f3\fs18 color
+\f4\fs20  and 
+\f3\fs18 lwd
+\f4\fs20 , each of which may be either a singleton (to provide one value used for all lines) or a vector equal in length to the number of lines plotted (to provide one value per line).\
+See also 
+\f3\fs18 lines()
+\f4\fs20 , for a more common approach to line plotting.  The 
+\f3\fs18 abline()
+\f4\fs20  method is different, and more specialized; the lines plotted by it span the full extent of the plot area, and their coordinates are not considered when dynamically resizing the axes of the plot (i.e., when 
+\f3\fs18 createPlot()
+\f4\fs20  is not passed explicit, non-
+\f3\fs18 NULL
+\f4\fs20  values for 
+\f3\fs18 xrange
+\f4\fs20  or 
+\f3\fs18 yrange
+\f4\fs20 ).  This is typically useful for plotting things such as expected values and fit lines.\
+\pard\pardeftab397\li720\fi-446\ri720\sb180\sa60\partightenfactor0
+
+\f3\fs18 \cf2 \'96\'a0(void)addLegend([Ns$\'a0position\'a0=\'a0NULL], [Ni$\'a0inset\'a0=\'a0NULL], [Nif$\'a0labelSize\'a0=\'a0NULL], [Nif$\'a0lineHeight\'a0=\'a0NULL], [Nif$\'a0graphicsWidth\'a0=\'a0NULL], [Nif$\'a0exteriorMargin\'a0=\'a0NULL], [Nif$\'a0interiorMargin\'a0=\'a0NULL])\
+\pard\pardeftab720\li547\ri720\sb60\sa60\partightenfactor0
+
+\f4\fs20 \cf2 Adds a legend to the plot.  The legend will be displayed within the plot at the location specified by position, which must be 
+\f3\fs18 "topRight"
+\f4\fs20 , 
+\f3\fs18 "topLeft"
+\f4\fs20 , 
+\f3\fs18 "bottomRight"
+\f4\fs20 , or 
+\f3\fs18 "bottomLeft"
+\f4\fs20 , or 
+\f3\fs18 NULL
+\f4\fs20  (the default) requesting that SLiMgui choose the position.  The position of the legend will be inset from the chosen corner by a margin 
+\f3\fs18 inset
+\f4\fs20 , measured in pixels; the default of 
+\f3\fs18 NULL
+\f4\fs20  allows SLiMgui to choose the inset.\
+The internal layout of the legend is a bit complex, and can be controlled by five parameters; in all cases, the default value of 
+\f3\fs18 NULL
+\f4\fs20  requests that SLiMgui provide a reasonable default.  The 
+\f3\fs18 labelSize
+\f4\fs20  parameter specifies the font size used for the text labels for each legend entry (measured in \'93points\'94, the standard metric of font sizes).  The 
+\f3\fs18 lineHeight
+\f4\fs20  parameter specifies the vertical size, in pixels, of one entry line.  The 
+\f3\fs18 graphicsWidth
+\f4\fs20  parameter species the width, in pixels, of the column used to display the \'93graphics\'94 (whether a line segment, a point symbol, a swatch, or a combination of those) associated with each entry.  The 
+\f3\fs18 exteriorMargin
+\f4\fs20  parameter specifies the width/height of margins, in pixels, outside of the entries (between the entries and the legend\'92s frame).  Finally, the 
+\f3\fs18 interiorMargin
+\f4\fs20  parameter specifies the width/height of margins, in pixels, vertically between entries, and also between the \'93graphics\'94 column and the label.  It is easy to produce a legend that looks terrible, using these layout metrics; SLiMgui does only minimal sanity-checking of their values, to provide maximal flexibility.\
+The legend is initially empty; entries for it can be added with 
+\f3\fs18 legendLineEntry()
+\f4\fs20 , 
+\f3\fs18 legendPointEntry()
+\f4\fs20 , and 
+\f3\fs18 legendSwatchEntry()
+\f4\fs20 .\
+\pard\pardeftab397\li720\fi-446\ri720\sb180\sa60\partightenfactor0
+
+\f3\fs18 \cf2 \'96\'a0(void)axis(integer$\'a0side, [Nif\'a0at\'a0=\'a0NULL], [ls\'a0labels\'a0=\'a0T])\
+\pard\pardeftab720\li547\ri720\sb60\sa60\partightenfactor0
+
+\f4\fs20 \cf2 Configures an axis of the plot.  The 
+\f3\fs18 side
+\f4\fs20  parameter controls which axis is being configured; at present, it may be 
+\f3\fs18 1
+\f4\fs20  for the 
+\f1\i x
+\f4\i0 -axis (at the bottom of the plot), or 
+\f3\fs18 2
+\f4\fs20  for the 
+\f1\i y
+\f4\i0 -axis (at the left of the plot).\
+The positions of tick marks (and of any associated labels) are controlled by 
+\f3\fs18 at
+\f4\fs20 ; if 
+\f3\fs18 at
+\f4\fs20  is 
+\f3\fs18 NULL
+\f4\fs20  (the default) these positions will be computed automatically based upon the range of the data in the plot, otherwise 
+\f3\fs18 at
+\f4\fs20  must be a vector of 
+\f3\fs18 numeric
+\f4\fs20  positions.  Note that the coordinate system of the plot is controlled not by this method, but by the 
+\f3\fs18 xrange
+\f4\fs20  and 
+\f3\fs18 yrange
+\f4\fs20  parameters of 
+\f3\fs18 createPlot()
+\f4\fs20 ; 
+\f3\fs18 at
+\f4\fs20  controls only the positions of axis ticks 
+\f1\i within
+\f4\i0  that coordinate system.\
+The 
+\f3\fs18 labels
+\f4\fs20  parameter controls the text labels displayed for ticks; it may be 
+\f3\fs18 T
+\f4\fs20  (the default) to label ticks with their numeric positions, 
+\f3\fs18 F
+\f4\fs20  to suppress all tick labels, or a vector of type 
+\f3\fs18 string
+\f4\fs20 , equal in length to 
+\f3\fs18 at
+\f4\fs20 , providing the label for each position in 
+\f3\fs18 at
+\f4\fs20 .  Label values may be the empty string, 
+\f3\fs18 ""
+\f4\fs20 , if a label at a given position is not desired, and if 
+\f3\fs18 labels
+\f4\fs20  is 
+\f3\fs18 T
+\f4\fs20 , some ticks may not receive a label for readability.\
+\pard\pardeftab397\li720\fi-446\ri720\sb180\sa60\partightenfactor0
+
+\f3\fs18 \cf2 \'96\'a0(void)legendLineEntry(string$\'a0label, [string$\'a0color\'a0=\'a0"red"], [numeric$\'a0lwd\'a0=\'a01.0])\
+\pard\pardeftab720\li547\ri720\sb60\sa60\partightenfactor0
+
+\f4\fs20 \cf2 Adds a legend entry with text 
+\f3\fs18 label
+\f4\fs20  to the plot.  The entry will be displayed as a line segment drawn in color 
+\f3\fs18 color
+\f4\fs20 , using line width 
+\f3\fs18 lwd
+\f4\fs20 , mirroring the appearance produced by 
+\f3\fs18 lines()
+\f4\fs20  for the same parameters.  If one or more other legend entries already exist with the same label, the new entry will be drawn on top of the previously set entries for that label (allowing legend entries that display both a line and a point, for example).\
+\pard\pardeftab397\li720\fi-446\ri720\sb180\sa60\partightenfactor0
+
+\f3\fs18 \cf2 \'96\'a0(void)legendPointEntry(string$\'a0label, [integer$\'a0symbol\'a0=\'a00], [string$\'a0color\'a0=\'a0"red"], [string$\'a0border\'a0=\'a0"black"], [numeric$\'a0lwd\'a0=\'a01.0], [numeric$\'a0size\'a0=\'a01.0])\
+\pard\pardeftab720\li547\ri720\sb60\sa60\partightenfactor0
+
+\f4\fs20 \cf2 Adds a legend entry with text 
+\f3\fs18 label
+\f4\fs20  to the plot.  The entry will be displayed as a point symbol specified by 
+\f3\fs18 symbol
+\f4\fs20 , 
+\f3\fs18 color
+\f4\fs20 , 
+\f3\fs18 border
+\f4\fs20 , 
+\f3\fs18 lwd
+\f4\fs20 , and 
+\f3\fs18 size
+\f4\fs20 , mirroring the appearance produced by 
+\f3\fs18 points()
+\f4\fs20  for the same parameters; see 
+\f3\fs18 points()
+\f4\fs20  for further details.  If one or more other legend entries already exist with the same label, the new entry will be drawn on top of the previously set entries for that label (allowing legend entries that display both a line and a point, for example).\
+\pard\pardeftab397\li720\fi-446\ri720\sb180\sa60\partightenfactor0
+
+\f3\fs18 \cf2 \'96\'a0(void)legendSwatchEntry(string$\'a0label, [string$\'a0color\'a0=\'a0"red"])\
+\pard\pardeftab720\li547\ri720\sb60\sa60\partightenfactor0
+
+\f4\fs20 \cf2 Adds a legend entry with text 
+\f3\fs18 label
+\f4\fs20  to the plot.  The entry will be displayed as a swatch drawn in color 
+\f3\fs18 color
+\f4\fs20 .  If one or more other legend entries already exist with the same label, the new entry will be drawn on top of the previously set entries for that label (allowing legend entries that display both a line and a point, for example).\
+\pard\pardeftab397\li720\fi-446\ri720\sb180\sa60\partightenfactor0
+
+\f3\fs18 \cf2 \'96\'a0(void)lines(numeric\'a0x, numeric\'a0y, [string$\'a0color\'a0=\'a0"red"], [numeric$\'a0lwd\'a0=\'a01.0])\
+\pard\pardeftab720\li547\ri720\sb60\sa60\partightenfactor0
+
+\f4\fs20 \cf2 Adds line data given by 
+\f3\fs18 x
+\f4\fs20  and 
+\f3\fs18 y
+\f4\fs20  to the plot.  The data will be plotted as a series of connected line segments, following the (
+\f1\i x
+\f4\i0 , 
+\f1\i y
+\f4\i0 ) positions given; note that the 
+\f3\fs18 x
+\f4\fs20  and 
+\f3\fs18 y
+\f4\fs20  vectors must be the same length.  The new line data will be plotted on top of any previously added data.\
+The lines will be drawn in color 
+\f3\fs18 color
+\f4\fs20 , using line width 
+\f3\fs18 lwd
+\f4\fs20 .  Unlike 
+\f3\fs18 points()
+\f4\fs20  and 
+\f3\fs18 text()
+\f4\fs20 , 
+\f3\fs18 color
+\f4\fs20  and 
+\f3\fs18 lwd
+\f4\fs20  must be singletons, since each point (except the two ends) is shared by two line segments; if you wish to vary the color and width for each line segment, separate calls to 
+\f3\fs18 lines()
+\f4\fs20  are necessary.  See also 
+\f3\fs18 abline()
+\f4\fs20 .\
+\pard\pardeftab397\li720\fi-446\ri720\sb180\sa60\partightenfactor0
+
+\f3\fs18 \cf2 \'96\'a0(void)points(numeric\'a0x, numeric\'a0y, [integer\'a0symbol\'a0=\'a00], [string\'a0color\'a0=\'a0"red"], [string\'a0border\'a0=\'a0"black"], [numeric\'a0lwd\'a0=\'a01.0], [numeric\'a0size\'a0=\'a01.0])\
+\pard\pardeftab720\li547\ri720\sb60\sa60\partightenfactor0
+
+\f4\fs20 \cf2 Adds point data given by 
+\f3\fs18 x
+\f4\fs20  and 
+\f3\fs18 y
+\f4\fs20  to the plot.  The data will be plotted as a set of point symbols, centered at the (
+\f1\i x
+\f4\i0 , 
+\f1\i y
+\f4\i0 ) positions given; note that the 
+\f3\fs18 x
+\f4\fs20  and 
+\f3\fs18 y
+\f4\fs20  vectors must be the same length.  The new point data will be plotted on top of any previously added data.\
+The symbol plotted for each point depends upon the value of 
+\f3\fs18 symbol
+\f4\fs20 .  In general, symbols will be drawn in color 
+\f3\fs18 color
+\f4\fs20 , with a line width 
+\f3\fs18 lwd
+\f4\fs20  used for lines (if any) in the symbol, and an overall size scaled by 
+\f3\fs18 size
+\f4\fs20 .  Symbols 
+\f3\fs18 21
+\f4\fs20 \'96
+\f3\fs18 25
+\f4\fs20  involve both a filled shape and a border line around that shape; for those symbols, the border line will use the color provided by 
+\f3\fs18 border
+\f4\fs20 , while the filled shape will use color 
+\f3\fs18 color
+\f4\fs20 .  All of these parameters (
+\f3\fs18 symbol
+\f4\fs20 , 
+\f3\fs18 color
+\f4\fs20 , 
+\f3\fs18 border
+\f4\fs20 , 
+\f3\fs18 lwd
+\f4\fs20 , and 
+\f3\fs18 size
+\f4\fs20 ) may either be a singleton value applied to all points, or a vector with one value per corresponding point.\
+\pard\pardeftab397\li720\fi-446\ri720\sb180\sa60\partightenfactor0
+
+\f3\fs18 \cf2 \'96\'a0(void)text(numeric\'a0x, numeric\'a0y, string\'a0labels, [string\'a0color\'a0=\'a0"black"], [numeric\'a0size\'a0=\'a010.0], [Nif\'a0adj\'a0=\'a0NULL])\
+\pard\pardeftab720\li547\ri720\sb60\sa60\partightenfactor0
+
+\f4\fs20 \cf2 Adds text data given by 
+\f3\fs18 x
+\f4\fs20 , 
+\f3\fs18 y
+\f4\fs20 , and 
+\f3\fs18 labels
+\f4\fs20  to the plot.  The string values in 
+\f3\fs18 labels
+\f4\fs20  will be plotted at the (
+\f1\i x
+\f4\i0 , 
+\f1\i y
+\f4\i0 ) positions given; note that 
+\f3\fs18 x
+\f4\fs20 , 
+\f3\fs18 y
+\f4\fs20 , and 
+\f3\fs18 labels
+\f4\fs20  must all be the same length.  The new text data will be plotted on top of any previously added data.\
+The text will be drawn in color 
+\f3\fs18 color
+\f4\fs20 , at the font size given by 
+\f3\fs18 size
+\f4\fs20  (measured in \'93points\'94, the standard metric of font sizes); the font family and style cannot be controlled at this time.  Both of these parameters (
+\f3\fs18 color
+\f4\fs20  and 
+\f3\fs18 size
+\f4\fs20 ) may either be a singleton value applied to all points, or a vector with one value per corresponding point.\
+The exact position of the text, relative to each point (
+\f1\i x
+\f4\i0 , 
+\f1\i y
+\f4\i0 ), is adjusted by the optional parameter 
+\f3\fs18 adj
+\f4\fs20 .  The value of 
+\f3\fs18 adj
+\f4\fs20 , if specified, must be a vector of length 
+\f3\fs18 2
+\f4\fs20 , where 
+\f3\fs18 adj[0]
+\f4\fs20  adjusts the 
+\f1\i x
+\f4\i0  position and 
+\f3\fs18 adj[1]
+\f4\fs20  adjusts the 
+\f1\i y
+\f4\i0  position of the text.  Relative to a given 
+\f1\i x
+\f4\i0  position, a value of 
+\f3\fs18 0.0
+\f4\fs20  aligns the left edge of the text to it; a value of 
+\f3\fs18 0.5
+\f4\fs20  aligns the center of the text to it; and a value of 
+\f3\fs18 1.0
+\f4\fs20  aligns the right edge of the text to it.  Similarly, relative to a given 
+\f1\i y
+\f4\i0  position, a value of 
+\f3\fs18 0.0
+\f4\fs20  aligns the bottom edge of the text to it; a value of 
+\f3\fs18 0.5
+\f4\fs20  aligns the center of the text to it; and a value of 
+\f3\fs18 1.0
+\f4\fs20  aligns the top edge of the text to it.  Intermediate values will produce intermediate alignments, and values of 
+\f3\fs18 adj
+\f4\fs20  outside of [
+\f3\fs18 0.0
+\f4\fs20 , 
+\f3\fs18 1.0
+\f4\fs20 ] are also allowed.  The default value of 
+\f3\fs18 adj
+\f4\fs20 , 
+\f3\fs18 NULL
+\f4\fs20 , is equivalent to 
+\f3\fs18 c(0.5,\'a00.5)
+\f4\fs20 , aligning the center of the text to (
+\f1\i x
+\f4\i0 , 
+\f1\i y
+\f4\i0 ) both horizontally and vertically.\
+\pard\pardeftab397\li720\fi-446\ri720\sb180\sa60\partightenfactor0
+
+\f3\fs18 \cf2 \'96\'a0(void)write(string$\'a0filePath)\
+\pard\pardeftab720\li547\ri720\sb60\sa60\partightenfactor0
+
+\f4\fs20 \cf2 Writes the plot to the given filesystem path 
+\f3\fs18 filePath
+\f4\fs20  as a PDF file.  It is suggested, but not required, that 
+\f3\fs18 filePath
+\f4\fs20  should end in a 
+\f3\fs18 .pdf
+\f4\fs20  or 
+\f3\fs18 .PDF
+\f4\fs20  filename extension.  If the file cannot be written, an error will result.\
+\pard\pardeftab720\ri720\sb360\sa60\partightenfactor0
+
+\f0\b\fs22 \cf0 5.13  Class SLiMEidosBlock\
+\pard\pardeftab720\ri720\sb120\sa60\partightenfactor0
+
+\f1\i\b0 \cf0 5.13.1  
 \f2\fs18 SLiMEidosBlock
 \f1\fs22  properties\
 \pard\pardeftab720\li720\fi-446\ri720\sb180\sa60\partightenfactor0
@@ -5745,7 +6240,7 @@ The species to which the target object belongs.\
 \f3\fs18 \
 \pard\pardeftab720\ri720\sb120\sa60\partightenfactor0
 
-\f1\i\fs22 \cf0 5.12.2  
+\f1\i\fs22 \cf0 5.13.2  
 \f2\fs18 SLiMEidosBlock
 \f1\fs22  methods\
 \pard\pardeftab397\fi274\ri720\sb40\sa40\partightenfactor0
@@ -5753,10 +6248,10 @@ The species to which the target object belongs.\
 \f5\i0 \cf0 \
 \pard\pardeftab720\ri720\sb360\sa60\partightenfactor0
 
-\f0\b \cf0 5.13  Class SLiMgui\
+\f0\b \cf0 5.14  Class SLiMgui\
 \pard\pardeftab720\ri720\sb120\sa60\partightenfactor0
 
-\f1\i\b0 \cf0 5.13.1  
+\f1\i\b0 \cf0 5.14.1  
 \f2\fs18 SLiMgui
 \f1\fs22  properties\
 \pard\pardeftab720\li720\fi-446\ri720\sb180\sa60\partightenfactor0
@@ -5768,12 +6263,92 @@ pid => (integer$)\
 \f4\fs20 \cf2 The Un*x process identifier (commonly called the \'93pid\'94) of the running SLiMgui application.  This can be useful for scripts that wish to use system calls to influence the SLiMgui application.\
 \pard\pardeftab720\ri720\sb120\sa60\partightenfactor0
 
-\f1\i\fs22 \cf0 \kerning1\expnd0\expndtw0 5.13.2  
+\f1\i\fs22 \cf0 \kerning1\expnd0\expndtw0 5.14.2  
 \f2\fs18 SLiMgui
 \f1\fs22  methods\
 \pard\pardeftab397\li720\fi-446\ri720\sb180\sa60\partightenfactor0
 
-\f3\i0\fs18 \cf2 \expnd0\expndtw0\kerning0
+\f3\i0\fs18 \cf2 \'96\'a0(No<Plot>$)createPlot(string$\'a0title, [Nif\'a0xrange\'a0=\'a0NULL], [Nif\'a0yrange\'a0=\'a0NULL], [string$\'a0xlab\'a0=\'a0"x"], [string$\'a0ylab\'a0=\'a0"y"], [Nif$\'a0width\'a0=\'a0NULL], [Nif$\'a0height\'a0=\'a0NULL], [logical$\'a0horizontalGrid\'a0=\'a0F], [logical$\'a0verticalGrid\'a0=\'a0F], [logical$\'a0fullBox\'a0=\'a0T], [numeric$\'a0axisLabelSize\'a0=\'a015], [numeric$\'a0tickLabelSize\'a0=\'a010])\
+\pard\pardeftab720\li547\ri720\sb60\sa60\partightenfactor0
+
+\f4\fs20 \cf2 Creates and returns a new custom plot referred to by 
+\f3\fs18 title
+\f4\fs20 , or restarts and returns the existing plot with that title; if the plot cannot be created (notably, when running under SLiMguiLegacy rather than SLiMgui), 
+\f3\fs18 NULL
+\f4\fs20  is returned.  The range for the 
+\f1\i x
+\f4\i0  and 
+\f1\i y
+\f4\i0  axes of the plot can optionally be provided in 
+\f3\fs18 xrange
+\f4\fs20  and 
+\f3\fs18 yrange
+\f4\fs20 , as vectors of length 
+\f3\fs18 2
+\f4\fs20  containing the minimum and maximum values for the corresponding axis; the default of 
+\f3\fs18 NULL
+\f4\fs20  for these parameters requests that the axis ranges be determined heuristically based upon the data subsequently added to the plot.  Labels for the 
+\f1\i x
+\f4\i0  and 
+\f1\i y
+\f4\i0  axes can be provided in 
+\f3\fs18 xlab
+\f4\fs20  and 
+\f3\fs18 ylab
+\f4\fs20 ; if no axis label is desired, the empty string 
+\f3\fs18 ""
+\f4\fs20  may be passed.  The width and height of the window itself can optionally be set with 
+\f3\fs18 width
+\f4\fs20  and 
+\f3\fs18 height
+\f4\fs20 , in units of pixels (perhaps 70\'96100 pixels per inch, depending on your screen\'92s pixel density); the default of 
+\f3\fs18 NULL
+\f4\fs20  for these parameters requests SLiMgui\'92s default plot window size.  The display of horizontal grid lines, vertical grid lines, and a full box around the plot area can be controlled with 
+\f3\fs18 horizontalGrid
+\f4\fs20 , 
+\f3\fs18 verticalGrid
+\f4\fs20 , and 
+\f3\fs18 fullBox
+\f4\fs20  respectively, and the size (in points) of axis and tick labels can be controlled with 
+\f3\fs18 axisLabelSize
+\f4\fs20  and 
+\f3\fs18 tickLabelSize
+\f4\fs20  respectively.\
+Once the plot has been created, data can be added to it using 
+\f3\fs18 Plot
+\f4\fs20  methods such as 
+\f3\fs18 lines()
+\f4\fs20 , 
+\f3\fs18 points()
+\f4\fs20 , and 
+\f3\fs18 text()
+\f4\fs20 .  As with other plot windows in SLiMgui, the \'93action button\'94 can be used to access plot configuration options, and to copy or save the final plot as a raster image or a PDF file.\
+\pard\pardeftab397\li720\fi-446\ri720\sb180\sa60\partightenfactor0
+
+\f3\fs18 \cf2 \'96\'a0(Nfs)logFileData(object<LogFile>$\'a0logFile, is$\'a0column)\
+\pard\pardeftab720\li547\ri720\sb60\sa60\partightenfactor0
+
+\f4\fs20 \cf2 Returns a vector containing data from the 
+\f3\fs18 LogFile
+\f4\fs20  object 
+\f3\fs18 logFile
+\f4\fs20 , taken from a specified column (identified in 
+\f3\fs18 column
+\f4\fs20  either by the column\'92s name or by its zero-based index).  If the data are all numeric, they will be returned as a 
+\f3\fs18 float
+\f4\fs20  vector.  Otherwise \'96 if the data are non-numeric \'96 they will be returned as a 
+\f3\fs18 string
+\f4\fs20  vector.  If the specified column does not exist in the log file, 
+\f3\fs18 NULL
+\f4\fs20  will be returned.\
+This functionality is provided as a method on the 
+\f3\fs18 SLiMgui
+\f4\fs20  class, rather than on 
+\f3\fs18 LogFile
+\f4\fs20 , because in SLiMgui logged data is kept in memory anyway, for display in the debugging output viewer window.  When running at the command line logged data is not kept in memory, and thus is not available.\
+\pard\pardeftab397\li720\fi-446\ri720\sb180\sa60\partightenfactor0
+
+\f3\fs18 \cf2 \expnd0\expndtw0\kerning0
 \'96\'a0(void)openDocument(string$\'a0filePath)\
 \pard\pardeftab720\li547\ri720\sb60\sa60\partightenfactor0
 
@@ -5812,9 +6387,23 @@ If the model is being profiled, or is executing forward to a tick number entered
 \f4\fs20  will do nothing; by design, 
 \f3\fs18 pauseExecution()
 \f4\fs20  only pauses execution when SLiMgui is doing a simple \'93Play\'94 of the model.\
+\pard\pardeftab397\li720\fi-446\ri720\sb180\sa60\partightenfactor0
+
+\f3\fs18 \cf2 \kerning1\expnd0\expndtw0 \'96\'a0(No<Plot>$)plotWithTitle(string$\'a0title)\
+\pard\pardeftab720\li547\ri720\sb60\sa60\partightenfactor0
+
+\f4\fs20 \cf2 Returns an existing plot that was created by 
+\f3\fs18 createPlot()
+\f4\fs20  with 
+\f3\fs18 title
+\f4\fs20 ; if such a plot does not exist, 
+\f3\fs18 NULL
+\f4\fs20  is returned.  Note that other SLiMgui plots cannot be accessed through this method; only plots created by 
+\f3\fs18 createPlot()
+\f4\fs20  are available in Eidos.\
 \pard\pardeftab720\ri720\sb360\sa60\partightenfactor0
 
-\f0\b\fs22 \cf2 \kerning1\expnd0\expndtw0 5.14  Class SpatialMap
+\f0\b\fs22 \cf2 5.15  Class SpatialMap
 \f4\b0 \
 \pard\pardeftab397\li720\fi-446\ri720\sb180\sa60\partightenfactor0
 
@@ -5830,7 +6419,7 @@ If the model is being profiled, or is executing forward to a tick number entered
 \f4\fs20 .\
 \pard\pardeftab720\ri720\sb120\sa60\partightenfactor0
 
-\f1\i\fs22 \cf2 5.14.1  
+\f1\i\fs22 \cf2 5.15.1  
 \f2\fs18 SpatialMap
 \f1\fs22  properties\
 \pard\pardeftab720\li720\fi-446\ri720\sb180\sa60\partightenfactor0
@@ -5929,7 +6518,7 @@ If the model is being profiled, or is executing forward to a tick number entered
 \f4\fs20  class; see the Eidos manual), for another way of attaching state to spatial maps.\
 \pard\pardeftab720\ri720\sb120\sa60\partightenfactor0
 
-\f1\i\fs22 \cf2 5.14.2  
+\f1\i\fs22 \cf2 5.15.2  
 \f2\fs18 SpatialMap
 \f1\fs22  methods\
 \pard\pardeftab397\li720\fi-446\ri720\sb180\sa60\partightenfactor0
@@ -6240,7 +6829,7 @@ The sampling of the spatial map can be done in one of two ways, as controlled by
 \f3\fs18 centers == F
 \f4\fs20  will recover the original values, but will not capture the \'93typical\'94 value of each pixel in the image; 
 \f3\fs18 centers == T
-\f4\fs20 , on the other hand, will not recover the original values, but will capture the \'93typical\'94 value of each pixel in the image (i.e., the value at the center of each pixel, as produced by interpolation).  The figures in section 15.11 may be helpful for visualizing the difference between these options; the overlaid grids span the full extent of the spatial map, just as shown in that section.\
+\f4\fs20 , on the other hand, will not recover the original values, but will capture the \'93typical\'94 value of each pixel in the image (i.e., the value at the center of each pixel, as produced by interpolation).\
 If 
 \f3\fs18 color
 \f4\fs20  is 
@@ -6308,9 +6897,9 @@ If
 \f4\fs20  to wrap the point coordinates first if desired.  See the documentation for 
 \f3\fs18 defineSpatialMap()
 \f4\fs20  for information regarding the details of value mapping.\
-Beginning in SLiM 3.3, 
+The 
 \f3\fs18 point
-\f4\fs20  may contain more than one point to be looked up.  In this case, the length of 
+\f4\fs20  parameter may also contain more than one point to be looked up.  In this case, the length of 
 \f3\fs18 point
 \f4\fs20  must be an exact multiple of the spatiality of the spatial map; for a spatial map with spatiality 
 \f3\fs18 "xz"
@@ -6331,13 +6920,13 @@ Beginning in SLiM 3.3,
 \f4\i0  and 
 \f1\i z
 \f4\i0  coordinates of the points to be evaluated.  This allows 
-\f3\fs18 spatialMapValue()
+\f3\fs18 mapValue()
 \f4\fs20  to be used in a vectorized fashion.\
 The 
 \f3\fs18 spatialMapValue()
 \f4\fs20  method of 
 \f3\fs18 Subpopulation
-\f4\fs20  provides the same functionality as this method; it may be more convenient to use, for some usage cases, and it checks that the spatial map is actually added to the subpopulation in question, providing an additional consistency check.  However, either method may be used.\
+\f4\fs20  provides essentially the same functionality as this method; it may be more convenient to use, for some usage cases, and it checks that the spatial map is actually added to the subpopulation in question, providing an additional consistency check.  However, either method may be used.\
 \pard\pardeftab397\li720\fi-446\ri720\sb180\sa60\partightenfactor0
 
 \f3\fs18 \cf2 \'96\'a0(object<SpatialMap>$)multiply(ifo<SpatialMap>\'a0x)\
@@ -6435,23 +7024,10 @@ The
 \f3\fs18 sampleNearbyPoint()
 \f4\fs20  samples a Metropolis\'96Hastings move on the spatial map.  See 
 \f3\fs18 sampleNearbyPoint()
-\f4\fs20  for discussion of the basic idea.  This method proposes a nearby point drawn from the given kernel.  If the drawn point has a larger map value than the original point, the new point is returned.  If the drawn point has a smaller map value than the original point, it is returned with a probability equal to the ratio between its map value and the original map value, otherwise the original point is returned.  The distribution of individuals that move (or not) to new locations governed by this method will converge upon the map itself, in a similar manner to how MCMC converges upon the posterior distribution (assuming no other forces, such as birth or death, influence the distribution of individuals).  Movement governed by this method is \'93improved\'94 in the sense that individuals will tend to remain where they are unless the new sampled point is an improvement for them \'96 a higher map value.\
-Note that unlike 
+\f4\fs20  for discussion of the basic idea.  This method proposes a nearby point drawn from the given kernel.  If the drawn point has a larger map value than the original point, the new point is returned.  If the drawn point has a smaller map value than the original point, it is returned with a probability equal to the ratio between its map value and the original map value, otherwise the original point is returned.  The distribution of individuals that move (or not) to new locations governed by this method will converge upon the map itself, in a similar manner to how MCMC converges upon the posterior distribution (assuming no other forces, such as birth or death, influence the distribution of individuals).  Movement governed by this method is \'93improved\'94 in the sense that individuals will tend to remain where they are unless the new sampled point is an improvement for them \'96 a higher map value.  Note that unlike 
 \f3\fs18 sampleNearbyPoint()
 \f4\fs20 , this method requires that all map values are non-negative.\
-\pard\pardeftab397\li720\fi-446\ri720\sb180\sa60\partightenfactor0
-
-\f3\fs18 \cf2 \'96\'a0(float)sampleNearbyPoint(float\'a0point, float$\'a0maxDistance, string$\'a0functionType, ...)\
-\pard\pardeftab720\li547\ri720\sb60\sa60\partightenfactor0
-
-\f4\fs20 \cf2 For a spatial point supplied in 
-\f3\fs18 point
-\f4\fs20 , returns a nearby point sampled from a kernel weighted by the spatial map\'92s values.  Only points within the maximum distance of the kernel, 
-\f3\fs18 maxDistance
-\f4\fs20 , will be chosen, and the probability that a given point is chosen will be proportional to the density of the kernel at that point multiplied by the value of the map at that point (interpolated, if interpolation is enabled for the map).  Negative values of the map will be treated as zero.  The point returned will be within spatial bounds, respecting periodic boundaries if in effect (so there is no need to call 
-\f3\fs18 pointPeriodic()
-\f4\fs20  on the result).\
-The kernel is specified with a kernel shape, 
+The kernel is specified with a kernel type, 
 \f3\fs18 functionType
 \f4\fs20 , followed by zero or more ellipsis arguments; see 
 \f3\fs18 smooth()
@@ -6467,7 +7043,48 @@ The kernel is specified with a kernel shape,
 \f3\fs18 "t"
 \f4\fs20  are supported, and type 
 \f3\fs18 "t"
-\f4\fs20  is not presently supported for 3D kernels.\
+\f4\fs20  is not presently supported for 3D kernels.  The parameters that define the kernel\'92s shape \'96 the ellipsis arguments that follow 
+\f3\fs18 functionType
+\f4\fs20  \'96 may each, independently, be either a singleton or a vector with length equal to the number of points, providing a separate value for each point being processed.  In this way, all of the nearby points can be drawn from the same kernel, or each from a separately defined kernel.  Since 
+\f3\fs18 maxDistance
+\f4\fs20  and 
+\f3\fs18 functionType
+\f4\fs20  are required to be singletons, however, their values cannot vary from point to point in the present design.\
+\pard\pardeftab397\li720\fi-446\ri720\sb180\sa60\partightenfactor0
+
+\f3\fs18 \cf2 \'96\'a0(float)sampleNearbyPoint(float\'a0point, float$\'a0maxDistance, string$\'a0functionType, ...)\
+\pard\pardeftab720\li547\ri720\sb60\sa60\partightenfactor0
+
+\f4\fs20 \cf2 For a spatial point supplied in 
+\f3\fs18 point
+\f4\fs20 , returns a nearby point sampled from a kernel weighted by the spatial map\'92s values.  Only points within the maximum distance of the kernel, 
+\f3\fs18 maxDistance
+\f4\fs20 , will be chosen, and the probability that a given point is chosen will be proportional to the density of the kernel at that point multiplied by the value of the map at that point (interpolated, if interpolation is enabled for the map).  Negative values of the map will be treated as zero.  The point returned will be within spatial bounds, respecting periodic boundaries if in effect (so there is no need to call 
+\f3\fs18 pointPeriodic()
+\f4\fs20  on the result).\
+The kernel is specified with a kernel type, 
+\f3\fs18 functionType
+\f4\fs20 , followed by zero or more ellipsis arguments; see 
+\f3\fs18 smooth()
+\f4\fs20  for further information.  For this method, at present only kernel types 
+\f3\fs18 "f"
+\f4\fs20 , 
+\f3\fs18 "l"
+\f4\fs20 , 
+\f3\fs18 "e"
+\f4\fs20 , 
+\f3\fs18 "n"
+\f4\fs20 , and 
+\f3\fs18 "t"
+\f4\fs20  are supported, and type 
+\f3\fs18 "t"
+\f4\fs20  is not presently supported for 3D kernels.  The parameters that define the kernel\'92s shape \'96 the ellipsis arguments that follow 
+\f3\fs18 functionType
+\f4\fs20  \'96 may each, independently, be either a singleton or a vector with length equal to the number of points, providing a separate value for each point being processed.  In this way, all of the nearby points can be drawn from the same kernel, or each from a separately defined kernel.  Since 
+\f3\fs18 maxDistance
+\f4\fs20  and 
+\f3\fs18 functionType
+\f4\fs20  are required to be singletons, however, their values cannot vary from point to point in the present design.\
 This method can be used to find points in the vicinity of individuals that are favorable \'96 possessing more resources, or better environmental conditions, etc.  It can also be used to guide the dispersal or foraging behavior of individuals.  See 
 \f3\fs18 sampleImprovedNearbyPoint()
 \f4\fs20  for a variant that may be useful for directed movement across a landscape.  Note that the algorithm for 
@@ -6570,10 +7187,10 @@ The density scale of the kernel has no effect and will be normalized; this is th
 \f4\fs20  is subtracted from the corresponding grid value of the target spatial map (and thus the two spatial maps must match in their spatiality, their spatial bounds, and their grid dimensions).  The target spatial map is returned, to allow easy chaining of operations.\
 \pard\pardeftab720\ri720\sb360\sa60\partightenfactor0
 
-\f0\b\fs22 \cf0 5.15  Class Species\
+\f0\b\fs22 \cf0 5.16  Class Species\
 \pard\pardeftab720\ri720\sb120\sa60\partightenfactor0
 
-\f1\i\b0 \cf0 5.15.1  
+\f1\i\b0 \cf0 5.16.1  
 \f2\fs18 Species
 \f1\fs22  properties\
 \pard\pardeftab720\li720\fi-446\ri720\sb180\sa60\partightenfactor0
@@ -6659,8 +7276,10 @@ The density scale of the kernel has no effect and will be normalized; this is th
 
 \f4\fs20 \cf0 The 
 \f3\fs18 GenomicElementType
-\f4\fs20  objects being used in the species.
-\f5 \
+\f4\fs20  objects being used in the species.\cf2   These are guaranteed to be in sorted order, by their 
+\f3\fs18 id
+\f4\fs20  property.
+\f5 \cf0 \
 \pard\pardeftab720\li720\fi-446\ri720\sb180\sa60\partightenfactor0
 
 \f3\fs18 \cf2 id => (integer$)\
@@ -6682,8 +7301,10 @@ The density scale of the kernel has no effect and will be normalized; this is th
 
 \f4\fs20 \cf0 The 
 \f3\fs18 MutationType
-\f4\fs20  objects being used in the species.
-\f5 \
+\f4\fs20  objects being used in the species.\cf2   These are guaranteed to be in sorted order, by their 
+\f3\fs18 id
+\f4\fs20  property.
+\f5 \cf0 \
 \pard\pardeftab720\li720\fi-446\ri720\sb180\sa60\partightenfactor0
 
 \f3\fs18 \cf0 mutations => (object<Mutation>)\
@@ -6763,8 +7384,10 @@ The spatial periodicity of the simulation for this species, as specified in
 
 \f4\fs20 \cf0 The 
 \f3\fs18 Subpopulation
-\f4\fs20  instances currently defined in the species.
-\f5 \
+\f4\fs20  instances currently defined in the species.\cf2   These are guaranteed to be in sorted order, by their 
+\f3\fs18 id
+\f4\fs20  property.
+\f5 \cf0 \
 \pard\pardeftab720\li720\fi-446\ri720\sb180\sa60\partightenfactor0
 
 \f3\fs18 \cf0 substitutions => (object<Substitution>)\
@@ -6796,7 +7419,7 @@ The spatial periodicity of the simulation for this species, as specified in
 \f5 \
 \pard\pardeftab720\ri720\sb120\sa60\partightenfactor0
 
-\f1\i\fs22 \cf0 5.15.2  
+\f1\i\fs22 \cf0 5.16.2  
 \f2\fs18 Species
 \f1\fs22  methods\
 \pard\pardeftab397\li720\fi-446\ri720\sb180\sa60\partightenfactor0
@@ -6868,7 +7491,7 @@ The spatial periodicity of the simulation for this species, as specified in
 \f3\fs18 sexRatio
 \f4\fs20  (as the male fraction, M:M+F); if it is not specified, a default of 
 \f3\fs18 0.5
-\f4\fs20  is used.  The new subpopulation will be defined as a global variable immediately by this method (see section 24.15), and will also be returned by this method.\
+\f4\fs20  is used.  The new subpopulation will be defined as a global variable immediately by this method, and will also be returned by this method.\
 Subpopulations added by this method will consist of individuals that are clonal copies of individuals from the source subpopulation, randomly chosen with probabilities proportional to fitness.  The fitness of all of these initial individuals is considered to be 1.0, to avoid a doubled round of selection in the initial tick, given that fitness values were already used to choose the individuals to clone.  Once this initial set of individuals has mated to produce offspring, the model is effectively of parental individuals in the source subpopulation mating randomly according to fitness, as usual in SLiM, with juveniles migrating to the newly added subpopulation.  Effectively, then, then new subpopulation is created empty, and is filled by migrating juveniles from the source subpopulation, in accordance with SLiM\'92s usual model of juvenile migration.\
 \pard\pardeftab529\li720\fi-446\ri720\sb180\sa60\partightenfactor0
 
@@ -8058,10 +8681,10 @@ The metadata (age, location, etc) that are stored in the resulting tree sequence
 \f4\fs20 ), but it can also take a significant amount of time.  Typically calling this method is not necessary; the automatic simplification performed occasionally by SLiM should be sufficient for most models.\
 \pard\pardeftab720\ri720\sb360\sa60\partightenfactor0
 
-\f0\b\fs22 \cf0 \kerning1\expnd0\expndtw0 5.16  Class Subpopulation\
+\f0\b\fs22 \cf0 \kerning1\expnd0\expndtw0 5.17  Class Subpopulation\
 \pard\pardeftab720\ri720\sb120\sa60\partightenfactor0
 
-\f1\i\b0 \cf0 5.16.1  
+\f1\i\b0 \cf0 5.17.1  
 \f2\fs18 Subpopulation
 \f1\fs22  properties\
 \pard\pardeftab720\li720\fi-446\ri720\sb180\sa60\partightenfactor0
@@ -8338,7 +8961,7 @@ The species to which the target object belongs.\
 \f4\fs20  class; see the Eidos manual)\cf0 , for another way of attaching state to subpopulations.\
 \pard\pardeftab720\ri720\sb120\sa60\partightenfactor0
 
-\f1\i\fs22 \cf0 5.16.2  
+\f1\i\fs22 \cf0 5.17.2  
 \f2\fs18 Subpopulation
 \f1\fs22  methods\
 \pard\pardeftab397\li720\fi-446\ri720\sb180\sa60\partightenfactor0
@@ -8354,7 +8977,7 @@ The species to which the target object belongs.\
 \f4\fs20  and 
 \f3\fs18 modifyChild()
 \f4\fs20  callbacks governing the generation of the offspring individual.\
-Beginning in SLiM 5.0, the 
+Beginning in SLiM 4.1, the 
 \f3\fs18 count
 \f4\fs20  parameter dictates how many offspring will be generated (previously, exactly one offspring was generated).  Each offspring is generated independently, based upon the given parameters.  The returned vector contains all generated offspring, except those that were rejected by a 
 \f3\fs18 modifyChild()
@@ -8367,7 +8990,7 @@ Beginning in SLiM 5.0, the
 \f4\fs20 ; note that this is a change in behavior from earlier versions, which would return 
 \f3\fs18 NULL
 \f4\fs20 .\
-Beginning in SLiM 5.0, passing 
+Beginning in SLiM 4.1, passing 
 \f3\fs18 T
 \f4\fs20  for 
 \f3\fs18 defer
@@ -8380,7 +9003,7 @@ Beginning in SLiM 5.0, passing
 \f4\fs20  for 
 \f3\fs18 defer
 \f4\fs20  is generally preferable since it has fewer restrictions.  When running multi-threaded, deferring genome generation allows that task to be done in parallel (which is the reason this option exists).\
-Also beginning in SLiM 5.0, in spatial models the spatial position of the offspring will be inherited (i.e., copied) from 
+Also beginning in SLiM 4.1, in spatial models the spatial position of the offspring will be inherited (i.e., copied) from 
 \f3\fs18 parent
 \f4\fs20 ; more specifically, the 
 \f3\fs18 x
@@ -8388,7 +9011,9 @@ Also beginning in SLiM 5.0, in spatial models the spatial position of the offspr
 \f3\fs18 y
 \f4\fs20  property in 2D/3D models, and the 
 \f3\fs18 z
-\f4\fs20  property in 3D models.  Properties not inherited will be left uninitialized, as they were prior to SLiM 5.  The parent\'92s spatial position is probably not desirable in itself; the intention here is to make it easy to model the natal dispersal of all the new offspring for a given tick with a single vectorized call to 
+\f4\fs20  property in 3D models.  Properties not inherited will be left uninitialized, as they were prior to SLiM 4.1.  The parent\'92s spatial position is probably not desirable in itself; the intention here is to make it easy to model the natal dispersal of all the new offspring for a given tick with a single vectorized call to 
+\f3\fs18 deviatePositions()
+\f4\fs20  / 
 \f3\fs18 pointDeviated()
 \f4\fs20 .\
 Note that this method is only for use in nonWF models.  See 
@@ -8484,14 +9109,14 @@ Note that any defined, active, and applicable
 \f4\fs20  are used (since that is the maternal parent).\
 If the 
 \f3\fs18 modifyChild()
-\f4\fs20  callback process results in rejection of the proposed child (see section 26.5), a new offspring individual is not be generated.  To force the generation of an offspring individual from a given pair of parents, you could loop until 
+\f4\fs20  callback process results in rejection of the proposed child, a new offspring individual is not be generated.  To force the generation of an offspring individual from a given pair of parents, you could loop until 
 \f3\fs18 addCrossed()
 \f4\fs20  succeeds, but note that if your 
 \f3\fs18 modifyChild()
 \f4\fs20  callback rejects all proposed children from those particular parents, your model will then hang, so care must be taken with this approach.  Usually, nonWF models do not force generation of offspring in this manner; rejection of a proposed offspring by a 
 \f3\fs18 modifyChild()
 \f4\fs20  callback typically represents a phenomenon such as post-mating reproductive isolation or lethal genetic incompatibilities that would reduce the expected litter size, so the default behavior is typically desirable.\
-Beginning in SLiM 5.0, the 
+Beginning in SLiM 4.1, the 
 \f3\fs18 count
 \f4\fs20  parameter dictates how many offspring will be generated (previously, exactly one offspring was generated).  Each offspring is generated independently, based upon the given parameters.  The returned vector contains all generated offspring, except those that were rejected by a 
 \f3\fs18 modifyChild()
@@ -8504,7 +9129,7 @@ Beginning in SLiM 5.0, the
 \f4\fs20 ; note that this is a change in behavior from earlier versions, which would return 
 \f3\fs18 NULL
 \f4\fs20 .\
-Beginning in SLiM 5.0, passing 
+Beginning in SLiM 4.1, passing 
 \f3\fs18 T
 \f4\fs20  for 
 \f3\fs18 defer
@@ -8519,7 +9144,7 @@ Beginning in SLiM 5.0, passing
 \f4\fs20  for 
 \f3\fs18 defer
 \f4\fs20  is generally preferable since it has fewer restrictions.  When running multi-threaded, deferring genome generation allows that task to be done in parallel (which is the reason this option exists).\
-Also beginning in SLiM 5.0, in spatial models the spatial position of the offspring will be inherited (i.e., copied) from 
+Also beginning in SLiM 4.1, in spatial models the spatial position of the offspring will be inherited (i.e., copied) from 
 \f3\fs18 parent1
 \f4\fs20 ; more specifically, the 
 \f3\fs18 x
@@ -8527,7 +9152,9 @@ Also beginning in SLiM 5.0, in spatial models the spatial position of the offspr
 \f3\fs18 y
 \f4\fs20  property in 2D/3D models, and the 
 \f3\fs18 z
-\f4\fs20  property in 3D models.  Properties not inherited will be left uninitialized, as they were prior to SLiM 5.  The parent\'92s spatial position is probably not desirable in itself; the intention here is to make it easy to model the natal dispersal of all the new offspring for a given tick with a single vectorized call to 
+\f4\fs20  property in 3D models.  Properties not inherited will be left uninitialized, as they were prior to SLiM 4.1.  The parent\'92s spatial position is probably not desirable in itself; the intention here is to make it easy to model the natal dispersal of all the new offspring for a given tick with a single vectorized call to 
+\f3\fs18 deviatePositions()
+\f4\fs20  / 
 \f3\fs18 pointDeviated()
 \f4\fs20 .\
 Note that this method is only for use in nonWF models, in which offspring generation is managed manually by the model script; in such models, 
@@ -8583,7 +9210,7 @@ By default \'96 when
 \f4\fs20  can be used to make one or both genomes be null genomes, which can be useful for, e.g., modeling haploids (for which, by convention, the 
 \f1\i second
 \f4\i0  genome is usually a null genome in SLiM).\
-Beginning in SLiM 5.0, the 
+Beginning in SLiM 4.1, the 
 \f3\fs18 count
 \f4\fs20  parameter dictates how many offspring will be generated (previously, exactly one offspring was generated).  Each offspring is generated independently, based upon the given parameters.  The returned vector contains all generated offspring, except those that were rejected by a 
 \f3\fs18 modifyChild()
@@ -8830,7 +9457,7 @@ Note that gene conversion tracts are not explicitly supported by this method; th
 \f3\fs18 breaks
 \f4\fs20  vectors provide crossover breakpoints, which may be used to implement crossovers or simple gene conversion tracts.  There is no way to specify complex gene conversion tracts with heteroduplex mismatch repair.\
 \pard\pardeftab720\li547\ri720\sb60\sa60\partightenfactor0
-\cf2 \kerning1\expnd0\expndtw0 Beginning in SLiM 5.0, the 
+\cf2 \kerning1\expnd0\expndtw0 Beginning in SLiM 4.1, the 
 \f3\fs18 count
 \f4\fs20  parameter dictates how many offspring will be generated (previously, exactly one offspring was generated).  Each offspring is generated independently, based upon the given parameters.  The returned vector contains all generated offspring, except those that were rejected by a 
 \f3\fs18 modifyChild()
@@ -8843,7 +9470,7 @@ Note that gene conversion tracts are not explicitly supported by this method; th
 \f4\fs20 ; note that this is a change in behavior from earlier versions, which would return 
 \f3\fs18 NULL
 \f4\fs20 .\
-Beginning in SLiM 5.0, passing 
+Beginning in SLiM 4.1, passing 
 \f3\fs18 T
 \f4\fs20  for 
 \f3\fs18 defer
@@ -8856,7 +9483,7 @@ Beginning in SLiM 5.0, passing
 \f4\fs20  for 
 \f3\fs18 defer
 \f4\fs20  is generally preferable since it has fewer restrictions.  When running multi-threaded, deferring genome generation allows that task to be done in parallel (which is the reason this option exists).\
-Also beginning in SLiM 5.0, in spatial models the spatial position of the offspring will be inherited (i.e., copied) from 
+Also beginning in SLiM 4.1, in spatial models the spatial position of the offspring will be inherited (i.e., copied) from 
 \f3\fs18 parent1
 \f4\fs20 ; more specifically, the 
 \f3\fs18 x
@@ -8864,7 +9491,9 @@ Also beginning in SLiM 5.0, in spatial models the spatial position of the offspr
 \f3\fs18 y
 \f4\fs20  property in 2D/3D models, and the 
 \f3\fs18 z
-\f4\fs20  property in 3D models.  Properties not inherited will be left uninitialized, as they were prior to SLiM 5.  The parent\'92s spatial position is probably not desirable in itself; the intention here is to make it easy to model the natal dispersal of all the new offspring for a given tick with a single vectorized call to 
+\f4\fs20  property in 3D models.  Properties not inherited will be left uninitialized, as they were prior to SLiM 4.1.  The parent\'92s spatial position is probably not desirable in itself; the intention here is to make it easy to model the natal dispersal of all the new offspring for a given tick with a single vectorized call to 
+\f3\fs18 deviatePositions()
+\f4\fs20  / 
 \f3\fs18 pointDeviated()
 \f4\fs20 .  If 
 \f3\fs18 parent1
@@ -8903,7 +9532,7 @@ Since selfing requires that
 \f4\fs20  has no effect on this method (in contrast to the behavior of 
 \f3\fs18 addCrossed()
 \f4\fs20 , where selfing is assumed to be incidental).\
-Beginning in SLiM 5.0, the 
+Beginning in SLiM 4.1, the 
 \f3\fs18 count
 \f4\fs20  parameter dictates how many offspring will be generated (previously, exactly one offspring was generated).  Each offspring is generated independently, based upon the given parameters.  The returned vector contains all generated offspring, except those that were rejected by a 
 \f3\fs18 modifyChild()
@@ -8916,7 +9545,7 @@ Beginning in SLiM 5.0, the
 \f4\fs20 ; note that this is a change in behavior from earlier versions, which would return 
 \f3\fs18 NULL
 \f4\fs20 .\
-Beginning in SLiM 5.0, passing 
+Beginning in SLiM 4.1, passing 
 \f3\fs18 T
 \f4\fs20  for 
 \f3\fs18 defer
@@ -8931,7 +9560,7 @@ Beginning in SLiM 5.0, passing
 \f4\fs20  for 
 \f3\fs18 defer
 \f4\fs20  is generally preferable since it has fewer restrictions.  When running multi-threaded, deferring genome generation allows that task to be done in parallel (which is the reason this option exists).\
-Also beginning in SLiM 5.0, in spatial models the spatial position of the offspring will be inherited (i.e., copied) from 
+Also beginning in SLiM 4.1, in spatial models the spatial position of the offspring will be inherited (i.e., copied) from 
 \f3\fs18 parent
 \f4\fs20 ; more specifically, the 
 \f3\fs18 x
@@ -8939,7 +9568,9 @@ Also beginning in SLiM 5.0, in spatial models the spatial position of the offspr
 \f3\fs18 y
 \f4\fs20  property in 2D/3D models, and the 
 \f3\fs18 z
-\f4\fs20  property in 3D models.  Properties not inherited will be left uninitialized, as they were prior to SLiM 5.  The parent\'92s spatial position is probably not desirable in itself; the intention here is to make it easy to model the natal dispersal of all the new offspring for a given tick with a single vectorized call to 
+\f4\fs20  property in 3D models.  Properties not inherited will be left uninitialized, as they were prior to SLiM 4.1.  The parent\'92s spatial position is probably not desirable in itself; the intention here is to make it easy to model the natal dispersal of all the new offspring for a given tick with a single vectorized call to 
+\f3\fs18 deviatePositions()
+\f4\fs20  / 
 \f3\fs18 pointDeviated()
 \f4\fs20 .\
 Note that this method is only for use in nonWF models.  See 
@@ -9198,6 +9829,68 @@ Note that at present, SLiMgui will only display spatial maps of spatiality
 \f4\fs20  method will return translated color strings for any spatial map, however, even if SLiMgui is unable to display the spatial map.  If there are multiple spatial maps that SLiMgui is capable of displaying, it choose one for display by default, but other maps may be selected from the action menu on the individuals view (by clicking on the button with the gear icon).\
 \pard\pardeftab397\li720\fi-446\ri720\sb180\sa60\partightenfactor0
 
+\f3\fs18 \cf2 \'96\'a0(void)deviatePositions(No<Individual>\'a0individuals, string$\'a0boundary, numeric$\'a0maxDistance, string$\'a0functionType, ...)\
+\pard\pardeftab397\li547\ri720\sb60\sa60\partightenfactor0
+
+\f4\fs20 \cf2 Deviates the spatial positions of the individuals supplied in 
+\f3\fs18 individuals
+\f4\fs20 , using the provided boundary condition and dispersal kernel.  If 
+\f3\fs18 individuals
+\f4\fs20  is 
+\f3\fs18 NULL
+\f4\fs20 , the positions of all individuals in the target subpopulation are deviated.  This method is essentially a more efficient shorthand for getting the spatial positions of 
+\f3\fs18 individuals
+\f4\fs20  from the 
+\f3\fs18 spatialPosition
+\f4\fs20  property, deviating those positions with 
+\f3\fs18 pointDeviated()
+\f4\fs20 , and setting the deviated positions back into 
+\f3\fs18 individuals
+\f4\fs20  with the 
+\f3\fs18 setSpatialPosition()
+\f4\fs20  method.  The boundary condition 
+\f3\fs18 boundary
+\f4\fs20  must be one of 
+\f3\fs18 "none"
+\f4\fs20 , 
+\f3\fs18 "periodic"
+\f4\fs20 , 
+\f3\fs18 "reflecting"
+\f4\fs20 , 
+\f3\fs18 "stopping"
+\f4\fs20 , or 
+\f3\fs18 "reprising"
+\f4\fs20 , and the spatial kernel type 
+\f3\fs18 functionType
+\f4\fs20  must be one of 
+\f3\fs18 "f"
+\f4\fs20 , 
+\f3\fs18 "l"
+\f4\fs20 , 
+\f3\fs18 "e"
+\f4\fs20 , 
+\f3\fs18 "n"
+\f4\fs20 , or 
+\f3\fs18 "t"
+\f4\fs20 , with the ellipsis parameters 
+\f3\fs18 ...
+\f4\fs20  supplying kernel configuration parameters appropriate for that kernel type; see 
+\f3\fs18 pointDeviated()
+\f4\fs20  for further details.  As with 
+\f3\fs18 pointDeviated()
+\f4\fs20 , the ellipsis parameters that follow 
+\f3\fs18 functionType
+\f4\fs20  may each, independently, be either a singleton or a vector of length equal to 
+\f3\fs18 n
+\f4\fs20 .  This allows each individual\'92s position to be deviated with a different kernel, representing, for example, the movements of individuals with differing dispersal capabilities/propensities.  (However, other parameters such as 
+\f3\fs18 boundary
+\f4\fs20 , 
+\f3\fs18 maxDistance
+\f4\fs20 , and 
+\f3\fs18 functionType
+\f4\fs20  must be the same for all of the points, in the present design.)\
+\pard\pardeftab397\li720\fi-446\ri720\sb180\sa60\partightenfactor0
+
 \f3\fs18 \cf0 \'96\'a0(void)outputMSSample(integer$\'a0sampleSize, [logical$\'a0replace\'a0=\'a0T], [string$\'a0requestedSex\'a0=\'a0"*"], [Ns$\'a0filePath\'a0=\'a0NULL], [logical$\'a0append\'a0=\'a0F]\cf2 \expnd0\expndtw0\kerning0
 , [logical$\'a0filterMonomorphic\'a0=\'a0F]\cf0 \kerning1\expnd0\expndtw0 )
 \f5 \
@@ -9381,12 +10074,14 @@ The parameters
 \f3\fs18 ...
 \f4\fs20 , as detailed below) and then applying a boundary condition specified by 
 \f3\fs18 boundary
-\f4\fs20 .  This method therefore performs the steps of a simple dispersal algorithm in a single vectorized call.\
+\f4\fs20 .  This method therefore performs the steps of a simple dispersal algorithm in a single vectorized call.  See 
+\f3\fs18 deviatePositions()
+\f4\fs20  for an even more efficient approach.\
 The parameter 
 \f3\fs18 point
 \f4\fs20  may contain a single point which is deviated and bounded 
 \f3\fs18 n
-\f4\fs20  times, or may contain 
+\f4\fs20  independent times, or may contain 
 \f3\fs18 n
 \f4\fs20  points each of which is deviated and bounded.  In any case, each point in 
 \f3\fs18 point
@@ -9400,14 +10095,14 @@ The dispersal kernel is specified similarly to other kernel-based methods, such 
 \f4\fs20 , 
 \f3\fs18 functionType
 \f4\fs20  may be 
-\f3\fs18 \'93f"
+\f3\fs18 "f"
 \f4\fs20  with no ellipsis arguments 
 \f3\fs18 ...
 \f4\fs20  to use a flat kernel out to 
 \f3\fs18 maxDistance
 \f4\fs20 ; 
-\f3\fs18 \'93l"
-\f4\fs20  with no ellpises arguments for a kernel that decreases linearly from the center to zero at 
+\f3\fs18 "l"
+\f4\fs20  with no ellipsis arguments for a kernel that decreases linearly from the center to zero at 
 \f3\fs18 maxDistance
 \f4\fs20 ; 
 \f3\fs18 "e"
@@ -9435,23 +10130,92 @@ The dispersal kernel is specified similarly to other kernel-based methods, such 
 \f3\fs18 "t"
 \f4\fs20 ) kernel is not allowed in 3D models at present simply because it hasn\'92t been implemented.  See the 
 \f3\fs18 InteractionType
-\f4\fs20  class documentation (section 25.8) for more detailed discussion of the available kernel types and their parameters and probability distribution functions.  The random points returned from this method are drawn from the probability distribution that is radially symmetric and has density proportional to the kernel \'96 in other words, at distance 
+\f4\fs20  class documentation (section 25.8) for more detailed discussion of the available kernel types and their parameters and probability distribution functions.  For 
+\f3\fs18 pointDeviated()
+\f4\fs20 , the ellipsis parameters that follow 
+\f3\fs18 functionType
+\f4\fs20  may each, independently, be either a singleton or a vector of length equal to 
+\f3\fs18 n
+\f4\fs20 .  This allows each point to be deviated with a different kernel, representing, for example, the movements of individuals with differing dispersal capabilities/propensities.  (However, other parameters such as 
+\f3\fs18 boundary
+\f4\fs20 , 
+\f3\fs18 maxDistance
+\f4\fs20 , and 
+\f3\fs18 functionType
+\f4\fs20  must be the same for all of the points, in the present design.)\
+The random points returned from this method are drawn from the probability distribution that is radially symmetric and has density proportional to the kernel \'96 in other words, at distance 
 \f1\i r
 \f4\i0  the density is proportional to the kernel type referred to by 
 \f3\fs18 functionType
-\f4\fs20 .  For instance, the density of the probability distribution for type 
+\f4\fs20 .  (Said another way, the shape of the 
+\f1\i cross-section
+\f4\i0  through the probability density function is given by the kernel.)  For instance, the value of the type 
 \f3\fs18 "e"
-\f4\fs20  with rate 
+\f4\fs20  (exponential) kernel with rate 
 \f1\i a
-\f4\i0  at distance 
+\f4\i0  at 
 \f1\i r
 \f4\i0  is proportional to exp(\uc0\u8722 
-\f1\i ra
-\f4\i0 ); and so the distribution of the distance in 1D is exponential, while in 2D it is proportional to 
+\f1\i ar
+\f4\i0 ), and so in 2D, the probability density that this method with kernel type 
+\f3\fs18 "e"
+\f4\fs20  draws from has density proportional to p(
+\f1\i x
+\f4\i0 ,\'a0
+\f1\i y
+\f4\i0 )\'a0=\'a0exp(\uc0\u8722 
+\f1\i a
+\f4\i0 \'a0sqrt(
+\f1\i x
+\f4\i0\fs13\fsmilli6667 \super 2
+\fs20 \nosupersub \'a0+\'a0
+\f1\i y
+\f4\i0\fs13\fsmilli6667 \super 2
+\fs20 \nosupersub )), since 
 \f1\i r
-\f4\i0  exp(\uc0\u8722 
-\f1\i ra
-\f4\i0 ) (i.e., Gamma with shape parameter 1).\
+\f4\i0 \'a0=\'a0sqrt(x
+\fs13\fsmilli6667 \super 2
+\fs20 \nosupersub \'a0+\'a0y
+\fs13\fsmilli6667 \super 2
+\fs20 \nosupersub ) is the distance.  Note that the 
+\f1\i distribution of the distance
+\f4\i0  is not given by the kernel except in 1D: in the type\'a0
+\f3\fs18 "e"
+\f4\fs20 \'a0example, the distribution of the distance in 1D is exponential, while in 2D it has density proportional to 
+\f1\i r
+\f4\i0 \'a0exp(\uc0\u8722 
+\f1\i ar
+\f4\i0 ) (i.e., Gamma with shape parameter 1).  For another example, the value of the type 
+\f3\fs18 "n"
+\f4\fs20  (Normal) kernel at 
+\f1\i r
+\f4\i0  with standard deviation 1 is proportional to exp(\uc0\u8722 
+\f1\i r
+\f4\i0\fs13\fsmilli6667 \super 2
+\fs20 \nosupersub \'a0/\'a02), and so the density is proportional to\'a0p(
+\f1\i x
+\f4\i0 ,\'a0
+\f1\i y
+\f4\i0 )\'a0=\'a0exp(\uc0\u8722 (
+\f1\i x
+\f4\i0\fs13\fsmilli6667 \super 2
+\fs20 \nosupersub \'a0+\'a0
+\f1\i y
+\f4\i0\fs13\fsmilli6667 \super 2
+\fs20 \nosupersub )\'a0/\'a02).  This is the standard bivariate Normal, and equivalent to drawing independent Normals for the 
+\f1\i x
+\f4\i0  and 
+\f1\i y
+\f4\i0  directions; however, the Normal is the 
+\f1\i only
+\f4\i0  distribution for which independent draws along each axis will result in a radially symmetric distribution.  The distribution of the distance in 2D with type 
+\f3\fs18 "n"
+\f4\fs20  is proportional to 
+\f1\i r
+\f4\i0 \'a0exp(\uc0\u8722 
+\f1\i r
+\f4\i0\fs13\fsmilli6667 \super 2
+\fs20 \nosupersub \'a0/\'a02), i.e., Rayleigh.\
 The boundary condition must be one of 
 \f3\fs18 "none"
 \f4\fs20 , 
@@ -9479,13 +10243,15 @@ The boundary condition must be one of
 \f4\fs20  methods; see their documentation for further details.  For 
 \f3\fs18 "reprising"
 \f4\fs20 , if the deviated point is out of bounds a new deviated point will be chosen, based upon the same original point, until a point inside bounds is obtained.  Note that absorbing boundaries (for which being out-of-bounds is lethal) would be implemented in script; this method cannot enforce them.\
-In the typical usage case, 
+Note that for the typical usage case, in which 
 \f3\fs18 point
 \f4\fs20  comes from the 
 \f3\fs18 spatialPosition
 \f4\fs20  property for a vector of individuals, and the result is then set back onto the same vector of individuals using the 
 \f3\fs18 setSpatialPosition()
-\f4\fs20  method; however, this method might be useful in other situations too.\
+\f4\fs20  method, the 
+\f3\fs18 deviatePositions()
+\f4\fs20  method provides an even more efficient alternative.\
 \pard\pardeftab720\li720\fi-446\ri720\sb180\sa60\partightenfactor0
 
 \f3\fs18 \cf0 \'96\'a0(logical)pointInBounds(float\'a0point)
@@ -9873,7 +10639,7 @@ Set the spatial boundaries of the subpopulation to
 \pard\pardeftab720\li547\ri720\sb60\sa60\partightenfactor0
 
 \f0\b\fs20 \cf2 This method has been deprecated, and may be removed in a future release of SLiM.
-\f4\b0   In SLiM 5.0 and later, use the 
+\f4\b0   In SLiM 4.1 and later, use the 
 \f3\fs18 SpatialMap
 \f4\fs20  method 
 \f3\fs18 mapColor()
@@ -9886,7 +10652,7 @@ Set the spatial boundaries of the subpopulation to
 \pard\pardeftab720\li547\ri720\sb60\sa60\partightenfactor0
 
 \f0\b\fs20 \cf2 This method has been deprecated, and may be removed in a future release of SLiM.
-\f4\b0   In SLiM 5.0 and later, use the 
+\f4\b0   In SLiM 4.1 and later, use the 
 \f3\fs18 SpatialMap
 \f4\fs20  method 
 \f3\fs18 mapImage()
@@ -9971,7 +10737,7 @@ The
 \f3\fs18 spatialMapValue()
 \f4\fs20  is provided on 
 \f3\fs18 Subpopulation
-\f4\fs20  partly for backward compatibility, but also for convenience for the most common usage case of spatial maps.\
+\f4\fs20  partly for backward compatibility, but also for convenience in some usage cases.\
 \pard\pardeftab397\li720\fi-446\ri720\sb180\sa60\partightenfactor0
 
 \f3\fs18 \cf0 \'96\'a0\cf2 \expnd0\expndtw0\kerning0
@@ -10076,10 +10842,10 @@ Note that this method is only for use in nonWF models, in which migration is man
 \f5 \cf0 \kerning1\expnd0\expndtw0 \
 \pard\pardeftab720\ri720\sb360\sa60\partightenfactor0
 
-\f0\b\fs22 \cf0 5.17  Class Substitution\
+\f0\b\fs22 \cf0 5.18  Class Substitution\
 \pard\pardeftab720\ri720\sb120\sa60\partightenfactor0
 
-\f1\i\b0 \cf0 5.17.1  
+\f1\i\b0 \cf0 5.18.1  
 \f2\fs18 Substitution
 \f1\fs22  properties\
 \pard\pardeftab720\li720\fi-446\ri720\sb180\sa60\partightenfactor0
@@ -10194,7 +10960,7 @@ nucleotide <\'96> (string$)\
 \f4\fs20  is not used by SLiM; it is free for you to use.\
 \pard\pardeftab720\ri720\sb120\sa60\partightenfactor0
 
-\f1\i\fs22 \cf0 5.17.2  
+\f1\i\fs22 \cf0 5.18.2  
 \f2\fs18 Substitution
 \f1\fs22  methods\
 \pard\pardeftab397\fi274\ri720\sb40\sa40\partightenfactor0

@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 1/4/15.
-//  Copyright (c) 2015-2023 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2015-2024 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -44,8 +44,8 @@ class SLiMEidosBlock;
 
 
 // SLiM version: see also Info.plist and QtSLiM.pro
-#define SLIM_VERSION_STRING	("4.0.1 OB Lab")
-#define SLIM_VERSION_FLOAT	(4.01)
+#define SLIM_VERSION_STRING	("4.3 OB Lab")
+#define SLIM_VERSION_FLOAT	(4.3)
 
 
 void SLiM_WarmUp(void);
@@ -474,6 +474,8 @@ void AccumulateMemoryUsageIntoTotal_Community(SLiMMemoryUsage_Community &p_usage
 #define DEBUG_MUTATION_ZOMBIES		0		// avoid destroying Mutation objects; keep them as zombies
 #define SLIM_DEBUG_MUTATION_RUNS	0		// turn on to get logging about mutation run uniquing and usage
 #define DEBUG_BLOCK_REG_DEREG		0		// turn on to get logging about script block registration/deregistration
+#define DEBUG_SHUFFLE_BUFFER		1		// debug memory overruns with the shuffle buffer
+#define DEBUG_TICK_RANGES			0		// debug tick range parsing and evaluation
 
 
 // In SLiMgui we want to emit only a reasonably limited number of lines of input debugging; for big models, this output
@@ -661,7 +663,7 @@ public:
 	// should therefore generally be called from a try/catch block.
 	NucleotideArray(std::size_t p_length, const int64_t *p_int_buffer);
 	NucleotideArray(std::size_t p_length, const char *p_char_buffer);
-	NucleotideArray(std::size_t p_length, const std::vector<std::string> &p_string_vector);
+	NucleotideArray(std::size_t p_length, const std::string p_string_vector[]);
 	
 	std::size_t size() const { return length_; }
 	
@@ -865,6 +867,8 @@ extern const std::string &gStr_maxDistance;
 
 extern const std::string &gStr_ancestralNucleotides;
 extern const std::string &gStr_nucleotides;
+extern const std::string &gStr_genomicElementForPosition;
+extern const std::string &gStr_hasGenomicElementForPosition;
 extern const std::string &gStr_setAncestralNucleotides;
 extern const std::string &gStr_setGeneConversion;
 extern const std::string &gStr_setHotspotMap;
@@ -901,6 +905,7 @@ extern const std::string &gStr_drawSelectionCoefficient;
 extern const std::string &gStr_setDistribution;
 extern const std::string &gStr_addSubpop;
 extern const std::string &gStr_addSubpopSplit;
+extern const std::string &gStr_estimatedLastTick;
 extern const std::string &gStr_deregisterScriptBlock;
 extern const std::string &gStr_genomicElementTypesWithIDs;
 extern const std::string &gStr_interactionTypesWithIDs;
@@ -908,6 +913,7 @@ extern const std::string &gStr_mutationTypesWithIDs;
 extern const std::string &gStr_scriptBlocksWithIDs;
 extern const std::string &gStr_speciesWithIDs;
 extern const std::string &gStr_subpopulationsWithIDs;
+extern const std::string &gStr_subpopulationsWithNames;
 extern const std::string &gStr_individualsWithPedigreeIDs;
 extern const std::string &gStr_killIndividuals;
 extern const std::string &gStr_mutationCounts;
@@ -942,7 +948,9 @@ extern const std::string &gStr_treeSeqCoalesced;
 extern const std::string &gStr_treeSeqSimplify;
 extern const std::string &gStr_treeSeqRememberIndividuals;
 extern const std::string &gStr_treeSeqOutput;
+extern const std::string &gStr__debug;	// internal
 extern const std::string &gStr_setMigrationRates;
+extern const std::string &gStr_deviatePositions;
 extern const std::string &gStr_pointDeviated;
 extern const std::string &gStr_pointInBounds;
 extern const std::string &gStr_pointReflected;
@@ -1044,9 +1052,23 @@ extern const std::string &gStr_draw;
 
 extern const std::string &gStr_slimgui;
 extern const std::string &gStr_pid;
+extern const std::string &gStr_configureDisplay;
+extern const std::string &gStr_createPlot;
+extern const std::string &gStr_logFileData;
 extern const std::string &gStr_openDocument;
 extern const std::string &gStr_pauseExecution;
-extern const std::string &gStr_configureDisplay;
+extern const std::string &gStr_plotWithTitle;
+
+extern const std::string &gStr_abline;
+extern const std::string &gStr_addLegend;
+extern const std::string &gStr_axis;
+extern const std::string &gStr_legendLineEntry;
+extern const std::string &gStr_legendPointEntry;
+extern const std::string &gStr_legendSwatchEntry;
+extern const std::string &gStr_lines;
+extern const std::string &gStr_points;
+extern const std::string &gStr_text;
+extern const std::string &gStr_title;
 
 extern const std::string &gStr_Chromosome;
 //extern const std::string &gStr_Genome;			// in Eidos; see EidosValue_Object::EidosValue_Object()
@@ -1062,6 +1084,7 @@ extern const std::string &gStr_Subpopulation;
 //extern const std::string &gStr_Individual;		// in Eidos; see EidosValue_Object::EidosValue_Object()
 extern const std::string &gStr_Substitution;
 extern const std::string &gStr_InteractionType;
+extern const std::string &gStr_Plot;
 extern const std::string &gStr_SLiMgui;
 
 extern const std::string &gStr_createLogFile;
@@ -1274,6 +1297,8 @@ enum _SLiMGlobalStringID : int {
 	
 	gID_ancestralNucleotides,
 	gID_nucleotides,
+	gID_genomicElementForPosition,
+	gID_hasGenomicElementForPosition,
 	gID_setAncestralNucleotides,
 	gID_setGeneConversion,
 	gID_setHotspotMap,
@@ -1310,6 +1335,7 @@ enum _SLiMGlobalStringID : int {
 	gID_setDistribution,
 	gID_addSubpop,
 	gID_addSubpopSplit,
+	gID_estimatedLastTick,
 	gID_deregisterScriptBlock,
 	gID_genomicElementTypesWithIDs,
 	gID_interactionTypesWithIDs,
@@ -1317,6 +1343,7 @@ enum _SLiMGlobalStringID : int {
 	gID_scriptBlocksWithIDs,
 	gID_speciesWithIDs,
 	gID_subpopulationsWithIDs,
+	gID_subpopulationsWithNames,
 	gID_individualsWithPedigreeIDs,
 	gID_killIndividuals,
 	gID_mutationCounts,
@@ -1351,7 +1378,9 @@ enum _SLiMGlobalStringID : int {
 	gID_treeSeqSimplify,
 	gID_treeSeqRememberIndividuals,
 	gID_treeSeqOutput,
+	gID__debug,		// internal
 	gID_setMigrationRates,
+	gID_deviatePositions,
 	gID_pointDeviated,
 	gID_pointInBounds,
 	gID_pointReflected,
@@ -1453,9 +1482,23 @@ enum _SLiMGlobalStringID : int {
 	
 	gID_slimgui,
 	gID_pid,
+	gID_configureDisplay,
+	gID_createPlot,
+	gID_logFileData,
 	gID_openDocument,
 	gID_pauseExecution,
-	gID_configureDisplay,
+	gID_plotWithTitle,
+	
+	gID_abline,
+	gID_addLegend,
+	gID_axis,
+	gID_legendLineEntry,
+	gID_legendPointEntry,
+	gID_legendSwatchEntry,
+	gID_lines,
+	gID_points,
+	gID_text,
+	gID_title,
 	
 	gID_Chromosome,
 	gID_Genome,
@@ -1471,6 +1514,7 @@ enum _SLiMGlobalStringID : int {
 	gID_Individual,
 	gID_Substitution,
 	gID_InteractionType,
+	gID_Plot,
 	gID_SLiMgui,
 	
 	gID_createLogFile,

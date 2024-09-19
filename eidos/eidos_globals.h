@@ -3,7 +3,7 @@
 //  Eidos
 //
 //  Created by Ben Haller on 6/28/15.
-//  Copyright (c) 2015-2023 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2015-2024 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -52,8 +52,8 @@ class EidosToken;
 
 
 // Eidos version: See also Info.plist
-#define EIDOS_VERSION_STRING	("3.0.1")
-#define EIDOS_VERSION_FLOAT		(3.01)
+#define EIDOS_VERSION_STRING	("3.3")
+#define EIDOS_VERSION_FLOAT		(3.3)
 
 
 #ifdef _OPENMP
@@ -472,6 +472,7 @@ public:
 	
 	EidosTerminate(void) = default;							// default constructor, no backtrace, does not change error range
 	explicit EidosTerminate(const EidosToken *p_error_token);	// supply a token from which an error range is taken
+	explicit EidosTerminate(const EidosErrorPosition &p_error_position);	// supply an error position yourself
 	
 	// These constructors request a backtrace as well
 	explicit EidosTerminate(bool p_print_backtrace);
@@ -488,6 +489,23 @@ void operator<<(std::ostream& p_out, const EidosTerminate &p_terminator) __attri
 std::string Eidos_GetTrimmedRaiseMessage(void);
 std::string Eidos_GetUntrimmedRaiseMessage(void);
 
+// This custom exception subclass is used to allow tick range evaluation in SLiM to be error-tolerant,
+// for the specific case of expressions that reference global constants that are not yet defined.
+// See Community::_EvaluateTickRangeNode() for the use of this facility.  It is thrown by
+// EidosSymbolTable::_GetValue_SpecialRaise() when a specific flag is set on the interpreter.
+// The message property is used by SLiM to pass up the name of the identifier that was undefined.
+class SLiMUndefinedIdentifierException : public std::exception
+{ 
+private: 
+	std::string message;
+	
+public: 
+	SLiMUndefinedIdentifierException(const char* msg) : message(msg) {}
+	SLiMUndefinedIdentifierException(const std::string &msg) : message(msg) {}
+	
+	const char* what() const noexcept { return message.c_str(); } 
+}; 
+
 
 // *******************************************************************************************************************
 //
@@ -499,6 +517,9 @@ std::string Eidos_GetUntrimmedRaiseMessage(void);
 
 // Resolve a leading ~ in a filesystem path to the user's home directory
 std::string Eidos_ResolvedPath(const std::string &p_path);
+
+// Generate a canonical absolute path corresponding to the provided path
+std::string Eidos_AbsolutePath(const std::string &p_path);
 
 // Get the filename (or a trailing directory name) from a path
 std::string Eidos_LastPathComponent(const std::string &p_path);
@@ -531,12 +552,12 @@ int Eidos_mkstemps_directory(char *p_pattern, int p_suffix_len);
 #define EIDOS_BUFFER_ZIP_APPENDS	1
 
 #if EIDOS_BUFFER_ZIP_APPENDS	// implementation details for Eidos_FlushFiles(); for internal use only
-extern std::unordered_map<std::string, std::string> gEidosBufferedZipAppendData;	// filename -> text
+extern std::unordered_map<std::string, std::string> gEidosBufferedZipAppendData;	// canonical absolute file path -> buffered text
 bool _Eidos_FlushZipBuffer(const std::string &p_file_path, const std::string &p_outstring);
 #endif
 
 void Eidos_FlushFile(const std::string &p_file_path);
-void Eidos_FlushFiles(void);			// This should be called at the end of execution, or any other appropriate time, to flush buffered file append data
+bool Eidos_FlushFiles(void);			// This should be called at the end of execution, or any other appropriate time, to flush buffered file append data; returns false for failure
 
 enum class EidosFileFlush {
 	kNoFlush = 0,		// no flush, no matter what
@@ -624,6 +645,9 @@ BidiIter Eidos_random_unique(BidiIter begin, BidiIter end, size_t num_random)
 
 // The <regex> library does not work on Ubuntu 18.04, annoyingly; probably a very old compiler or something.  So we have to check.
 bool Eidos_RegexWorks(void);
+
+// Checks that symbol_name does not contain any illegal Unicode characters; used to check identifiers, in particular
+bool Eidos_ContainsIllegalUnicode(const std::string &symbol_name);
 
 
 // *******************************************************************************************************************
@@ -982,6 +1006,10 @@ extern const std::string &gEidosStr_s;
 extern const std::string &gEidosStr_x;
 extern const std::string &gEidosStr_y;
 extern const std::string &gEidosStr_z;
+extern const std::string &gEidosStr_xy;
+extern const std::string &gEidosStr_xz;
+extern const std::string &gEidosStr_yz;
+extern const std::string &gEidosStr_xyz;
 extern const std::string &gEidosStr_color;
 extern const std::string &gEidosStr_filePath;
 
@@ -1110,6 +1138,10 @@ enum _EidosGlobalStringID : uint32_t
 	gEidosID_x,
 	gEidosID_y,
 	gEidosID_z,
+	gEidosID_xy,
+	gEidosID_xz,
+	gEidosID_yz,
+	gEidosID_xyz,
 	gEidosID_color,
 	gEidosID_filePath,
 
@@ -1118,7 +1150,7 @@ enum _EidosGlobalStringID : uint32_t
 	gEidosID_Individual,
 	
 	gEidosID_LastEntry,					// IDs added by the Context should start here
-	gEidosID_LastContextEntry = 500		// IDs added by the Context must end before this value; Eidos reserves the remaining values
+	gEidosID_LastContextEntry = 510		// IDs added by the Context must end before this value; Eidos reserves the remaining values
 };
 
 extern std::vector<std::string> gEidosConstantNames;	// T, F, NULL, PI, E, INF, NAN
@@ -1180,19 +1212,10 @@ class EidosValue;
 class EidosValue_VOID;
 class EidosValue_NULL;
 class EidosValue_Logical;
-class EidosValue_Logical_const;
 class EidosValue_Int;
-class EidosValue_Int_singleton;
-class EidosValue_Int_vector;
 class EidosValue_Float;
-class EidosValue_Float_singleton;
-class EidosValue_Float_vector;
 class EidosValue_String;
-class EidosValue_String_singleton;
-class EidosValue_String_vector;
 class EidosValue_Object;
-class EidosValue_Object_singleton;
-class EidosValue_Object_vector;
 
 class EidosObjectPool;
 class EidosPropertySignature;
@@ -1222,19 +1245,10 @@ typedef Eidos_intrusive_ptr<EidosValue>						EidosValue_SP;
 typedef Eidos_intrusive_ptr<EidosValue_VOID>				EidosValue_VOID_SP;
 typedef Eidos_intrusive_ptr<EidosValue_NULL>				EidosValue_NULL_SP;
 typedef Eidos_intrusive_ptr<EidosValue_Logical>				EidosValue_Logical_SP;
-typedef Eidos_intrusive_ptr<EidosValue_Logical_const>		EidosValue_Logical_const_SP;
 typedef Eidos_intrusive_ptr<EidosValue_Int>					EidosValue_Int_SP;
-typedef Eidos_intrusive_ptr<EidosValue_Int_singleton>		EidosValue_Int_singleton_SP;
-typedef Eidos_intrusive_ptr<EidosValue_Int_vector>			EidosValue_Int_vector_SP;
 typedef Eidos_intrusive_ptr<EidosValue_Float>				EidosValue_Float_SP;
-typedef Eidos_intrusive_ptr<EidosValue_Float_singleton>		EidosValue_Float_singleton_SP;
-typedef Eidos_intrusive_ptr<EidosValue_Float_vector>		EidosValue_Float_vector_SP;
 typedef Eidos_intrusive_ptr<EidosValue_String>				EidosValue_String_SP;
-typedef Eidos_intrusive_ptr<EidosValue_String_singleton>	EidosValue_String_singleton_SP;
-typedef Eidos_intrusive_ptr<EidosValue_String_vector>		EidosValue_String_vector_SP;
 typedef Eidos_intrusive_ptr<EidosValue_Object>				EidosValue_Object_SP;
-typedef Eidos_intrusive_ptr<EidosValue_Object_singleton>	EidosValue_Object_singleton_SP;
-typedef Eidos_intrusive_ptr<EidosValue_Object_vector>		EidosValue_Object_vector_SP;
 
 
 // EidosValueType is an enum of the possible types for EidosValue objects.  Note that all of these types are vectors of the stated

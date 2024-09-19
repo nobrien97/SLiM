@@ -1,6 +1,32 @@
+# Cross-distribution SLiM RPM spec.
+%if %{defined suse_version}
+%if 0%{?suse_version} < 1600
+%global qtNameAndVersion libqt5
+%else
+%global qtNameAndVersion qt6
+%endif
+%endif
+
+%if %{defined fedora}
+%if 0%{?fedora} >= 39
+%global qtNameAndVersion qt6
+%else
+%global qtNameAndVersion qt5
+%endif
+%endif
+
+%if %{defined rhel}
+%if 0%{?epel} >= 9
+# qt6 is only available through EPEL on RHEL 9 and higher
+%global qtNameAndVersion qt6
+%else
+%global qtNameAndVersion qt5
+%endif
+%endif
+
 Name:           SLiM
-Version:        4.0.1
-Release:        2%{?dist}
+Version:        4.3
+Release:        1%{?dist}
 Summary:        an evolutionary simulation framework
 
 License:        GPLv3+
@@ -10,38 +36,32 @@ Source0:        https://github.com/MesserLab/SLiM/archive/v%{version}.tar.gz
 # Prevent users of the Copr repository from using Simple Login Manager, due to binary file name conflict.
 Conflicts:      slim
 
+# This paragraph of the spec file is old and delicate.
 BuildRequires:  cmake
 # openSUSE Build Requires
 %if %{defined suse_version}
-%if 0%{?suse_version} >= 1500
 BuildRequires:  glew-devel
 BuildRequires:  Mesa-libGL-devel
 BuildRequires:  gcc-c++
-BuildRequires:  libqt5-qtbase-devel
 BuildRequires:  appstream-glib-devel
+%if 0%{?suse_version} < 1600
+BuildRequires:  %{qtNameAndVersion}-qtbase-devel
+%else
+# only Tumbleweed officially supports Qt6; further, it's "base" not "qtbase" in Tumbleweed. :(
+BuildRequires:  %{qtNameAndVersion}-base-devel
 %endif
 %else
-BuildRequires:  qt5-qtbase-devel
+# if not on openSUSE
+BuildRequires:  %{qtNameAndVersion}-qtbase-devel
 BuildRequires:  libappstream-glib
 %endif
 ExclusiveArch:  x86_64
 
-# Fedora: these package versions are those that COPR is building against, and thus if
-# they change because of point releases in Qt5, the RPMs need to be rebuilt and deployed.
-# Qt is weird and doesn't allow older software to be used if a newer point release is
-# installed on the system.
-%if 0%{?fedora}
-Requires: qt5-qtbase >= 5.13.2
-%endif
-
-# Conditonal requires for RHEL (and CentOS)
-%if 0%{?rhel}
-Requires: qt5-qtbase >= 5.12.5
-%endif
-
-# Conditional requires for openSUSE and SLE.
-%if %{defined suse_version}
-Requires: libqt5-qtbase >= 5.12.7
+# RHEL 8 has the oldest point release of 5.15, and is the oldest RHEL supported.
+%if 0%{?rhel} == 8
+Requires: qt5-qtbase >= 5.15.1
+%else
+Requires: %{qtNameAndVersion}-qtbase
 %endif
 
 %description
@@ -56,36 +76,80 @@ Linux for easy simulation set-up, interactive runtime control, and dynamical
 visualization of simulation output.
 
 %prep
-tar -xf ../SOURCES/v%{version}.tar.gz
+%setup -q
 
 %build
-# NOTE: is the relative path required when using the cmake macro due to the above source prep-style?
-%cmake -DBUILD_SLIMGUI=ON #./SLiM-%version}/
+%if 0%{?rhel} == 8
+%if "%_vpath_builddir" != "%_vpath_srcdir"
+echo "current directory: %(pwd)"
+echo "source directory: %_vpath_srcdir"
+echo "build directory: %_vpath_builddir"
+mkdir -p %_vpath_builddir
+%else
+%{warn "The build directory is the same as the source directory on RHEL 8!"}
+%endif
+
+## Tell CMake where the source directory and the build directory are, directly.
+%cmake -S %_vpath_srcdir -B %_vpath_builddir -DBUILD_SLIMGUI=ON
+cd %_vpath_builddir
+%else
+# rpmbuild is not running on RHEL 8
+%cmake -DBUILD_SLIMGUI=ON
+%endif
+
 %cmake_build
 
 %install
+%if 0%{?rhel} == 8
+cmake --install %_vpath_builddir --prefix %{buildroot}/usr
+%else
 %cmake_install
-
-%check
-appstream-util validate-relax --nonet %{buildroot}/usr/share/metainfo/org.messerlab.slimgui.appdata.xml
+%endif
 
 %files
-/usr/bin/eidos
-/usr/bin/slim
-/usr/bin/SLiMgui
-/usr/share/applications/org.messerlab.slimgui.desktop
-/usr/share/icons/hicolor/scalable/apps/org.messerlab.slimgui.svg
-/usr/share/icons/hicolor/scalable/mimetypes/text-slim.svg
-/usr/share/icons/hicolor/symbolic/apps/org.messerlab.slimgui-symbolic.svg
-/usr/share/metainfo/org.messerlab.slimgui.appdata.xml
-/usr/share/metainfo/org.messerlab.slimgui.metainfo.xml
-/usr/share/mime/packages/org.messerlab.slimgui-mime.xml
-
-%post
-update-mime-database -n /usr/share/mime/
-xdg-mime install --mode system /usr/share/mime/packages/org.messerlab.slimgui-mime.xml
+%{_bindir}/eidos
+%{_bindir}/slim
+%{_bindir}/SLiMgui
+%{_datadir}/applications/org.messerlab.slimgui.desktop
+%{_datadir}/icons/hicolor/scalable/apps/org.messerlab.slimgui.svg
+%{_datadir}/icons/hicolor/scalable/mimetypes/text-slim.svg
+%{_datadir}/icons/hicolor/symbolic/apps/org.messerlab.slimgui-symbolic.svg
+%{_datadir}/metainfo/org.messerlab.slimgui.appdata.xml
+%{_datadir}/metainfo/org.messerlab.slimgui.metainfo.xml
+%{_datadir}/mime/packages/org.messerlab.slimgui-mime.xml
 
 %changelog
+* Sun Sep 15 2024 Bryce Carson <bryce.a.carson@gmail.com> - 4.3-2
+- Significant work has been invested into debugging the build of RHEL 8 on COPR. For whatever reason, since 4.0.1-1, we were unable to build on RHEL 8 (or perhaps it was EPEL 8?). Regardless, the ability to build on RHEL 8 and EPEL 8 has been achieved or restored, using conditionals which check what distribution the build is occuring on. These conditionals check the distribution using the defined RPM macros, a reliable system that the operating systems try not to step on each others toes; it'd be nicer if CentOS didn't call itself RHEL, though, but CentOS purposefully tries to be "bug-compatible" (if I recall) with RHEL, yet be slightly upstream of it with RHEL. The buildroot (which is the installation prefix within the CHROOT) and the source and build directories must be manually specified when building on RHEL 8 or EPEL 8 systems (which is RHEL 8 + EPEL [the extra packages for enterprise linux repository] for RHEL 8). I don't know what changed amongst the macros, if anything ever did change, but with 4.0.1-1 we were able to build for EPEL 8 two years ago, and then we weren't when I tried however long ago that issue four-hundred and forty cropped up. This has been resolved with the use of conditionals in the RPM preprocessor (do recall that "if" is not actually a macro) and RPM macros.
+- Conditionals and macros are used to decide whether to use Qt 6 or Qt 5.
+
+* Mon Sep 02 2024 Bryce Carson <bryce.a.carson@gmail.com> - 4.3-1
+- Changes to the package have occurred. See the following points.
+- Further version checks for various distributions are introduced to allow cross-distribution packaging and building against Qt5 or Qt6, appropriate to the platform.
+- An attempt to fix issue 440 is made
+- See the SLiM release notes on GitHub for information about changes to the packaged software.
+
+* Tue Apr 30 2024 Ben Haller <bhaller@mac.com> - 4.2.2-1
+- No changes to the package have been made since the last release.
+- Ship the fix for the 4.2.1-2 crashing bug as a separate release.
+- Fix an issue with reading of some VCF files.
+
+* Tue Apr 30 2024 Ben Haller <bhaller@mac.com> - 4.2.1-2
+- No changes to the package have been made since the last release.
+- Another fix for a crashing bug under certain conditions.
+
+* Fri Apr 12 2024 Ben Haller <bhaller@mac.com> - 4.2.1-1
+- No changes to the package have been made since the last release.
+- Fix for a crashing bug under certain conditions.
+
+* Wed Mar 20 2024 Bryce Carson <bryce.a.carson@gmail.com> - 4.2-1
+- No changes to the package have been made since the last release. See the SLiM release notes on GitHub for information about changes to the packaged software.
+
+* Mon Dec 4 2023 Bryce Carson <bryce.a.carson@gmail.com> - 4.1-1
+- Final candidate 1 for 4.1 release
+- CMake install of package desktop environment data properly implemented
+- RPM macros adopted
+
 * Tue Sep 27 2022 Bryce Carson <bryce.a.carson@gmail.com> - 4.0.1-2
 - `CMakeLists.txt` improved, so the installation section of the RPM is now simplified.
 - Data files now exist in `data/`, rather than in the root folder of the software.

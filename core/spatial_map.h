@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 9/4/23.
-//  Copyright (c) 2023 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2023-2024 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -86,6 +86,7 @@ public:
 #if defined(SLIMGUI)
 	uint8_t *display_buffer_ = nullptr;	// OWNED POINTER: used by SLiMgui, contains RGB values for pixels in the PopulationView
 	int buffer_width_, buffer_height_;	// the size of the buffer, in pixels, each of which is 3 x sizeof(uint8_t)
+    bool buffer_flipped_;               // true if flipped (for Qt display) false if not (for GL display)
 #endif
 	
 	SpatialMap(const SpatialMap&) = delete;													// no copying
@@ -106,6 +107,40 @@ public:
 	double ValueAtPoint_S1(double *p_point);
 	double ValueAtPoint_S2(double *p_point);
 	double ValueAtPoint_S3(double *p_point);
+	
+	inline double ValueAtPoint_S1_NOINTERPOLATE(double x_fraction)
+	{
+		// See ValueAtPoint_S1(); this is a fast inline version that assumes no interpolation
+		int64_t xsize = grid_size_[0];
+		int x_map = (int)round(x_fraction * (xsize - 1));
+			
+		return values_[x_map];
+	}
+	
+	inline double ValueAtPoint_S2_NOINTERPOLATE(double x_fraction, double y_fraction)
+	{
+		// See ValueAtPoint_S2(); this is a fast inline version that assumes no interpolation
+		int64_t xsize = grid_size_[0];
+		int64_t ysize = grid_size_[1];
+		int x_map = (int)round(x_fraction * (xsize - 1));
+		int y_map = (int)round(y_fraction * (ysize - 1));
+		
+		return values_[x_map + y_map * xsize];
+	}
+	
+	double ValueAtPoint_S3_NOINTERPOLATE(double x_fraction, double y_fraction, double z_fraction)
+	{
+		// See ValueAtPoint_S3(); this is a fast inline version that assumes no interpolation
+		int64_t xsize = grid_size_[0];
+		int64_t ysize = grid_size_[1];
+		int64_t zsize = grid_size_[2];
+		int x_map = (int)round(x_fraction * (xsize - 1));
+		int y_map = (int)round(y_fraction * (ysize - 1));
+		int z_map = (int)round(z_fraction * (zsize - 1));
+		
+		return values_[x_map + y_map * xsize + z_map * xsize * ysize];
+	}
+	
 	void ColorForValue(double p_value, double *p_rgb_ptr);
 	void ColorForValue(double p_value, float *p_rgb_ptr);
 	

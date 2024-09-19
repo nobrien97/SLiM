@@ -3,7 +3,7 @@
 //  Eidos
 //
 //  Created by Ben Haller on 7/27/15.
-//  Copyright (c) 2015-2023 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2015-2024 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -76,7 +76,6 @@ void EidosASTNode::OptimizeTree(void) const
 	_OptimizeConstants();		// cache values for numeric and string constants, and for return statements and constant compound statements
 	_OptimizeIdentifiers();		// cache unique IDs for identifiers using EidosStringRegistry::GlobalStringIDForString()
 	_OptimizeEvaluators();		// cache evaluator functions in cached_evaluator_ for fast node evaluation
-	_OptimizeFor();				// cache information about for loops that allows them to be accelerated at runtime
 	_OptimizeAssignments();		// cache information about assignments that allows simple increment/decrement assignments to be accelerated
 }
 
@@ -93,6 +92,7 @@ void EidosASTNode::_OptimizeConstants(void) const
 	{
 		try {
 			cached_literal_value_ = EidosInterpreter::NumericValueForString(token_->token_string_, token_);
+			cached_literal_value_->MarkAsConstant();
 		}
 		catch (...) {		// NOLINT(*-empty-catch) : intentional empty catch
 			// if EidosInterpreter::NumericValueForString() raises, we just don't cache the value
@@ -101,12 +101,14 @@ void EidosASTNode::_OptimizeConstants(void) const
 	else if (token_type == EidosTokenType::kTokenString)
 	{
 		// This is taken from EidosInterpreter::Evaluate_String and needs to match exactly!
-		cached_literal_value_ = EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String_singleton(token_->token_string_));
+		cached_literal_value_ = EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String(token_->token_string_));
+		cached_literal_value_->MarkAsConstant();
 	}
 	else if (token_type == EidosTokenType::kTokenIdentifier)
 	{
 		// Cache values for built-in constants; these can't be changed, so this should be safe, and
 		// should be much faster than having to scan up through all the symbol tables recursively
+		// Note that these values are all constants already, so MarkAsConstant() is not needed.
 		if (token_->token_string_ == gEidosStr_F)
 			cached_literal_value_ = gStaticEidosValue_LogicalF;
 		else if (token_->token_string_ == gEidosStr_T)
@@ -135,7 +137,10 @@ void EidosASTNode::_OptimizeConstants(void) const
 			const EidosASTNode *child = children_[0];
 			
 			if (child->cached_literal_value_)
+			{
 				cached_return_value_ = child->cached_literal_value_;
+				cached_return_value_->MarkAsConstant();			// should already be marked constant, actually
+			}
 		}
 	}
 	else if (token_type == EidosTokenType::kTokenLBrace)
@@ -150,7 +155,10 @@ void EidosASTNode::_OptimizeConstants(void) const
 			const EidosASTNode *child = children_[0];
 			
 			if (child->cached_return_value_ && (child->token_->token_type_ == EidosTokenType::kTokenReturn))
+			{
 				cached_return_value_ = child->cached_return_value_;
+				cached_return_value_->MarkAsConstant();			// should already be marked constant, actually
+			}
 		}
 	}
 }
@@ -233,95 +241,6 @@ void EidosASTNode::_OptimizeEvaluators(void) const
 	}
 }
 
-void EidosASTNode::_OptimizeForScan(const std::string &p_for_index_identifier, uint8_t *p_references, uint8_t *p_assigns) const
-{
-	// recurse down the tree; determine our children, then ourselves
-	for (auto child : children_)
-		child->_OptimizeForScan(p_for_index_identifier, p_references, p_assigns);
-	
-	EidosTokenType token_type = token_->token_type_;
-	
-	if (token_type == EidosTokenType::kTokenIdentifier)
-	{
-		// if the identifier occurs anywhere in the subtree, that is a reference
-		if (token_->token_string_.compare(p_for_index_identifier) == 0)
-			*p_references = true;
-	}
-	else if (children_.size() >= 1)
-	{
-		if (token_type == EidosTokenType::kTokenAssign)
-		{
-			// if the identifier occurs anywhere on the left-hand side of an assignment, that is an assignment (overbroad, but whatever)
-			EidosASTNode *lvalue_node = children_[0];
-			uint8_t references = false, assigns = false;
-			
-			lvalue_node->_OptimizeForScan(p_for_index_identifier, &references, &assigns);
-			
-			if (references)
-				*p_assigns = true;
-		}
-		else if (token_type == EidosTokenType::kTokenFor)
-		{
-			// for loops assign into their index variable, so they are like an assignment statement
-			EidosASTNode *identifier_child = children_[0];
-			
-			if (identifier_child->token_->token_type_ == EidosTokenType::kTokenIdentifier)
-			{
-				if (identifier_child->token_->token_string_.compare(p_for_index_identifier) == 0)
-					*p_assigns = true;
-			}
-		}
-		else if (token_type == EidosTokenType::kTokenLParen)
-		{
-			// certain functions are unpredictable and must be assumed to reference and/or assign
-			EidosASTNode *function_name_node = children_[0];
-			EidosTokenType function_name_token_type = function_name_node->token_->token_type_;
-			
-			if (function_name_token_type == EidosTokenType::kTokenIdentifier)	// is it a function call, not a method call?
-			{
-				const std::string &function_name = function_name_node->token_->token_string_;
-				
-				if ((function_name.compare(gEidosStr_apply) == 0) || (function_name.compare(gEidosStr_sapply) == 0) || (function_name.compare(gEidosStr_executeLambda) == 0) || (function_name.compare(gEidosStr__executeLambda_OUTER) == 0) || (function_name.compare(gEidosStr_doCall) == 0) || (function_name.compare(gEidosStr_rm) == 0))
-				{
-					*p_references = true;
-					*p_assigns = true;
-				}
-				else if (function_name.compare(gEidosStr_ls) == 0)
-				{
-					*p_references = true;
-				}
-			}
-		}
-	}
-}
-
-void EidosASTNode::_OptimizeFor(void) const
-{
-	// recurse down the tree; determine our children, then ourselves
-	for (auto child : children_)
-		child->_OptimizeFor();
-	
-	EidosTokenType token_type = token_->token_type_;
-	
-	if ((token_type == EidosTokenType::kTokenFor) && (children_.size() == 3))
-	{
-		// This node is a for loop node.  We want to determine whether any node under this node:
-		//	1. is unpredictable (executeLambda, _executeLambda_OUTER, apply, sapply, rm, ls)
-		//	2. references our index variable
-		//	3. assigns to our index variable
-		EidosASTNode *identifier_child = children_[0];
-		EidosASTNode *statement_child = children_[2];
-		
-		if (identifier_child->token_->token_type_ == EidosTokenType::kTokenIdentifier)
-		{
-			cached_for_references_index_ = false;
-			cached_for_assigns_index_ = false;
-			
-			statement_child->_OptimizeForScan(identifier_child->token_->token_string_, &cached_for_references_index_, &cached_for_assigns_index_);
-		}
-	}
-}
-
 void EidosASTNode::_OptimizeAssignments(void) const
 {
 	// recurse down the tree; determine our children, then ourselves
@@ -368,6 +287,23 @@ void EidosASTNode::_OptimizeAssignments(void) const
 					}
 				}
 			}
+			else if ((child1_token_type == EidosTokenType::kTokenLParen) && (child1->children_.size() == 3))
+			{
+				// ... the rvalue is a function call with three children...
+				EidosASTNode *left_operand = child1->children_[0];
+				
+				if ((left_operand->token_->token_type_ == EidosTokenType::kTokenIdentifier) && (left_operand->token_->token_string_ == gEidosStr_c))
+				{
+					// ... it's a call to c()...
+					EidosASTNode *middle_operand = child1->children_[1];
+					
+					if ((middle_operand->token_->token_type_ == EidosTokenType::kTokenIdentifier) && (middle_operand->token_->token_string_ == child0->token_->token_string_))
+					{
+						// ... the first argument to c() is the same as the lvalue, so we have x = c(x, <expression>), so we mark that in the tree for Evaluate_Assign()
+						cached_append_assignment_ = true;
+					}
+				}
+			}
 		}
 	}
 }
@@ -391,14 +327,14 @@ bool EidosASTNode::HasCachedNumericValue(void) const
 double EidosASTNode::CachedNumericValue(void) const
 {
 	if ((token_->token_type_ == EidosTokenType::kTokenNumber) && cached_literal_value_ && (cached_literal_value_->Count() == 1))
-		return cached_literal_value_->FloatAtIndex(0, nullptr);
+		return cached_literal_value_->NumericAtIndex_NOCAST(0, nullptr);
 	
 	if ((token_->token_type_ == EidosTokenType::kTokenMinus) && (children_.size() == 1))
 	{
 		const EidosASTNode *minus_child = children_[0];
 		
 		if ((minus_child->token_->token_type_ == EidosTokenType::kTokenNumber) && minus_child->cached_literal_value_ && (minus_child->cached_literal_value_->Count() == 1))
-			return -minus_child->cached_literal_value_->FloatAtIndex(0, nullptr);
+			return -minus_child->cached_literal_value_->NumericAtIndex_NOCAST(0, nullptr);
 	}
 	
 	EIDOS_TERMINATION << "ERROR (EidosASTNode::CachedNumericValue): (internal error) no cached numeric value" << EidosTerminate(nullptr);
@@ -485,6 +421,30 @@ void EidosASTNode::PrintTreeWithIndent(std::ostream &p_outstream, int p_indent) 
 			p_outstream << ")";
 		}
 	}
+}
+
+EidosErrorPosition EidosASTNode::ErrorPositionForNodeAndChildren(void) const
+{
+	// Returns the union of all the token ranges for the node and its children; useful when
+	// you want to report an error that spans a whole region of the AST.
+	EidosErrorPosition pos;
+	
+	pos.characterStartOfError = token_->token_start_;
+	pos.characterEndOfError = token_->token_end_;
+	pos.characterStartOfErrorUTF16 = token_->token_UTF16_start_;
+	pos.characterEndOfErrorUTF16 = token_->token_UTF16_end_;
+	
+	for (auto child : children_)
+	{
+		EidosErrorPosition child_pos = child->ErrorPositionForNodeAndChildren();
+		
+		pos.characterStartOfError = std::min(pos.characterStartOfError, child_pos.characterStartOfError);
+		pos.characterEndOfError = std::max(pos.characterEndOfError, child_pos.characterEndOfError);
+		pos.characterStartOfErrorUTF16 = std::min(pos.characterStartOfErrorUTF16, child_pos.characterStartOfErrorUTF16);
+		pos.characterEndOfErrorUTF16 = std::max(pos.characterEndOfErrorUTF16, child_pos.characterEndOfErrorUTF16);
+	}
+	
+	return pos;
 }
 
 #if (SLIMPROFILING == 1)

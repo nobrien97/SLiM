@@ -3,7 +3,7 @@
 //  Eidos
 //
 //  Created by Ben Haller on 8/3/15.
-//  Copyright (c) 2015-2023 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2015-2024 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -74,7 +74,7 @@ public:
 	EidosPropertySignature(const std::string &p_property_name, bool p_read_only, EidosValueMask p_value_mask, const EidosClass *p_value_class);
 	
 	// check arguments and returns
-	bool CheckAssignedValue(const EidosValue &p_value) const;	// checks a vector being assigned into a whole object; true is exact match, false is implicit type conversion
+	void CheckAssignedValue(const EidosValue &p_value) const;	// checks a vector being assigned into a whole object; raises on mismatch
 	void CheckResultValue(const EidosValue &p_value) const;	// checks the result from a single element
 	void CheckAggregateResultValue(const EidosValue &p_value, size_t p_expected_size) const;	// checks the result from a vector
 	

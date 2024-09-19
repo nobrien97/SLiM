@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 3/30/2020.
-//  Copyright (c) 2020-2023 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2020-2024 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -45,7 +45,7 @@ public slots:
 private:
     double scalingFactor_;
     
-    bool optimizePositions_;
+    bool optimizePositions_ = false;
     double scorePositions(double *center_x, double *center_y, bool *connected, size_t subpopCount);
     void optimizePositions(void); 
     

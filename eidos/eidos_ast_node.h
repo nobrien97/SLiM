@@ -3,7 +3,7 @@
 //  Eidos
 //
 //  Created by Ben Haller on 7/27/15.
-//  Copyright (c) 2015-2023 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2015-2024 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -82,12 +82,12 @@ public:
 	mutable EidosGlobalStringID cached_stringID_ = gEidosID_none;		// a pre-cached identifier for the token string, for fast property/method lookup
 	
 	uint8_t token_is_owned_ = false;									// if T, we own token_ because it is a virtual token that replaced a real token
-	mutable uint8_t cached_for_references_index_ = true;				// pre-cached as true if the index variable is referenced at all in the loop
-	mutable uint8_t cached_for_assigns_index_ = true;					// pre-cached as true if the index variable is assigned to in the loop
 	mutable uint8_t cached_compound_assignment_ = false;				// pre-cached on assignment nodes if they are of the form "x=x+1" or "x=x-1" only
+	mutable uint8_t cached_append_assignment_ = false;					// pre-cached on assignment nodes if they are of the form "x=c(x, y)" only
 	
 	mutable EidosTypeSpecifier typespec_;								// only valid for type-specifier nodes inside function declarations
 	mutable bool hit_eof_in_tolerant_parse_ = false;					// only valid for compound statement nodes; used by the type-interpreter to handle scoping
+	bool was_parenthesized_ = false;									// set to true for nodes that are the child of a set of grouping parentheses
 	
 	mutable EidosASTNode_ArgumentCache *argument_cache_ = nullptr;		// OWNED POINTER: an argument cache struct, allocated on demand for function/method call nodes
 	
@@ -117,8 +117,6 @@ public:
 	void _OptimizeConstants(void) const;								// cache EidosValues for constants and propagate constants upward
 	void _OptimizeIdentifiers(void) const;								// cache function signatures, global strings for methods and properties, etc.
 	void _OptimizeEvaluators(void) const;								// cache pointers to method for evaluation
-	void _OptimizeFor(void) const;										// determine whether/how for-loop index variables need to be set up
-	void _OptimizeForScan(const std::string &p_for_index_identifier, uint8_t *p_references, uint8_t *p_assigns) const;	// internal method
 	void _OptimizeAssignments(void) const;								// detect and mark simple increment/decrement assignments on a variable
 	
 	bool HasCachedNumericValue(void) const;
@@ -126,6 +124,8 @@ public:
 	
 	void PrintToken(std::ostream &p_outstream) const;
 	void PrintTreeWithIndent(std::ostream &p_outstream, int p_indent) const;
+	
+	EidosErrorPosition ErrorPositionForNodeAndChildren(void) const;
 	
 #if (SLIMPROFILING == 1)
 	// PROFILING

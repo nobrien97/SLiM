@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 8/3/2019.
-//  Copyright (c) 2019-2023 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2019-2024 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -35,6 +35,7 @@
 static const char *QtSLiMAppStartupAction = "QtSLiMAppStartupAction";
 static const char *QtSLiMForceDarkMode = "QtSLiMForceDarkMode";
 static const char *QtSLiMForceFusionStyle = "QtSLiMForceFusionStyle";
+static const char *QtSLiMUseOpenGL = "QtSLiMUseOpenGL";
 static const char *QtSLiMDisplayFontFamily = "QtSLiMDisplayFontFamily";
 static const char *QtSLiMDisplayFontSize = "QtSLiMDisplayFontSize";
 static const char *QtSLiMSyntaxHighlightScript = "QtSLiMSyntaxHighlightScript";
@@ -43,6 +44,7 @@ static const char *QtSLiMShowLineNumbers = "QtSLiMShowLineNumbers";
 static const char *QtSLiMHighlightCurrentLine = "QtSLiMHighlightCurrentLine";
 static const char *QtSLiMAutosaveOnRecycle = "QtSLiMAutosaveOnRecycle";
 static const char *QtSLiMShowSaveInUntitled = "QtSLiMShowSaveInUntitled";
+static const char *QtSLiMReloadOnSafeExternalEdits = "QtSLiMReloadOnSafeExternalEdits";
 
 
 static QFont &defaultDisplayFont(void)
@@ -53,8 +55,12 @@ static QFont &defaultDisplayFont(void)
     
     if (!defaultFont)
     {
+#if (QT_VERSION < QT_VERSION_CHECK(6, 0, 0))
         QFontDatabase fontdb;
         QStringList families = fontdb.families();
+#else
+        QStringList families = QFontDatabase::families();
+#endif
         
         // Use filter() to look for matches, since the foundry can be appended after the name (why isn't this easier??)
         if (families.filter("Consola").size() > 0)                 // good on Windows
@@ -120,6 +126,17 @@ bool QtSLiMPreferencesNotifier::forceFusionStylePref(void)
     QSettings settings;
     
     return settings.value(QtSLiMForceFusionStyle, QVariant(false)).toBool();
+}
+
+bool QtSLiMPreferencesNotifier::useOpenGLPref(void)
+{
+#ifndef SLIM_NO_OPENGL
+    QSettings settings;
+    
+    return settings.value(QtSLiMUseOpenGL, QVariant(true)).toBool();
+#else
+    return false;
+#endif
 }
 
 QFont QtSLiMPreferencesNotifier::displayFontPref(double *tabWidth) const
@@ -189,6 +206,13 @@ bool QtSLiMPreferencesNotifier::showSaveIfUntitledPref(void) const
     QSettings settings;
     
     return settings.value(QtSLiMShowSaveInUntitled, QVariant(false)).toBool();
+}
+
+bool QtSLiMPreferencesNotifier::reloadOnSafeExternalEditsPref(void) const
+{
+    QSettings settings;
+    
+    return settings.value(QtSLiMReloadOnSafeExternalEdits, QVariant(false)).toBool();
 }
 
 void QtSLiMPreferencesNotifier::displayFontBigger(void)
@@ -275,6 +299,16 @@ void QtSLiMPreferencesNotifier::forceFusionStyleToggled()
     //emit forceFusionStylePrefChanged();
 }
 
+void QtSLiMPreferencesNotifier::useOpenGLToggled()
+{
+    QtSLiMPreferences &prefsUI = QtSLiMPreferences::instance();
+    QSettings settings;
+    
+    settings.setValue(QtSLiMUseOpenGL, QVariant(prefsUI.ui->useOpenGL->isChecked()));
+    
+    emit useOpenGLPrefChanged();
+}
+
 void QtSLiMPreferencesNotifier::fontChanged(const QFont &newFont)
 {
     QString fontFamily = newFont.family();
@@ -354,6 +388,16 @@ void QtSLiMPreferencesNotifier::showSaveIfUntitledToggled()
     emit showSaveIfUntitledPrefChanged();
 }
 
+void QtSLiMPreferencesNotifier::reloadOnSafeExternalEditsToggled()
+{
+    QtSLiMPreferences &prefsUI = QtSLiMPreferences::instance();
+    QSettings settings;
+    
+    settings.setValue(QtSLiMReloadOnSafeExternalEdits, QVariant(prefsUI.ui->reloadOnSafeExternalEdits->isChecked()));
+    
+    emit reloadOnSafeExternalEditsChanged();
+}
+
 void QtSLiMPreferencesNotifier::resetSuppressedClicked()
 {
     // All "do not show this again" settings should be removed here
@@ -414,6 +458,8 @@ QtSLiMPreferences::QtSLiMPreferences(QWidget *p_parent) : QDialog(p_parent), ui(
     ui->showSaveIfUntitled->setChecked(notifier->showSaveIfUntitledPref());
     ui->showSaveIfUntitled->setEnabled(notifier->autosaveOnRecyclePref());
     
+    ui->reloadOnSafeExternalEdits->setChecked(notifier->reloadOnSafeExternalEditsPref());
+    
     // connect the UI elements to QtSLiMPreferencesNotifier
     connect(ui->startupRadioOpenFile, &QRadioButton::toggled, notifier, &QtSLiMPreferencesNotifier::startupRadioChanged);
     connect(ui->startupRadioCreateNew, &QRadioButton::toggled, notifier, &QtSLiMPreferencesNotifier::startupRadioChanged);
@@ -431,13 +477,28 @@ QtSLiMPreferences::QtSLiMPreferences(QWidget *p_parent) : QDialog(p_parent), ui(
     connect(ui->showSaveIfUntitled, &QCheckBox::toggled, notifier, &QtSLiMPreferencesNotifier::showSaveIfUntitledToggled);
     connect(notifier, &QtSLiMPreferencesNotifier::autosaveOnRecyclePrefChanged, this, [this, notifier]() { ui->showSaveIfUntitled->setEnabled(notifier->autosaveOnRecyclePref()); });
     
+    connect(ui->reloadOnSafeExternalEdits, &QCheckBox::toggled, notifier, &QtSLiMPreferencesNotifier::reloadOnSafeExternalEditsToggled);
+    
     connect(ui->resetSuppressedButton, &QPushButton::clicked, notifier, &QtSLiMPreferencesNotifier::resetSuppressedClicked);
     
     // handle the user interface display prefs, which are hidden and disconnected on macOS
+    ui->useOpenGL->setChecked(notifier->useOpenGLPref());
+    
+    connect(ui->useOpenGL, &QCheckBox::toggled, notifier, &QtSLiMPreferencesNotifier::useOpenGLToggled);
+
 #ifdef __APPLE__
-    ui->uiAppearanceGroup->setHidden(true);
-    ui->verticalSpacer_uiAppearance->changeSize(0, 0);
-    ui->verticalSpacer_uiAppearance->invalidate();
+    // This old code hid the UI prefs entirely on macOS
+//    ui->uiAppearanceGroup->setHidden(true);
+//    ui->verticalSpacer_uiAppearance->changeSize(0, 0);
+//    ui->verticalSpacer_uiAppearance->invalidate();
+//    ui->verticalLayout->invalidate();
+    
+    // This new code leaves the "Use OpenGL for speed" checkbox visible and hides the rest
+    ui->requireRelaunchLabel->setHidden(true);
+    ui->forceDarkMode->setHidden(true);
+    ui->forceFusionStyle->setHidden(true);
+    ui->verticalSpacer_requireRelaunch->changeSize(0, 0);
+    ui->verticalSpacer_requireRelaunch->invalidate();
     ui->verticalLayout->invalidate();
 #else
     ui->forceDarkMode->setChecked(notifier->forceDarkModePref());

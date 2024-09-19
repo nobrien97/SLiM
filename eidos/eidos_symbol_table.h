@@ -3,7 +3,7 @@
 //  Eidos
 //
 //  Created by Ben Haller on 4/12/15.
-//  Copyright (c) 2015-2023 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2015-2024 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -60,7 +60,7 @@ class EidosTypeTable;
 extern EidosSymbolTable *gEidosConstantsSymbolTable;
 
 
-// This is used by InitializeConstantSymbolEntry / ReinitializeConstantSymbolEntry for fast setup / teardown
+// This is used by InitializeConstantSymbolEntry() for fast setup / teardown
 typedef std::pair<EidosGlobalStringID, EidosValue_SP> EidosSymbolTableEntry;
 
 
@@ -138,8 +138,9 @@ private:
 	// Utility methods called by the public methods to do the real work
 	std::vector<std::string> _SymbolNames(bool p_include_constants, bool p_include_variables) const;
 	EidosValue_SP _GetValue(EidosGlobalStringID p_symbol_name, const EidosToken *p_symbol_token) const;
+	EidosValue_SP _GetValue_SpecialRaise(EidosGlobalStringID p_symbol_name, const EidosToken *p_symbol_token) const;
 	EidosValue *_GetValue_RAW(EidosGlobalStringID p_symbol_name, const EidosToken *p_symbol_token) const;
-	EidosValue_SP _GetValue_IsConst(EidosGlobalStringID p_symbol_name, const EidosToken *p_symbol_token, bool *p_is_const) const;
+	EidosValue_SP _GetValue_IsConstIsLocal(EidosGlobalStringID p_symbol_name, const EidosToken *p_symbol_token, bool *p_is_const, bool *p_is_local) const;
 	void _RemoveSymbol(EidosGlobalStringID p_symbol_name, bool p_remove_constant);
 	void _InitializeConstantSymbolEntry(EidosGlobalStringID p_symbol_name, EidosValue_SP p_value);
 	void _ResizeToFitSymbol(EidosGlobalStringID p_symbol_name);
@@ -162,22 +163,25 @@ public:
 	bool ContainsSymbol_IsConstant(EidosGlobalStringID p_symbol_name, bool *p_is_const) const;
 	bool SymbolDefinedAnywhere(EidosGlobalStringID p_symbol_name) const;
 	
-	// Set as a variable (raises if already defined as a constant); the NoCopy version is *not* what you want, almost certainly (see it for comments)
+	// Set as a variable (raises if already defined as a constant)
 	void SetValueForSymbol(EidosGlobalStringID p_symbol_name, EidosValue_SP p_value);
-	void SetValueForSymbolNoCopy(EidosGlobalStringID p_symbol_name, EidosValue_SP p_value);
+	void SetValueForSymbolNoCopy(EidosGlobalStringID p_symbol_name, EidosValue_SP p_value);			// *not* what you want, almost certainly
 	
 	// Set as a constant (raises if already defined as a variable or a constant); adds to the kEidosDefinedConstantsTable, creating it if necessary
 	void DefineConstantForSymbol(EidosGlobalStringID p_symbol_name, EidosValue_SP p_value);
+	void DefineConstantForSymbolNoCopy(EidosGlobalStringID p_symbol_name, EidosValue_SP p_value);	// *not* what you want, almost certainly
 	
 	// Set as a global (raises if already defined as a constant); adds to the kGlobalVariablesTable, or raises if that does not exist
 	void DefineGlobalForSymbol(EidosGlobalStringID p_symbol_name, EidosValue_SP p_value);
 	
-	// Remove symbols; RemoveValueForSymbol() will raise if the symbol is a constant
+	// Remove symbols; RemoveValueForSymbol() will raise if the symbol is a constant.  RemoveConstantForSymbol() is
+	// not used in Eidos itself, but SLiM uses it when script blocks, subpopulations, species, etc. cease to exist.
 	inline __attribute__((always_inline)) void RemoveValueForSymbol(EidosGlobalStringID p_symbol_name) { _RemoveSymbol(p_symbol_name, false); }
 	inline __attribute__((always_inline)) void RemoveConstantForSymbol(EidosGlobalStringID p_symbol_name) { _RemoveSymbol(p_symbol_name, true); }
 	
 	// Get a value, with an optional token used if the call raises due to an undefined symbol
 	inline __attribute__((always_inline)) EidosValue_SP GetValueOrRaiseForASTNode(const EidosASTNode *p_symbol_node) const { return _GetValue(p_symbol_node->cached_stringID_, p_symbol_node->token_); }
+	inline __attribute__((always_inline)) EidosValue_SP GetValueOrRaiseForASTNode_SpecialRaise(const EidosASTNode *p_symbol_node) const { return _GetValue_SpecialRaise(p_symbol_node->cached_stringID_, p_symbol_node->token_); }
 	inline __attribute__((always_inline)) EidosValue_SP GetValueOrRaiseForSymbol(EidosGlobalStringID p_symbol_name) const { return _GetValue(p_symbol_name, nullptr); }
 	
 	// Get a value, with an optional token used if the call raises due to an undefined symbol; these variants return an unwrapped EidosValue *
@@ -186,8 +190,8 @@ public:
 	inline __attribute__((always_inline)) EidosValue *GetValueRawOrRaiseForSymbol(EidosGlobalStringID p_symbol_name) const { return _GetValue_RAW(p_symbol_name, nullptr); }
 	
 	// Special getters that return a boolean flag, true if the fetched symbol is a constant
-	inline __attribute__((always_inline)) EidosValue_SP GetValueOrRaiseForASTNode_IsConst(const EidosASTNode *p_symbol_node, bool *p_is_const) const { return _GetValue_IsConst(p_symbol_node->cached_stringID_, p_symbol_node->token_, p_is_const); }
-	inline __attribute__((always_inline)) EidosValue_SP GetValueOrRaiseForSymbol_IsConst(EidosGlobalStringID p_symbol_name, bool *p_is_const) const { return _GetValue_IsConst(p_symbol_name, nullptr, p_is_const); }
+	inline __attribute__((always_inline)) EidosValue_SP GetValueOrRaiseForASTNode_IsConstIsLocal(const EidosASTNode *p_symbol_node, bool *p_is_const, bool *p_is_local) const { return _GetValue_IsConstIsLocal(p_symbol_node->cached_stringID_, p_symbol_node->token_, p_is_const, p_is_local); }
+	inline __attribute__((always_inline)) EidosValue_SP GetValueOrRaiseForSymbol_IsConstIsLocal(EidosGlobalStringID p_symbol_name, bool *p_is_const, bool *p_is_local) const { return _GetValue_IsConstIsLocal(p_symbol_name, nullptr, p_is_const, p_is_local); }
 	
 	// Special-purpose methods used for fast setup of new symbol tables with constants.
 	//
@@ -195,11 +199,23 @@ public:
 	// has infinite lifespan, and (2) that the EidosValue passed in is not invisible and is thus suitable for
 	// direct use in the symbol table; no copy will be made of the value.  These are not general-purpose methods,
 	// they are specifically for the very specialized init case of setting up a table with standard entries.
+	//
+	// Note that this method does *not* require that the value itself is marked as a constant, nor does this
+	// method mark it as such; this mechanism relies upon the table's designation as a constants table to
+	// enforce constness.  This provides a small window through which the user could potentially modify a value
+	// in a constants table, if (a) the value is not marked as a constant, and (b) it is set directly in the
+	// table through these methods, rather than through DefineConstantForSymbol().  If it is possible to do,
+	// I have not yet found the way to do it, though, because assignment and subset-assignment both check that
+	// the symbol table for the variable being modified is not a constants table.  If new methods are added
+	// that are also capable of modifying values in place, however, they will need to check the table type,
+	// not just the IsConstant() property of the value, which is not guaranteed to be set in all cases!  See
+	// eidos_value.h for further discussion of how EidosValue constness is managed internally.
 	inline __attribute__((always_inline)) void InitializeConstantSymbolEntry(EidosSymbolTableEntry &p_new_entry) { _InitializeConstantSymbolEntry(p_new_entry.first, p_new_entry.second); }
 	inline __attribute__((always_inline)) void InitializeConstantSymbolEntry(EidosGlobalStringID p_symbol_name, EidosValue_SP p_value) { _InitializeConstantSymbolEntry(p_symbol_name, std::move(p_value)); }
 	
-	// A utility method for printing a symbol table; note this is different from operator<<, which prints the whole chain in sorted form
+	// Utility methods for printing a symbol table and, for PrintSymbolTableChain(), its parents; note these are different from operator<<
 	void PrintSymbolTable(std::ostream &p_outstream);
+	void PrintSymbolTableChain(std::ostream &p_outstream);
 	
 	// A utility method to add entries for defined symbols into an EidosTypeTable
 	void AddSymbolsToTypeTable(EidosTypeTable *p_type_table) const;
@@ -213,6 +229,7 @@ public:
 	friend size_t MemoryUsageForSymbolTables(EidosSymbolTable *p_currentTable);
 };
 
+// Print all symbols available from a given table (and its parents), in sorted form
 std::ostream &operator<<(std::ostream &p_outstream, const EidosSymbolTable &p_symbols);
 
 // Memory usage tallying, for outputUsage()

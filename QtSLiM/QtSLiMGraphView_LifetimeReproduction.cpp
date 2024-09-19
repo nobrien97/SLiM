@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 11/30/2020.
-//  Copyright (c) 2020-2023 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2020-2024 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -27,6 +27,9 @@
 #include <QGuiApplication>
 #include <QDebug>
 
+#include <string>
+#include <algorithm>
+
 #include "QtSLiMWindow.h"
 #include "subpopulation.h"
 
@@ -36,8 +39,11 @@ QtSLiMGraphView_LifetimeReproduction::QtSLiMGraphView_LifetimeReproduction(QWidg
     histogramBinCount_ = 11;        // max reproductive output (from 0 to 10); this rescales automatically
     allowBinCountRescale_ = false;
     
-    xAxisMin_ = -1;                 // zero is included
-    xAxisMax_ = histogramBinCount_ - 1;
+    x0_ = -1;                 // zero is included
+    x1_ = histogramBinCount_ - 1;
+    
+    xAxisMin_ = x0_;
+    xAxisMax_ = x1_;
     xAxisHistogramStyle_ = true;
     xAxisTickValuePrecision_ = 0;
     tweakXAxisTickLabelAlignment_ = true;
@@ -86,6 +92,7 @@ void QtSLiMGraphView_LifetimeReproduction::subpopulation1PopupChanged(int /* ind
         // Reset our autoscaling x axis
         histogramBinCount_ = 11;
         xAxisMax_ = histogramBinCount_ - 1;
+        x1_ = xAxisMax_;               // the same as xAxisMax_, for base plots
         
         invalidateCachedData();
         update();
@@ -103,9 +110,11 @@ void QtSLiMGraphView_LifetimeReproduction::controllerRecycled(void)
     // Reset our autoscaling x axis
     histogramBinCount_ = 11;
     xAxisMax_ = histogramBinCount_ - 1;
+    x1_ = xAxisMax_;               // the same as xAxisMax_, for base plots
     
     // Reset our autoscaling y axis
     yAxisMax_ = 1.0;
+    y1_ = yAxisMax_;               // the same as yAxisMax_, for base plots
     yAxisMajorTickInterval_ = 0.5;
     yAxisMinorTickInterval_ = 0.25;
     
@@ -163,6 +172,7 @@ void QtSLiMGraphView_LifetimeReproduction::drawGraph(QPainter &painter, QRect in
         {
             histogramBinCount_ = binCount;
             xAxisMax_ = histogramBinCount_ - 1;
+            x1_ = xAxisMax_;               // the same as xAxisMax_, for base plots
             invalidateCachedData();
         }
         
@@ -178,6 +188,7 @@ void QtSLiMGraphView_LifetimeReproduction::drawGraph(QPainter &painter, QRect in
                 ((ceilingFreq < yAxisMax_) && (maxFreq + 0.05 < ceilingFreq)))    // require a margin of error to jump down
         {
             yAxisMax_ = ceilingFreq;
+            y1_ = yAxisMax_;               // the same as yAxisMax_, for base plots
             yAxisMajorTickInterval_ = ceilingFreq / 2.0;
             yAxisMinorTickInterval_ = ceilingFreq / 4.0;
         }
@@ -201,11 +212,8 @@ QtSLiMLegendSpec QtSLiMGraphView_LifetimeReproduction::legendKey(void)
     {
         QtSLiMLegendSpec legend_key;
         
-        legend_key.resize(2);
-        legend_key[0].first = "M";
-        legend_key[0].second = controller_->blackContrastingColorForIndex(0);
-        legend_key[1].first = "F";
-        legend_key[1].second = controller_->blackContrastingColorForIndex(1);
+        legend_key.emplace_back("M", controller_->blackContrastingColorForIndex(0));
+        legend_key.emplace_back("F", controller_->blackContrastingColorForIndex(1));
         
         return legend_key;
     }
@@ -246,6 +254,8 @@ void QtSLiMGraphView_LifetimeReproduction::appendStringForData(QString &string)
             for (int i = 0; i < binCount; ++i)
                 string.append(QString("%1, ").arg(reproductionDist[i], 0, 'f', 4));
         }
+        
+        free(reproductionDist);
     }
     
     string.append("\n");
@@ -260,16 +270,19 @@ double *QtSLiMGraphView_LifetimeReproduction::reproductionDistribution(int *binC
     if (!subpop1)
         return nullptr;
     
-    // Find the maximum age and choose the new bin count
-    slim_age_t maxReproduction = 0;
+    // Find the maximum reproductive output and choose the new bin count
+    int32_t maxReproduction = 0;
     
-    for (int reproduction : subpop1->lifetime_reproductive_output_F_)
+    for (int32_t reproduction : subpop1->lifetime_reproductive_output_F_)
         maxReproduction = std::max(maxReproduction, reproduction);
-    for (int reproduction : subpop1->lifetime_reproductive_output_MH_)
+    for (int32_t reproduction : subpop1->lifetime_reproductive_output_MH_)
         maxReproduction = std::max(maxReproduction, reproduction);
     
-    if (maxReproduction > *binCount)
-        *binCount = (int)(std::ceil(maxReproduction / 10.0) * 10.0 + 1);
+    // compare to the logic in QtSLiMGraphView_AgeDistribution::ageDistribution();
+    // it is different here because reproduction count 0 gets a bin, so if the
+    // max reproduction is 12, we need 13 bins; confusing!
+    if (maxReproduction >= *binCount)
+        *binCount = (int)(std::ceil(maxReproduction / 10.0) * 10.0 + 1);    // +1 because zero gets an entry
     
     int newBinCount = *binCount;
     

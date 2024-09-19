@@ -1009,7 +1009,7 @@ QSlider::handle:horizontal:disabled {
           <item>
            <widget class="QLabel" name="scriptHeaderLabel">
             <property name="text">
-             <string>Input Commands:</string>
+             <string>Input Script:</string>
             </property>
            </widget>
           </item>
@@ -1050,17 +1050,17 @@ QSlider::handle:horizontal:disabled {
            </widget>
           </item>
           <item>
-           <spacer name="horizontalSpacer_4">
-            <property name="orientation">
-             <enum>Qt::Horizontal</enum>
+           <widget class="QtSLiMEllipsisLabel" name="scriptBlockLabel">
+            <property name="sizePolicy">
+             <sizepolicy hsizetype="Expanding" vsizetype="Preferred">
+              <horstretch>0</horstretch>
+              <verstretch>0</verstretch>
+             </sizepolicy>
             </property>
-            <property name="sizeHint" stdset="0">
-             <size>
-              <width>10</width>
-              <height>10</height>
-             </size>
+            <property name="text">
+             <string>1 early()</string>
             </property>
-           </spacer>
+           </widget>
           </item>
          </layout>
         </item>
@@ -1300,7 +1300,7 @@ QSlider::handle:horizontal:disabled {
      <x>0</x>
      <y>0</y>
      <width>914</width>
-     <height>22</height>
+     <height>24</height>
     </rect>
    </property>
    <widget class="QMenu" name="menuFile">
@@ -1352,6 +1352,7 @@ QSlider::handle:horizontal:disabled {
     <addaction name="separator"/>
     <addaction name="actionCut"/>
     <addaction name="actionCopy"/>
+    <addaction name="actionCopyAsHTML"/>
     <addaction name="actionPaste"/>
     <addaction name="actionDelete"/>
     <addaction name="actionSelectAll"/>
@@ -1434,6 +1435,9 @@ QSlider::handle:horizontal:disabled {
     </property>
     <addaction name="actionShowCycle_WF"/>
     <addaction name="actionShowCycle_nonWF"/>
+    <addaction name="separator"/>
+    <addaction name="actionShowCycle_WF_MS"/>
+    <addaction name="actionShowCycle_nonWF_MS"/>
     <addaction name="separator"/>
     <addaction name="actionQtSLiMHelp"/>
     <addaction name="actionSLiMWorkshops"/>
@@ -2017,6 +2021,33 @@ QSlider::handle:horizontal:disabled {
     <string>Ctrl+-</string>
    </property>
   </action>
+  <action name="actionShowCycle_WF_MS">
+   <property name="text">
+    <string>Show WF Tick Cycle (Multispecies)</string>
+   </property>
+   <property name="toolTip">
+    <string>Show WF Tick Cycle (Multispecies)</string>
+   </property>
+  </action>
+  <action name="actionShowCycle_nonWF_MS">
+   <property name="text">
+    <string>Show nonWF Tick Cycle (Multispecies)</string>
+   </property>
+   <property name="toolTip">
+    <string>Show nonWF Tick Cycle (Multispecies)</string>
+   </property>
+  </action>
+  <action name="actionCopyAsHTML">
+   <property name="text">
+    <string>Copy as HTML</string>
+   </property>
+   <property name="toolTip">
+    <string>Copy as HTML</string>
+   </property>
+   <property name="shortcut">
+    <string>Ctrl+Alt+C</string>
+   </property>
+  </action>
  </widget>
  <layoutdefault spacing="6" margin="11"/>
  <customwidgets>
@@ -2060,6 +2091,11 @@ QSlider::handle:horizontal:disabled {
    <extends>QWidget</extends>
    <header>QTabBar.h</header>
    <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>QtSLiMEllipsisLabel</class>
+   <extends>QLabel</extends>
+   <header>QtSLiMExtras.h</header>
   </customwidget>
  </customwidgets>
  <resources>

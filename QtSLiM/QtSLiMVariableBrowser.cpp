@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 4/17/2019.
-//  Copyright (c) 2020-2023 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2020-2024 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -28,9 +28,14 @@
 #include <QScrollBar>
 #include <QDebug>
 
-#include "QtSLiMWindow.h"
+#include <utility>
+#include <string>
+#include <algorithm>
+#include <vector>
+
 #include "QtSLiMEidosConsole.h"
 #include "QtSLiMAppDelegate.h"
+#include "QtSLiMExtras.h"
 
 #include "eidos_symbol_table.h"
 
@@ -332,7 +337,7 @@ void QtSLiMVariableBrowser::reloadBrowser(bool nowValidState)
             
             // We don't use the EidosValues in the saved tree at all, since they will potentially be stale;
             // to free up the memory involved, we go through the saved tree and wipe the values to nullptr
-            for (QTreeWidgetItem *old_root_child : old_children)
+            for (QTreeWidgetItem *old_root_child : qAsConst(old_children))
                 wipeEidosValuesFromSubtree(old_root_child);
         }
         else
@@ -382,7 +387,7 @@ void QtSLiMVariableBrowser::reloadBrowser(bool nowValidState)
         // Analyze the old children and try to expand items to match the previous state
         doingMatching = true;
         
-        for (QTreeWidgetItem *old_root_child : old_children)
+        for (QTreeWidgetItem *old_root_child : qAsConst(old_children))
             matchExpansionOfOldItem(old_root_child, root);
         
         // Try to restore the scroll position to where it was when we saved the tree
@@ -530,7 +535,7 @@ void QtSLiMVariableBrowser::itemExpanded(QTreeWidgetItem *item)
             // we used to display zero-length property values for zero-length object vectors, but don't any more
             int display_index = (element_index != -1) ? element_index : 0;
             EidosValue_Object *eidos_object_vector = static_cast<EidosValue_Object *>(eidos_value);
-            EidosObject *eidos_object = eidos_object_vector->ObjectElementAtIndex(display_index, nullptr);
+            EidosObject *eidos_object = eidos_object_vector->ObjectElementAtIndex_NOCAST(display_index, nullptr);
 			const EidosClass *object_class = eidos_object->Class();
 			const std::vector<EidosPropertySignature_CSP> *properties = object_class->Properties();
 			size_t propertyCount = properties->size();

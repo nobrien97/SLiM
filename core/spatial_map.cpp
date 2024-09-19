@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 9/4/23.
-//  Copyright (c) 2023 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2023-2024 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -262,8 +262,8 @@ void SpatialMap::TakeColorsFromEidosValues(EidosValue *p_value_range, EidosValue
 			EIDOS_TERMINATION << "ERROR (" << p_code_name << "): " << p_eidos_name << " valueRange must be exactly length 2 (giving the min and max value permitted)." << EidosTerminate();
 		
 		// valueRange and colors were provided, so use them for coloring
-		colors_min_ = p_value_range->FloatAtIndex(0, nullptr);
-		colors_max_ = p_value_range->FloatAtIndex(1, nullptr);
+		colors_min_ = p_value_range->NumericAtIndex_NOCAST(0, nullptr);
+		colors_max_ = p_value_range->NumericAtIndex_NOCAST(1, nullptr);
 		
 		if (!std::isfinite(colors_min_) || !std::isfinite(colors_max_) || (colors_min_ > colors_max_))
 			EIDOS_TERMINATION << "ERROR (" << p_code_name << "): " << p_eidos_name << " valueRange must be finite, and min <= max is required." << EidosTerminate();
@@ -291,7 +291,7 @@ void SpatialMap::TakeColorsFromEidosValues(EidosValue *p_value_range, EidosValue
 		if (!red_components_ || !green_components_ || !blue_components_)
 			EIDOS_TERMINATION << "ERROR (" << p_code_name << "): allocation failed; you may need to raise the memory limit for SLiM." << EidosTerminate(nullptr);
 		
-		const std::string *colors_vec_ptr = p_colors->StringVector()->data();
+		const std::string *colors_vec_ptr = p_colors->StringData();
 		
 		for (int colors_index = 0; colors_index < n_colors_; ++colors_index)
 			Eidos_GetColorComponents(colors_vec_ptr[colors_index], red_components_ + colors_index, green_components_ + colors_index, blue_components_ + colors_index);
@@ -338,8 +338,8 @@ void SpatialMap::TakeValuesFromEidosValue(EidosValue *p_values, const std::strin
 		EIDOS_TERMINATION << "ERROR (" << p_code_name << "): allocation failed; you may need to raise the memory limit for SLiM." << EidosTerminate(nullptr);
 	
 	// Take the values we were passed in
-	const double *values_float_vec_ptr = (p_values->Type() == EidosValueType::kValueFloat) ? p_values->FloatVector()->data() : nullptr;
-	const int64_t *values_integer_vec_ptr = (p_values->Type() == EidosValueType::kValueInt) ? p_values->IntVector()->data() : nullptr;
+	const double *values_float_vec_ptr = (p_values->Type() == EidosValueType::kValueFloat) ? p_values->FloatData() : nullptr;
+	const int64_t *values_integer_vec_ptr = (p_values->Type() == EidosValueType::kValueInt) ? p_values->IntData() : nullptr;
 	
 	if (spatiality_ == 1)
 	{
@@ -1072,29 +1072,29 @@ EidosValue_SP SpatialMap::GetProperty(EidosGlobalStringID p_property_id)
 		{
 			switch (spatiality_)
 			{
-				case 1: return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Int_vector{grid_size_[0]});
-				case 2: return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Int_vector{grid_size_[0], grid_size_[1]});
-				case 3: return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Int_vector{grid_size_[0], grid_size_[1], grid_size_[2]});
+				case 1: return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Int{grid_size_[0]});
+				case 2: return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Int{grid_size_[0], grid_size_[1]});
+				case 3: return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Int{grid_size_[0], grid_size_[1], grid_size_[2]});
 				default:	return gStaticEidosValueNULL;	// never hit; here to make the compiler happy
 			}
 		}
 		case gID_name:
 		{
-			return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String_singleton(name_));
+			return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String(name_));
 		}
 		case gID_spatialBounds:
 		{
 			switch (spatiality_)
 			{
-				case 1: return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float_vector{bounds_a0_, bounds_a1_});
-				case 2: return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float_vector{bounds_a0_, bounds_b0_, bounds_a1_, bounds_b1_});
-				case 3: return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float_vector{bounds_a0_, bounds_b0_, bounds_c0_, bounds_a1_, bounds_b1_, bounds_c1_});
+				case 1: return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float{bounds_a0_, bounds_a1_});
+				case 2: return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float{bounds_a0_, bounds_b0_, bounds_a1_, bounds_b1_});
+				case 3: return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float{bounds_a0_, bounds_b0_, bounds_c0_, bounds_a1_, bounds_b1_, bounds_c1_});
 				default:	return gStaticEidosValueNULL;	// never hit; here to make the compiler happy
 			}
 		}
 		case gID_spatiality:
 		{
-			return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String_singleton(spatiality_string_));
+			return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String(spatiality_string_));
 		}
 			
 			// variables
@@ -1109,7 +1109,7 @@ EidosValue_SP SpatialMap::GetProperty(EidosGlobalStringID p_property_id)
 			if (tag_value == SLIM_TAG_UNSET_VALUE)
 				EIDOS_TERMINATION << "ERROR (SpatialMap::GetProperty): property tag accessed on spatial map before being set." << EidosTerminate();
 			
-			return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Int_singleton(tag_value));
+			return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Int(tag_value));
 		}
 			
 			// all others, including gID_none
@@ -1125,7 +1125,7 @@ void SpatialMap::SetProperty(EidosGlobalStringID p_property_id, const EidosValue
 	{
 		case gID_interpolate:
 		{
-			eidos_logical_t value = p_value.LogicalAtIndex(0, nullptr);
+			eidos_logical_t value = p_value.LogicalAtIndex_NOCAST(0, nullptr);
 			
 			interpolate_ = value;
 			
@@ -1143,7 +1143,7 @@ void SpatialMap::SetProperty(EidosGlobalStringID p_property_id, const EidosValue
 		}
 		case gID_tag:
 		{
-			slim_usertag_t value = SLiMCastToUsertagTypeOrRaise(p_value.IntAtIndex(0, nullptr));
+			slim_usertag_t value = SLiMCastToUsertagTypeOrRaise(p_value.IntAtIndex_NOCAST(0, nullptr));
 			
 			tag_value_ = value;
 			return;
@@ -1203,7 +1203,7 @@ EidosValue_SP SpatialMap::ExecuteMethod_add(EidosGlobalStringID p_method_id, con
 	
 	if ((x_value->Type() == EidosValueType::kValueInt) || (x_value->Type() == EidosValueType::kValueFloat))
 	{
-		double add_scalar = x_value->FloatAtIndex(0, nullptr);
+		double add_scalar = x_value->NumericAtIndex_NOCAST(0, nullptr);
 		
 		// FIXME: TO BE PARALLELIZED
 		for (int64_t i = 0; i < values_size_; ++i)
@@ -1211,7 +1211,7 @@ EidosValue_SP SpatialMap::ExecuteMethod_add(EidosGlobalStringID p_method_id, con
 	}
 	else
 	{
-		SpatialMap *add_map = (SpatialMap *)x_value->ObjectElementAtIndex(0, nullptr);
+		SpatialMap *add_map = (SpatialMap *)x_value->ObjectElementAtIndex_NOCAST(0, nullptr);
 		double *add_map_values = add_map->values_;
 		
 		if (!IsCompatibleWithMap(add_map))
@@ -1224,7 +1224,7 @@ EidosValue_SP SpatialMap::ExecuteMethod_add(EidosGlobalStringID p_method_id, con
 	
 	_ValuesChanged();
 	
-	return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Object_singleton(this, gSLiM_SpatialMap_Class));
+	return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Object(this, gSLiM_SpatialMap_Class));
 }
 
 //	*********************	- (object<SpatialMap>)blend(ifo<SpatialMap> x, float$ xFraction)
@@ -1246,7 +1246,7 @@ EidosValue_SP SpatialMap::ExecuteMethod_blend(EidosGlobalStringID p_method_id, c
 		x_value = spatialmap_temp.get();
 	}
 	
-	double xFraction = xFraction_value->FloatAtIndex(0, nullptr);
+	double xFraction = xFraction_value->FloatAtIndex_NOCAST(0, nullptr);
 	double targetFraction = 1 - xFraction;
 	
 	if ((xFraction < 0.0) || (xFraction > 1.0))
@@ -1254,7 +1254,7 @@ EidosValue_SP SpatialMap::ExecuteMethod_blend(EidosGlobalStringID p_method_id, c
 	
 	if ((x_value->Type() == EidosValueType::kValueInt) || (x_value->Type() == EidosValueType::kValueFloat))
 	{
-		double blend_scalar = x_value->FloatAtIndex(0, nullptr);
+		double blend_scalar = x_value->NumericAtIndex_NOCAST(0, nullptr);
 		
 		// FIXME: TO BE PARALLELIZED
 		for (int64_t i = 0; i < values_size_; ++i)
@@ -1262,7 +1262,7 @@ EidosValue_SP SpatialMap::ExecuteMethod_blend(EidosGlobalStringID p_method_id, c
 	}
 	else
 	{
-		SpatialMap *blend_map = (SpatialMap *)x_value->ObjectElementAtIndex(0, nullptr);
+		SpatialMap *blend_map = (SpatialMap *)x_value->ObjectElementAtIndex_NOCAST(0, nullptr);
 		double *blend_map_values = blend_map->values_;
 		
 		if (!IsCompatibleWithMap(blend_map))
@@ -1275,7 +1275,7 @@ EidosValue_SP SpatialMap::ExecuteMethod_blend(EidosGlobalStringID p_method_id, c
 	
 	_ValuesChanged();
 	
-	return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Object_singleton(this, gSLiM_SpatialMap_Class));
+	return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Object(this, gSLiM_SpatialMap_Class));
 }
 
 //	*********************	- (object<SpatialMap>)multiply(ifo<SpatialMap> x)
@@ -1298,7 +1298,7 @@ EidosValue_SP SpatialMap::ExecuteMethod_multiply(EidosGlobalStringID p_method_id
 	
 	if ((x_value->Type() == EidosValueType::kValueInt) || (x_value->Type() == EidosValueType::kValueFloat))
 	{
-		double multiply_scalar = x_value->FloatAtIndex(0, nullptr);
+		double multiply_scalar = x_value->NumericAtIndex_NOCAST(0, nullptr);
 		
 		// FIXME: TO BE PARALLELIZED
 		for (int64_t i = 0; i < values_size_; ++i)
@@ -1306,7 +1306,7 @@ EidosValue_SP SpatialMap::ExecuteMethod_multiply(EidosGlobalStringID p_method_id
 	}
 	else
 	{
-		SpatialMap *multiply_map = (SpatialMap *)x_value->ObjectElementAtIndex(0, nullptr);
+		SpatialMap *multiply_map = (SpatialMap *)x_value->ObjectElementAtIndex_NOCAST(0, nullptr);
 		double *multiply_map_values = multiply_map->values_;
 		
 		if (!IsCompatibleWithMap(multiply_map))
@@ -1319,7 +1319,7 @@ EidosValue_SP SpatialMap::ExecuteMethod_multiply(EidosGlobalStringID p_method_id
 	
 	_ValuesChanged();
 	
-	return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Object_singleton(this, gSLiM_SpatialMap_Class));
+	return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Object(this, gSLiM_SpatialMap_Class));
 }
 
 //	*********************	- (object<SpatialMap>)subtract(ifo<SpatialMap> x)
@@ -1342,7 +1342,7 @@ EidosValue_SP SpatialMap::ExecuteMethod_subtract(EidosGlobalStringID p_method_id
 	
 	if ((x_value->Type() == EidosValueType::kValueInt) || (x_value->Type() == EidosValueType::kValueFloat))
 	{
-		double subtract_scalar = x_value->FloatAtIndex(0, nullptr);
+		double subtract_scalar = x_value->NumericAtIndex_NOCAST(0, nullptr);
 		
 		// FIXME: TO BE PARALLELIZED
 		for (int64_t i = 0; i < values_size_; ++i)
@@ -1350,7 +1350,7 @@ EidosValue_SP SpatialMap::ExecuteMethod_subtract(EidosGlobalStringID p_method_id
 	}
 	else
 	{
-		SpatialMap *subtract_map = (SpatialMap *)x_value->ObjectElementAtIndex(0, nullptr);
+		SpatialMap *subtract_map = (SpatialMap *)x_value->ObjectElementAtIndex_NOCAST(0, nullptr);
 		double *subtract_map_values = subtract_map->values_;
 		
 		if (!IsCompatibleWithMap(subtract_map))
@@ -1363,7 +1363,7 @@ EidosValue_SP SpatialMap::ExecuteMethod_subtract(EidosGlobalStringID p_method_id
 	
 	_ValuesChanged();
 	
-	return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Object_singleton(this, gSLiM_SpatialMap_Class));
+	return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Object(this, gSLiM_SpatialMap_Class));
 }
 
 //	*********************	- (object<SpatialMap>)divide(ifo<SpatialMap> x)
@@ -1386,7 +1386,7 @@ EidosValue_SP SpatialMap::ExecuteMethod_divide(EidosGlobalStringID p_method_id, 
 	
 	if ((x_value->Type() == EidosValueType::kValueInt) || (x_value->Type() == EidosValueType::kValueFloat))
 	{
-		double divide_scalar = x_value->FloatAtIndex(0, nullptr);
+		double divide_scalar = x_value->NumericAtIndex_NOCAST(0, nullptr);
 		
 		// FIXME: TO BE PARALLELIZED
 		for (int64_t i = 0; i < values_size_; ++i)
@@ -1394,7 +1394,7 @@ EidosValue_SP SpatialMap::ExecuteMethod_divide(EidosGlobalStringID p_method_id, 
 	}
 	else
 	{
-		SpatialMap *divide_map = (SpatialMap *)x_value->ObjectElementAtIndex(0, nullptr);
+		SpatialMap *divide_map = (SpatialMap *)x_value->ObjectElementAtIndex_NOCAST(0, nullptr);
 		double *divide_map_values = divide_map->values_;
 		
 		if (!IsCompatibleWithMap(divide_map))
@@ -1407,7 +1407,7 @@ EidosValue_SP SpatialMap::ExecuteMethod_divide(EidosGlobalStringID p_method_id, 
 	
 	_ValuesChanged();
 	
-	return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Object_singleton(this, gSLiM_SpatialMap_Class));
+	return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Object(this, gSLiM_SpatialMap_Class));
 }
 
 //	*********************	- (object<SpatialMap>)power(ifo<SpatialMap> x)
@@ -1430,7 +1430,7 @@ EidosValue_SP SpatialMap::ExecuteMethod_power(EidosGlobalStringID p_method_id, c
 	
 	if ((x_value->Type() == EidosValueType::kValueInt) || (x_value->Type() == EidosValueType::kValueFloat))
 	{
-		double power_scalar = x_value->FloatAtIndex(0, nullptr);
+		double power_scalar = x_value->NumericAtIndex_NOCAST(0, nullptr);
 		
 		// FIXME: TO BE PARALLELIZED
 		for (int64_t i = 0; i < values_size_; ++i)
@@ -1438,7 +1438,7 @@ EidosValue_SP SpatialMap::ExecuteMethod_power(EidosGlobalStringID p_method_id, c
 	}
 	else
 	{
-		SpatialMap *power_map = (SpatialMap *)x_value->ObjectElementAtIndex(0, nullptr);
+		SpatialMap *power_map = (SpatialMap *)x_value->ObjectElementAtIndex_NOCAST(0, nullptr);
 		double *power_map_values = power_map->values_;
 		
 		if (!IsCompatibleWithMap(power_map))
@@ -1451,7 +1451,7 @@ EidosValue_SP SpatialMap::ExecuteMethod_power(EidosGlobalStringID p_method_id, c
 	
 	_ValuesChanged();
 	
-	return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Object_singleton(this, gSLiM_SpatialMap_Class));
+	return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Object(this, gSLiM_SpatialMap_Class));
 }
 
 //	*********************	- (object<SpatialMap>)exp(void)
@@ -1465,7 +1465,7 @@ EidosValue_SP SpatialMap::ExecuteMethod_exp(EidosGlobalStringID p_method_id, con
 	
 	_ValuesChanged();
 	
-	return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Object_singleton(this, gSLiM_SpatialMap_Class));
+	return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Object(this, gSLiM_SpatialMap_Class));
 }
 
 //	*********************	- (void)changeColors([Nif valueRange = NULL], [Ns color = NULL])
@@ -1494,7 +1494,7 @@ EidosValue_SP SpatialMap::ExecuteMethod_changeValues(EidosGlobalStringID p_metho
 			EIDOS_TERMINATION << "ERROR (SpatialMap::ExecuteMethod_changeValues): changeValues() requires that if x is of type object, it must be a singleton SpatialMap." << EidosTerminate();
 		
 		// If passed a SpatialMap object, we copy its values directly
-		SpatialMap *x = (SpatialMap *)x_value->ObjectElementAtIndex(0, nullptr);
+		SpatialMap *x = (SpatialMap *)x_value->ObjectElementAtIndex_NOCAST(0, nullptr);
 		
 		if (IsCompatibleWithMapValues(x))
 		{
@@ -1525,7 +1525,7 @@ EidosValue_SP SpatialMap::ExecuteMethod_changeValues(EidosGlobalStringID p_metho
 EidosValue_SP SpatialMap::ExecuteMethod_gridValues(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter)
 {
 #pragma unused (p_method_id, p_arguments, p_interpreter)
-	EidosValue_Float_vector *float_result = (new (gEidosValuePool->AllocateChunk()) EidosValue_Float_vector())->resize_no_initialize(values_size_);
+	EidosValue_Float *float_result = (new (gEidosValuePool->AllocateChunk()) EidosValue_Float())->resize_no_initialize(values_size_);
 	
 	if (spatiality_ == 1)
 	{
@@ -1562,14 +1562,14 @@ EidosValue_SP SpatialMap::ExecuteMethod_interpolate(EidosGlobalStringID p_method
 {
 #pragma unused (p_method_id, p_arguments, p_interpreter)
 	EidosValue *factor_value = p_arguments[0].get();
-	int64_t factor = factor_value->IntAtIndex(0, nullptr);
+	int64_t factor = factor_value->IntAtIndex_NOCAST(0, nullptr);
 	
 	// the upper limit here is arbitrary, but the goal is to prevent users from blowing up their memory usage unintentionally
 	if ((factor < 2) || (factor > 10001))
 		EIDOS_TERMINATION << "ERROR (SpatialMap::ExecuteMethod_interpolate): interpolate() requires factor to be in [2, 10001], rather arbitrarily." << EidosTerminate();
 	
 	EidosValue_String *method_value = (EidosValue_String *)p_arguments[1].get();
-	const std::string &method_string = method_value->StringRefAtIndex(0, nullptr);
+	const std::string &method_string = method_value->StringRefAtIndex_NOCAST(0, nullptr);
 	int method;
 	
 	if (method_string == "nearest")
@@ -1842,7 +1842,7 @@ EidosValue_SP SpatialMap::ExecuteMethod_interpolate(EidosGlobalStringID p_method
 		}
 	}
 	
-	return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Object_singleton(this, gSLiM_SpatialMap_Class));
+	return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Object(this, gSLiM_SpatialMap_Class));
 }
 
 //	*********************	- (string)mapColor(numeric value)
@@ -1857,12 +1857,12 @@ EidosValue_SP SpatialMap::ExecuteMethod_mapColor(EidosGlobalStringID p_method_id
 		EIDOS_TERMINATION << "ERROR (SpatialMap::ExecuteMethod_mapColor): mapColor() no color map defined for spatial map." << EidosTerminate();
 	
 	int value_count = values->Count();
-	EidosValue_String_vector *string_return = (new (gEidosValuePool->AllocateChunk()) EidosValue_String_vector())->Reserve(value_count);
+	EidosValue_String *string_return = (new (gEidosValuePool->AllocateChunk()) EidosValue_String())->Reserve(value_count);
 	EidosValue_SP result_SP = EidosValue_SP(string_return);
 	
 	for (slim_popsize_t value_index = 0; value_index < value_count; value_index++)
 	{
-		double value = values->FloatAtIndex(value_index, nullptr);
+		double value = values->NumericAtIndex_NOCAST(value_index, nullptr);
 		double rgb[3];
 		char hex_chars[8];
 		
@@ -1890,15 +1890,15 @@ EidosValue_SP SpatialMap::ExecuteMethod_mapImage(EidosGlobalStringID p_method_id
 	int64_t image_width = grid_size_[0], image_height = grid_size_[1];
 	
 	if (width_value->Type() != EidosValueType::kValueNULL)
-		image_width = width_value->IntAtIndex(0, nullptr);
+		image_width = width_value->IntAtIndex_NOCAST(0, nullptr);
 	
 	if (height_value->Type() != EidosValueType::kValueNULL)
-		image_height = height_value->IntAtIndex(0, nullptr);
+		image_height = height_value->IntAtIndex_NOCAST(0, nullptr);
 	
 	if ((image_width <= 0) || (image_width > 100000) || (image_height <= 0) || (image_height > 100000))
 		EIDOS_TERMINATION << "ERROR (SpatialMap::ExecuteMethod_mapImage): mapImage() requires width and height values to be in [1, 100000]." << EidosTerminate();
 	
-	bool color = color_value->LogicalAtIndex(0, nullptr);
+	bool color = color_value->LogicalAtIndex_NOCAST(0, nullptr);
 	
 	if (color && (n_colors_ == 0))
 		EIDOS_TERMINATION << "ERROR (SpatialMap::ExecuteMethod_mapImage): mapImage() requires a defined color map for the spatial map with color=T; use color=F to get a grayscale image, or define a color map in SpatialMap()." << EidosTerminate();
@@ -1906,7 +1906,7 @@ EidosValue_SP SpatialMap::ExecuteMethod_mapImage(EidosGlobalStringID p_method_id
 	EidosImage *image = new EidosImage(image_width, image_height, !color);
 	unsigned char * const data = image->Data();
 	unsigned char *data_ptr = data;
-	bool centers = centers_value->LogicalAtIndex(0, nullptr);
+	bool centers = centers_value->LogicalAtIndex_NOCAST(0, nullptr);
 	
 	if (centers)
 	{
@@ -1977,7 +1977,7 @@ EidosValue_SP SpatialMap::ExecuteMethod_mapImage(EidosGlobalStringID p_method_id
 		}
 	}
 	
-	EidosValue_SP result_SP(EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Object_singleton(image, gEidosImage_Class)));
+	EidosValue_SP result_SP(EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Object(image, gEidosImage_Class)));
 	
 	// image is now retained by result_SP, so we can release it
 	image->Release();
@@ -1992,90 +1992,309 @@ EidosValue_SP SpatialMap::ExecuteMethod_mapValue(EidosGlobalStringID p_method_id
 #pragma unused (p_method_id, p_arguments, p_interpreter)
 	EidosValue *point = p_arguments[0].get();
 	
-	EidosValue_Float_vector *float_result = nullptr;
-	EidosValue_Float_singleton *float_singleton_result = nullptr;
-	
 	// Note that point is required to already be in terms of our spatiality; if we are an "xz" map, it must contain "xz" values
-	int x_count;
-	
-	if (point->Count() == spatiality_)
-	{
-		x_count = 1;
-		float_singleton_result = (new (gEidosValuePool->AllocateChunk()) EidosValue_Float_singleton(0.0));
-	}
-	else if (point->Count() % spatiality_ == 0)
-	{
-		x_count = point->Count() / spatiality_;
-		float_result = (new (gEidosValuePool->AllocateChunk()) EidosValue_Float_vector())->resize_no_initialize(x_count);
-	}
-	else
+	// Also note that we clamp coordinates here, whether they are periodic or not; the caller should use pointPeriodic()
+	if (point->Count() % spatiality_ != 0)
 		EIDOS_TERMINATION << "ERROR (SpatialMap::ExecuteMethod_mapValue): mapValue() length of point must match spatiality of map " << name_ << ", or be a multiple thereof." << EidosTerminate();
 	
-	EIDOS_THREAD_COUNT(gEidos_OMP_threads_SPATIAL_MAP_VALUE);
-#pragma omp parallel for schedule(static) default(none) shared(x_count, float_singleton_result) firstprivate(point, float_result) if(x_count >= EIDOS_OMPMIN_SPATIAL_MAP_VALUE) num_threads(thread_count)
-	for (int value_index = 0; value_index < x_count; ++value_index)
+	int x_count = point->Count() / spatiality_;
+	EidosValue_Float *float_result = (new (gEidosValuePool->AllocateChunk()) EidosValue_Float())->resize_no_initialize(x_count);
+	const double *point_data = point->FloatData();
+	
+	// need to parallelize the three loops below separately now; disabling this parallelization for now
+	//EIDOS_THREAD_COUNT(gEidos_OMP_threads_SPATIAL_MAP_VALUE);
+//#pragma omp parallel for schedule(static) default(none) shared(x_count) firstprivate(point_data, float_result) if(x_count >= EIDOS_OMPMIN_SPATIAL_MAP_VALUE) num_threads(thread_count)
+	
+	// It's very common for spatial bounds to be [0, 1] or [0, x] rather than the fully general case,
+	// so we actually optimize all of the cases here
+	
+	switch (spatiality_)	// NOLINT(*-missing-default-case) : our spatiality is always in [1,3], and we can't throw from a parallel region
 	{
-		// We need to use the correct spatial bounds for each coordinate, which depends upon our exact spatiality
-		// There is doubtless a way to make this code smarter, but brute force is sometimes best...
-		// Note that we clamp coordinates here, whether they are periodic or not; the caller should use pointPeriodic()
-		double map_value = 0;
-		
-		switch (spatiality_)	// NOLINT(*-missing-default-case) : our spatiality is always in [1,3], and we can't throw from a parallel region
+		case 1:
 		{
-			case 1:
+			if (!interpolate_)
 			{
-				double point_vec[1];
-				int value_offset = value_index;
-				
-				double a = (point->FloatAtIndex(0 + value_offset, nullptr) - bounds_a0_) / (bounds_a1_ - bounds_a0_);
-				point_vec[0] = SLiMClampCoordinate(a);
-				
-				map_value = ValueAtPoint_S1(point_vec);
-				break;
+				// without interpolation, use the inline version of ValueAtPoint_S1()
+				if (bounds_a0_ == 0.0)
+				{
+					if (bounds_a1_ == 1.0)
+					{
+						for (int value_index = 0; value_index < x_count; ++value_index)
+						{
+							double a = SLiMClampCoordinate(point_data[0 + value_index]);
+							
+							float_result->set_float_no_check(ValueAtPoint_S1_NOINTERPOLATE(a), value_index);
+						}
+					}
+					else
+					{
+						for (int value_index = 0; value_index < x_count; ++value_index)
+						{
+							double a = SLiMClampCoordinate(point_data[0 + value_index] / bounds_a1_);
+							
+							float_result->set_float_no_check(ValueAtPoint_S1_NOINTERPOLATE(a), value_index);
+						}
+					}
+				}
+				else
+				{
+					// full 1D case without interpolation
+					for (int value_index = 0; value_index < x_count; ++value_index)
+					{
+						double a = SLiMClampCoordinate((point_data[0 + value_index] - bounds_a0_) / (bounds_a1_ - bounds_a0_));
+						
+						float_result->set_float_no_check(ValueAtPoint_S1_NOINTERPOLATE(a), value_index);
+					}
+				}
 			}
-			case 2:
+			else
 			{
-				double point_vec[2];
-				int value_offset = value_index * 2;
-				
-				double a = (point->FloatAtIndex(0 + value_offset, nullptr) - bounds_a0_) / (bounds_a1_ - bounds_a0_);
-				point_vec[0] = SLiMClampCoordinate(a);
-				
-				double b = (point->FloatAtIndex(1 + value_offset, nullptr) - bounds_b0_) / (bounds_b1_ - bounds_b0_);
-				point_vec[1] = SLiMClampCoordinate(b);
-				
-				map_value = ValueAtPoint_S2(point_vec);
-				break;
+				if (bounds_a0_ == 0.0)
+				{
+					if (bounds_a1_ == 1.0)
+					{
+						for (int value_index = 0; value_index < x_count; ++value_index)
+						{
+							double point_vec[1];
+							
+							double a = point_data[0 + value_index];
+							point_vec[0] = SLiMClampCoordinate(a);
+							
+							float_result->set_float_no_check(ValueAtPoint_S1(point_vec), value_index);
+						}
+					}
+					else
+					{
+						for (int value_index = 0; value_index < x_count; ++value_index)
+						{
+							double point_vec[1];
+							
+							double a = point_data[0 + value_index] / bounds_a1_;
+							point_vec[0] = SLiMClampCoordinate(a);
+							
+							float_result->set_float_no_check(ValueAtPoint_S1(point_vec), value_index);
+						}
+					}
+				}
+				else
+				{
+					// full 1D case
+					for (int value_index = 0; value_index < x_count; ++value_index)
+					{
+						double point_vec[1];
+						
+						double a = (point_data[0 + value_index] - bounds_a0_) / (bounds_a1_ - bounds_a0_);
+						point_vec[0] = SLiMClampCoordinate(a);
+						
+						float_result->set_float_no_check(ValueAtPoint_S1(point_vec), value_index);
+					}
+				}
 			}
-			case 3:
-			{
-				double point_vec[3];
-				int value_offset = value_index * 3;
-				
-				double a = (point->FloatAtIndex(0 + value_offset, nullptr) - bounds_a0_) / (bounds_a1_ - bounds_a0_);
-				point_vec[0] = SLiMClampCoordinate(a);
-				
-				double b = (point->FloatAtIndex(1 + value_offset, nullptr) - bounds_b0_) / (bounds_b1_ - bounds_b0_);
-				point_vec[1] = SLiMClampCoordinate(b);
-				
-				double c = (point->FloatAtIndex(2 + value_offset, nullptr) - bounds_c0_) / (bounds_c1_ - bounds_c0_);
-				point_vec[2] = SLiMClampCoordinate(c);
-				
-				map_value = ValueAtPoint_S3(point_vec);
-				break;
-			}
+			break;
 		}
-		
-		if (float_result)
-			float_result->set_float_no_check(map_value, value_index);
-		else
-			float_singleton_result->SetValue(map_value);
+		case 2:
+		{
+			if (!interpolate_)
+			{
+				// without interpolation, use the inline version of ValueAtPoint_S2()
+				if ((bounds_a0_ == 0.0) && (bounds_b0_ == 0.0))
+				{
+					if ((bounds_a1_ == 1.0) && (bounds_b1_ == 1.0))
+					{
+						for (int value_index = 0, value_offset = 0; value_index < x_count; ++value_index, value_offset += 2)
+						{
+							double a = SLiMClampCoordinate(point_data[0 + value_offset]);
+							double b = SLiMClampCoordinate(point_data[1 + value_offset]);
+							
+							float_result->set_float_no_check(ValueAtPoint_S2_NOINTERPOLATE(a, b), value_index);
+						}
+					}
+					else
+					{
+						for (int value_index = 0, value_offset = 0; value_index < x_count; ++value_index, value_offset += 2)
+						{
+							double a = SLiMClampCoordinate(point_data[0 + value_offset] / bounds_a1_);
+							double b = SLiMClampCoordinate(point_data[1 + value_offset] / bounds_b1_);
+							
+							float_result->set_float_no_check(ValueAtPoint_S2_NOINTERPOLATE(a, b), value_index);
+						}
+					}
+				}
+				else
+				{
+					// full 2D case without interpolation
+					for (int value_index = 0, value_offset = 0; value_index < x_count; ++value_index, value_offset += 2)
+					{
+						double a = SLiMClampCoordinate((point_data[0 + value_offset] - bounds_a0_) / (bounds_a1_ - bounds_a0_));
+						double b = SLiMClampCoordinate((point_data[1 + value_offset] - bounds_b0_) / (bounds_b1_ - bounds_b0_));
+						
+						float_result->set_float_no_check(ValueAtPoint_S2_NOINTERPOLATE(a, b), value_index);
+					}
+				}
+			}
+			else
+			{
+				if ((bounds_a0_ == 0.0) && (bounds_b0_ == 0.0))
+				{
+					if ((bounds_a1_ == 1.0) && (bounds_b1_ == 1.0))
+					{
+						for (int value_index = 0, value_offset = 0; value_index < x_count; ++value_index, value_offset += 2)
+						{
+							double point_vec[2];
+							
+							double a = point_data[0 + value_offset];
+							point_vec[0] = SLiMClampCoordinate(a);
+							
+							double b = point_data[1 + value_offset];
+							point_vec[1] = SLiMClampCoordinate(b);
+							
+							float_result->set_float_no_check(ValueAtPoint_S2(point_vec), value_index);
+						}
+					}
+					else
+					{
+						for (int value_index = 0, value_offset = 0; value_index < x_count; ++value_index, value_offset += 2)
+						{
+							double point_vec[2];
+							
+							double a = point_data[0 + value_offset] / bounds_a1_;
+							point_vec[0] = SLiMClampCoordinate(a);
+							
+							double b = point_data[1 + value_offset] / bounds_b1_;
+							point_vec[1] = SLiMClampCoordinate(b);
+							
+							float_result->set_float_no_check(ValueAtPoint_S2(point_vec), value_index);
+						}
+					}
+				}
+				else
+				{
+					// full 2D case
+					for (int value_index = 0, value_offset = 0; value_index < x_count; ++value_index, value_offset += 2)
+					{
+						double point_vec[2];
+						
+						double a = (point_data[0 + value_offset] - bounds_a0_) / (bounds_a1_ - bounds_a0_);
+						point_vec[0] = SLiMClampCoordinate(a);
+						
+						double b = (point_data[1 + value_offset] - bounds_b0_) / (bounds_b1_ - bounds_b0_);
+						point_vec[1] = SLiMClampCoordinate(b);
+						
+						float_result->set_float_no_check(ValueAtPoint_S2(point_vec), value_index);
+					}
+				}
+			}
+			break;
+		}
+		case 3:
+		{
+			if (!interpolate_)
+			{
+				// without interpolation, use the inline version of ValueAtPoint_S3()
+				if ((bounds_a0_ == 0.0) && (bounds_b0_ == 0.0) && (bounds_c0_ == 0.0))
+				{
+					if ((bounds_a1_ == 1.0) && (bounds_b1_ == 1.0) && (bounds_c1_ == 1.0))
+					{
+						for (int value_index = 0, value_offset = 0; value_index < x_count; ++value_index, value_offset += 3)
+						{
+							double a = SLiMClampCoordinate(point_data[0 + value_offset]);
+							double b = SLiMClampCoordinate(point_data[1 + value_offset]);
+							double c = SLiMClampCoordinate(point_data[2 + value_offset]);
+							
+							float_result->set_float_no_check(ValueAtPoint_S3_NOINTERPOLATE(a, b, c), value_index);
+						}
+					}
+					else
+					{
+						for (int value_index = 0, value_offset = 0; value_index < x_count; ++value_index, value_offset += 3)
+						{
+							double a = SLiMClampCoordinate(point_data[0 + value_offset] / bounds_a1_);
+							double b = SLiMClampCoordinate(point_data[1 + value_offset] / bounds_b1_);
+							double c = SLiMClampCoordinate(point_data[2 + value_offset] / bounds_c1_);
+							
+							float_result->set_float_no_check(ValueAtPoint_S3_NOINTERPOLATE(a, b, c), value_index);
+						}
+					}
+				}
+				else
+				{
+					// full 3D case without interpolation
+					for (int value_index = 0, value_offset = 0; value_index < x_count; ++value_index, value_offset += 3)
+					{
+						double a = SLiMClampCoordinate((point_data[0 + value_offset] - bounds_a0_) / (bounds_a1_ - bounds_a0_));
+						double b = SLiMClampCoordinate((point_data[1 + value_offset] - bounds_b0_) / (bounds_b1_ - bounds_b0_));
+						double c = SLiMClampCoordinate((point_data[2 + value_offset] - bounds_c0_) / (bounds_c1_ - bounds_c0_));
+						
+						float_result->set_float_no_check(ValueAtPoint_S3_NOINTERPOLATE(a, b, c), value_index);
+					}
+				}
+			}
+			else
+			{
+				if ((bounds_a0_ == 0.0) && (bounds_b0_ == 0.0) && (bounds_c0_ == 0.0))
+				{
+					if ((bounds_a1_ == 1.0) && (bounds_b1_ == 1.0) && (bounds_c1_ == 1.0))
+					{
+						for (int value_index = 0, value_offset = 0; value_index < x_count; ++value_index, value_offset += 3)
+						{
+							double point_vec[3];
+							
+							double a = point_data[0 + value_offset];
+							point_vec[0] = SLiMClampCoordinate(a);
+							
+							double b = point_data[1 + value_offset];
+							point_vec[1] = SLiMClampCoordinate(b);
+							
+							double c = point_data[2 + value_offset];
+							point_vec[2] = SLiMClampCoordinate(c);
+							
+							float_result->set_float_no_check(ValueAtPoint_S3(point_vec), value_index);
+						}
+					}
+					else
+					{
+						for (int value_index = 0, value_offset = 0; value_index < x_count; ++value_index, value_offset += 3)
+						{
+							double point_vec[3];
+							
+							double a = point_data[0 + value_offset] / bounds_a1_;
+							point_vec[0] = SLiMClampCoordinate(a);
+							
+							double b = point_data[1 + value_offset] / bounds_b1_;
+							point_vec[1] = SLiMClampCoordinate(b);
+							
+							double c = point_data[2 + value_offset] / bounds_c1_;
+							point_vec[2] = SLiMClampCoordinate(c);
+							
+							float_result->set_float_no_check(ValueAtPoint_S3(point_vec), value_index);
+						}
+					}
+				}
+				else
+				{
+					// full 3D case
+					for (int value_index = 0, value_offset = 0; value_index < x_count; ++value_index, value_offset += 3)
+					{
+						double point_vec[3];
+						
+						double a = (point_data[0 + value_offset] - bounds_a0_) / (bounds_a1_ - bounds_a0_);
+						point_vec[0] = SLiMClampCoordinate(a);
+						
+						double b = (point_data[1 + value_offset] - bounds_b0_) / (bounds_b1_ - bounds_b0_);
+						point_vec[1] = SLiMClampCoordinate(b);
+						
+						double c = (point_data[2 + value_offset] - bounds_c0_) / (bounds_c1_ - bounds_c0_);
+						point_vec[2] = SLiMClampCoordinate(c);
+						
+						float_result->set_float_no_check(ValueAtPoint_S3(point_vec), value_index);
+					}
+				}
+			}
+			break;
+		}
 	}
 	
-	if (float_result)
-		return EidosValue_SP(float_result);
-	else
-		return EidosValue_SP(float_singleton_result);
+	return EidosValue_SP(float_result);
 }
 
 //	*********************	- (float)range(void)
@@ -2083,7 +2302,7 @@ EidosValue_SP SpatialMap::ExecuteMethod_mapValue(EidosGlobalStringID p_method_id
 EidosValue_SP SpatialMap::ExecuteMethod_range(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter)
 {
 #pragma unused (p_method_id, p_arguments, p_interpreter)
-	EidosValue_Float_vector *float_result = (new (gEidosValuePool->AllocateChunk()) EidosValue_Float_vector())->resize_no_initialize(2);
+	EidosValue_Float *float_result = (new (gEidosValuePool->AllocateChunk()) EidosValue_Float())->resize_no_initialize(2);
 	
 	float_result->set_float_no_check(values_min_, 0);
 	float_result->set_float_no_check(values_max_, 1);
@@ -2099,8 +2318,8 @@ EidosValue_SP SpatialMap::ExecuteMethod_rescale(EidosGlobalStringID p_method_id,
 	EidosValue *min_value = p_arguments[0].get();
 	EidosValue *max_value = p_arguments[1].get();
 	
-	double min = min_value->FloatAtIndex(0, nullptr);
-	double max = max_value->FloatAtIndex(0, nullptr);
+	double min = min_value->NumericAtIndex_NOCAST(0, nullptr);
+	double max = max_value->NumericAtIndex_NOCAST(0, nullptr);
 	
 	if (!std::isfinite(min) || !std::isfinite(max) || (min >= max))
 		EIDOS_TERMINATION << "ERROR (SpatialMap::ExecuteMethod_rescale): rescale() requires that min and max are finite, and that min < max." << EidosTerminate(nullptr);
@@ -2118,7 +2337,7 @@ EidosValue_SP SpatialMap::ExecuteMethod_rescale(EidosGlobalStringID p_method_id,
 	
 	_ValuesChanged();
 	
-	return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Object_singleton(this, gSLiM_SpatialMap_Class));
+	return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Object(this, gSLiM_SpatialMap_Class));
 }
 
 //	*********************	- (float)sampleImprovedNearbyPoint(float point, float$ maxDistance, string$ functionType, ...)
@@ -2128,18 +2347,30 @@ EidosValue_SP SpatialMap::ExecuteMethod_sampleImprovedNearbyPoint(EidosGlobalStr
 #pragma unused (p_method_id, p_arguments, p_interpreter)
 	// Our arguments go to SpatialKernel::SpatialKernel(), which creates the kernel object that we use
 	EidosValue *point_value = p_arguments[0].get();
-	size_t point_count = point_value->Count();
+	size_t coordinate_count = point_value->Count();
+	
+	if (coordinate_count % spatiality_ != 0)
+		EIDOS_TERMINATION << "ERROR (SpatialMap::ExecuteMethod_sampleImprovedNearbyPoint): sampleImprovedNearbyPoint() requires the length of point to be a multiple of the spatial map's spatiality (i.e., to contain complete points)." << EidosTerminate(nullptr);
+	
+	int point_count = (int)(coordinate_count / spatiality_);
+	
+	if (point_count == 0)
+		return gStaticEidosValue_Float_ZeroVec;
 	
 	EidosValue *maxDistance_value = p_arguments[1].get();
-	double max_distance = maxDistance_value->FloatAtIndex(0, nullptr);
+	double max_distance = maxDistance_value->FloatAtIndex_NOCAST(0, nullptr);
 	
-	SpatialKernel kernel(spatiality_, max_distance, p_arguments, 2, /* p_expect_max_density */ false);	// uses our arguments starting at index 2
+	SpatialKernelType k_type;
+	int k_param_count;
+	int kernel_count = SpatialKernel::PreprocessArguments(spatiality_, max_distance, p_arguments, 2, /* p_expect_max_density */ false, &k_type, &k_param_count);
+	
+	if ((kernel_count != 1) && (kernel_count != point_count))
+		EIDOS_TERMINATION << "ERROR (Subpopulation::ExecuteMethod_sampleImprovedNearbyPoint): sampleImprovedNearbyPoint() requires that the number of spatial kernels defined (by the supplied kernel-definition arguments) either must be 1, or must equal the number of points being processed (" << kernel_count << " kernels defined; " << (int)(point_count / spatiality_) << " individuals processed)." << EidosTerminate();
+	
+	SpatialKernel kernel0(spatiality_, max_distance, p_arguments, 2, 0, /* p_expect_max_density */ false, k_type, k_param_count);	// uses our arguments starting at index 2
 	
 	if (values_min_ < 0.0)
 		EIDOS_TERMINATION << "ERROR (SpatialMap::ExecuteMethod_sampleImprovedNearbyPoint): sampleImprovedNearbyPoint() requires that all map values are non-negative." << EidosTerminate(nullptr);
-	
-	if (point_count % spatiality_ != 0)
-		EIDOS_TERMINATION << "ERROR (SpatialMap::ExecuteMethod_sampleImprovedNearbyPoint): sampleImprovedNearbyPoint() requires the length of point to be a multiple of the spatial map's spatiality (i.e., to contain complete points)." << EidosTerminate(nullptr);
 	
 	// Require all/nothing for periodicity
 	if (((spatiality_ == 2) && (periodic_a_ != periodic_b_)) ||
@@ -2148,22 +2379,19 @@ EidosValue_SP SpatialMap::ExecuteMethod_sampleImprovedNearbyPoint(EidosGlobalStr
 	
 	bool periodic = periodic_a_;	// now guaranteed to apply to all dimensions
 	
-	const EidosValue_Float_vector *point_vec = (point_count == 1) ? nullptr : point_value->FloatVector();
-	double point_singleton = (point_count == 1) ? point_value->FloatAtIndex(0, nullptr) : 0.0;
-	const double *point_buf = (point_count == 1) ? &point_singleton : point_vec->data();
+	const double *point_buf = point_value->FloatData();
 	const double *point_buf_ptr = point_buf;
 	
-	EidosValue_Float_vector *float_result = (new (gEidosValuePool->AllocateChunk()) EidosValue_Float_vector())->resize_no_initialize(point_count);
-	double *result_ptr = float_result->data();
+	EidosValue_Float *float_result = (new (gEidosValuePool->AllocateChunk()) EidosValue_Float())->resize_no_initialize(coordinate_count);
+	double *result_ptr = float_result->data_mutable();
 	gsl_rng *rng = EIDOS_GSL_RNG(omp_get_thread_num());
-	
-	point_count /= spatiality_;
 	
 	if (spatiality_ == 1)
 	{
 		// FIXME: TO BE PARALLELIZED
-		for (size_t point_index = 0; point_index < point_count; point_index++)
+		for (int point_index = 0; point_index < point_count; point_index++)
 		{
+			SpatialKernel kernel((kernel_count == 1) ? kernel0 : SpatialKernel(spatiality_, max_distance, p_arguments, 2, point_index, /* p_expect_max_density */ false, k_type, k_param_count));
 			double point_a = *(point_buf_ptr)++;
 			
 			// displace the point by a draw from the kernel, looping until the displaced point is in bounds
@@ -2210,8 +2438,9 @@ EidosValue_SP SpatialMap::ExecuteMethod_sampleImprovedNearbyPoint(EidosGlobalStr
 	else if (spatiality_ == 2)
 	{
 		// FIXME: TO BE PARALLELIZED
-		for (size_t point_index = 0; point_index < point_count; point_index++)
+		for (int point_index = 0; point_index < point_count; point_index++)
 		{
+			SpatialKernel kernel((kernel_count == 1) ? kernel0 : SpatialKernel(spatiality_, max_distance, p_arguments, 2, point_index, /* p_expect_max_density */ false, k_type, k_param_count));
 			double point_a = *(point_buf_ptr)++;
 			double point_b = *(point_buf_ptr)++;
 			
@@ -2275,8 +2504,9 @@ EidosValue_SP SpatialMap::ExecuteMethod_sampleImprovedNearbyPoint(EidosGlobalStr
 	else // (spatiality_ == 3)
 	{
 		// FIXME: TO BE PARALLELIZED
-		for (size_t point_index = 0; point_index < point_count; point_index++)
+		for (int point_index = 0; point_index < point_count; point_index++)
 		{
+			SpatialKernel kernel((kernel_count == 1) ? kernel0 : SpatialKernel(spatiality_, max_distance, p_arguments, 2, point_index, /* p_expect_max_density */ false, k_type, k_param_count));
 			double point_a = *(point_buf_ptr)++;
 			double point_b = *(point_buf_ptr)++;
 			double point_c = *(point_buf_ptr)++;
@@ -2361,15 +2591,27 @@ EidosValue_SP SpatialMap::ExecuteMethod_sampleNearbyPoint(EidosGlobalStringID p_
 #pragma unused (p_method_id, p_arguments, p_interpreter)
 	// Our arguments go to SpatialKernel::SpatialKernel(), which creates the kernel object that we use
 	EidosValue *point_value = p_arguments[0].get();
-	size_t point_count = point_value->Count();
+	size_t coordinate_count = point_value->Count();
+	
+	if (coordinate_count % spatiality_ != 0)
+		EIDOS_TERMINATION << "ERROR (SpatialMap::ExecuteMethod_sampleNearbyPoint): sampleNearbyPoint() requires the length of point to be a multiple of the spatial map's spatiality (i.e., to contain complete points)." << EidosTerminate(nullptr);
+	
+	int point_count = (int)(coordinate_count / spatiality_);
+	
+	if (point_count == 0)
+		return gStaticEidosValue_Float_ZeroVec;
 	
 	EidosValue *maxDistance_value = p_arguments[1].get();
-	double max_distance = maxDistance_value->FloatAtIndex(0, nullptr);
+	double max_distance = maxDistance_value->FloatAtIndex_NOCAST(0, nullptr);
 	
-	SpatialKernel kernel(spatiality_, max_distance, p_arguments, 2, /* p_expect_max_density */ false);	// uses our arguments starting at index 2
+	SpatialKernelType k_type;
+	int k_param_count;
+	int kernel_count = SpatialKernel::PreprocessArguments(spatiality_, max_distance, p_arguments, 2, /* p_expect_max_density */ false, &k_type, &k_param_count);
 	
-	if (point_count % spatiality_ != 0)
-		EIDOS_TERMINATION << "ERROR (SpatialMap::ExecuteMethod_sampleNearbyPoint): sampleNearbyPoint() requires the length of point to be a multiple of the spatial map's spatiality (i.e., to contain complete points)." << EidosTerminate(nullptr);
+	if ((kernel_count != 1) && (kernel_count != point_count))
+		EIDOS_TERMINATION << "ERROR (Subpopulation::ExecuteMethod_sampleNearbyPoint): sampleNearbyPoint() requires that the number of spatial kernels defined (by the supplied kernel-definition arguments) either must be 1, or must equal the number of points being processed (" << kernel_count << " kernels defined; " << (int)(point_count / spatiality_) << " individuals processed)." << EidosTerminate();
+	
+	SpatialKernel kernel0(spatiality_, max_distance, p_arguments, 2, 0, /* p_expect_max_density */ false, k_type, k_param_count);	// uses our arguments starting at index 2
 	
 	// Require all/nothing for periodicity
 	if (((spatiality_ == 2) && (periodic_a_ != periodic_b_)) ||
@@ -2378,22 +2620,19 @@ EidosValue_SP SpatialMap::ExecuteMethod_sampleNearbyPoint(EidosGlobalStringID p_
 	
 	bool periodic = periodic_a_;	// now guaranteed to apply to all dimensions
 	
-	const EidosValue_Float_vector *point_vec = (point_count == 1) ? nullptr : point_value->FloatVector();
-	double point_singleton = (point_count == 1) ? point_value->FloatAtIndex(0, nullptr) : 0.0;
-	const double *point_buf = (point_count == 1) ? &point_singleton : point_vec->data();
+	const double *point_buf = point_value->FloatData();
 	const double *point_buf_ptr = point_buf;
 	
-	EidosValue_Float_vector *float_result = (new (gEidosValuePool->AllocateChunk()) EidosValue_Float_vector())->resize_no_initialize(point_count);
-	double *result_ptr = float_result->data();
+	EidosValue_Float *float_result = (new (gEidosValuePool->AllocateChunk()) EidosValue_Float())->resize_no_initialize(coordinate_count);
+	double *result_ptr = float_result->data_mutable();
 	gsl_rng *rng = EIDOS_GSL_RNG(omp_get_thread_num());
-	
-	point_count /= spatiality_;
 	
 	if (spatiality_ == 1)
 	{
 		// FIXME: TO BE PARALLELIZED
-		for (size_t point_index = 0; point_index < point_count; point_index++)
+		for (int point_index = 0; point_index < point_count; point_index++)
 		{
+			SpatialKernel kernel((kernel_count == 1) ? kernel0 : SpatialKernel(spatiality_, max_distance, p_arguments, 2, point_index, /* p_expect_max_density */ false, k_type, k_param_count));
 			double point_a = *(point_buf_ptr)++;
 			double displaced_point[1];
 			double map_value;
@@ -2441,8 +2680,9 @@ EidosValue_SP SpatialMap::ExecuteMethod_sampleNearbyPoint(EidosGlobalStringID p_
 	else if (spatiality_ == 2)
 	{
 		// FIXME: TO BE PARALLELIZED
-		for (size_t point_index = 0; point_index < point_count; point_index++)
+		for (int point_index = 0; point_index < point_count; point_index++)
 		{
+			SpatialKernel kernel((kernel_count == 1) ? kernel0 : SpatialKernel(spatiality_, max_distance, p_arguments, 2, point_index, /* p_expect_max_density */ false, k_type, k_param_count));
 			double point_a = *(point_buf_ptr)++;
 			double point_b = *(point_buf_ptr)++;
 			double displaced_point[2];
@@ -2501,9 +2741,9 @@ EidosValue_SP SpatialMap::ExecuteMethod_sampleNearbyPoint(EidosGlobalStringID p_
 	else // (spatiality_ == 3)
 	{
 		// FIXME: TO BE PARALLELIZED
-		for (size_t point_index = 0; point_index < point_count; point_index++)
+		for (int point_index = 0; point_index < point_count; point_index++)
 		{
-			// scale point coordinates to [0, 1]
+			SpatialKernel kernel((kernel_count == 1) ? kernel0 : SpatialKernel(spatiality_, max_distance, p_arguments, 2, point_index, /* p_expect_max_density */ false, k_type, k_param_count));
 			double point_a = *(point_buf_ptr)++;
 			double point_b = *(point_buf_ptr)++;
 			double point_c = *(point_buf_ptr)++;
@@ -2581,9 +2821,17 @@ EidosValue_SP SpatialMap::ExecuteMethod_smooth(EidosGlobalStringID p_method_id, 
 #pragma unused (p_method_id, p_arguments, p_interpreter)
 	// Our arguments go to SpatialKernel::SpatialKernel(), which creates the kernel object that we use
 	EidosValue *maxDistance_value = p_arguments[0].get();
-	double max_distance = maxDistance_value->FloatAtIndex(0, nullptr);
+	double max_distance = maxDistance_value->FloatAtIndex_NOCAST(0, nullptr);
 	
-	SpatialKernel kernel(spatiality_, max_distance, p_arguments, 1, /* p_expect_max_density */ false);	// uses our arguments starting at index 1
+	// SpatialKernel parses and bounds-checks our arguments for us
+	SpatialKernelType k_type;
+	int k_param_count;
+	int kernel_count = SpatialKernel::PreprocessArguments(spatiality_, max_distance, p_arguments, 1, /* p_expect_max_density */ false, &k_type, &k_param_count);
+	
+	if (kernel_count != 1)
+		EIDOS_TERMINATION << "ERROR (SpatialMap::ExecuteMethod_smooth): smooth() requires a single kernel; all kernel definition arguments must be singletons." << EidosTerminate();
+	
+	SpatialKernel kernel(spatiality_, max_distance, p_arguments, 1, 0, /* p_expect_max_density */ false, k_type, k_param_count);	// uses our arguments starting at index 1
 	
 	// Ask the kernel to create a discrete grid of values, at our spatial scale (we define the
 	// relationship between spatial bounds and pixels, used by the kernel to make its grid)
@@ -2606,7 +2854,7 @@ EidosValue_SP SpatialMap::ExecuteMethod_smooth(EidosGlobalStringID p_method_id, 
 	
 	_ValuesChanged();
 	
-	return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Object_singleton(this, gSLiM_SpatialMap_Class));
+	return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Object(this, gSLiM_SpatialMap_Class));
 }
 
 
@@ -2627,7 +2875,7 @@ EidosValue_SP SpatialMap::_DeriveTemporarySpatialMapWithEidosValue(EidosValue *p
 	
 	// make a duplicate of this SpatialMap
 	SpatialMap *objectElement = new SpatialMap("__tempmap__INTERNAL__", *this);
-	EidosValue_SP result_SP = EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Object_singleton(objectElement, gSLiM_SpatialMap_Class));
+	EidosValue_SP result_SP = EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Object(objectElement, gSLiM_SpatialMap_Class));
 	
 	// objectElement is now retained by result_SP, so we can release it
 	objectElement->Release();
@@ -2644,13 +2892,13 @@ EidosValue_SP SpatialMap::_DeriveTemporarySpatialMapWithEidosValue(EidosValue *p
 static EidosValue_SP SLiM_Instantiate_SpatialMap(const std::vector<EidosValue_SP> &p_arguments, __attribute__((unused)) EidosInterpreter &p_interpreter)
 {
 	EidosValue_String *name_value = (EidosValue_String *)p_arguments[0].get();
-	const std::string &name = name_value->StringRefAtIndex(0, nullptr);
+	const std::string &name = name_value->StringRefAtIndex_NOCAST(0, nullptr);
 	
 	EidosValue *map_value = p_arguments[1].get();
-	SpatialMap *map = (SpatialMap *)map_value->ObjectElementAtIndex(0, nullptr);
+	SpatialMap *map = (SpatialMap *)map_value->ObjectElementAtIndex_NOCAST(0, nullptr);
 	
 	SpatialMap *objectElement = new SpatialMap(name, *map);
-	EidosValue_SP result_SP = EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Object_singleton(objectElement, gSLiM_SpatialMap_Class));
+	EidosValue_SP result_SP = EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Object(objectElement, gSLiM_SpatialMap_Class));
 	
 	// objectElement is now retained by result_SP, so we can release it
 	objectElement->Release();
@@ -2712,7 +2960,7 @@ const std::vector<EidosMethodSignature_CSP> *SpatialMap_Class::Methods(void) con
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_changeColors, kEidosValueMaskVOID))->AddNumeric_ON("valueRange", gStaticEidosValueNULL)->AddString_ON("colors", gStaticEidosValueNULL));
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_changeValues, kEidosValueMaskVOID))->AddArg(kEidosValueMaskNumeric | kEidosValueMaskObject, "x", gSLiM_SpatialMap_Class));
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_gridValues, kEidosValueMaskFloat)));
-		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_interpolate, kEidosValueMaskObject | kEidosValueMaskSingleton, gSLiM_SpatialMap_Class))->AddInt_S("factor")->AddString_OS("method", EidosValue_String_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String_singleton("linear"))));
+		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_interpolate, kEidosValueMaskObject | kEidosValueMaskSingleton, gSLiM_SpatialMap_Class))->AddInt_S("factor")->AddString_OS("method", EidosValue_String_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String("linear"))));
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_mapColor, kEidosValueMaskString))->AddNumeric("value"));
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_mapImage, kEidosValueMaskObject | kEidosValueMaskSingleton, gEidosImage_Class))->AddInt_OSN(gEidosStr_width, gStaticEidosValueNULL)->AddInt_OSN(gEidosStr_height, gStaticEidosValueNULL)->AddLogical_OS("centers", gStaticEidosValue_LogicalF)->AddLogical_OS(gEidosStr_color, gStaticEidosValue_LogicalT));
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_mapValue, kEidosValueMaskFloat))->AddFloat("point"));

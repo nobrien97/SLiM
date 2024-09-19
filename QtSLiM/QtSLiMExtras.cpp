@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 7/28/2019.
-//  Copyright (c) 2019-2023 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2019-2024 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -39,8 +39,12 @@
 #include <QAbstractTextDocumentLayout>
 #include <QPalette>
 #include <QApplication>
+#include <QDateTime>
 #include <QDebug>
 #include <cmath>
+
+#include <string>
+#include <algorithm>
 
 #include "QtSLiMPreferences.h"
 #include "QtSLiMAppDelegate.h"
@@ -652,6 +656,14 @@ QString attributedStringForByteCount(uint64_t bytes, double total, QTextCharForm
 	return byteString;
 }
 
+QString slimDateline(void)
+{
+    QDateTime dateTime = QDateTime::currentDateTime();
+    QString dateTimeString = dateTime.toString("M/d/yy, h:mm:ss AP");        // format: 3/28/20, 8:03:09 PM
+    
+    return QString("# %1").arg(dateTimeString);
+}
+
 // Running a panel to obtain numbers from the user
 // The goal here is to avoid a proliferation of dumb forms, by programmatically generating the UI
 
@@ -674,7 +686,7 @@ QStringList QtSLiMRunLineEditArrayDialog(QWidget *p_parent, QString title, QStri
         QLabel *titleLabel = new QLabel(dialog);
         QFont font;
         font.setBold(true);
-        font.setWeight(75);
+        font.setWeight(QFont::Bold);    // used to be 75, which made little sense; fixed for Qt6
         titleLabel->setText(title);
         titleLabel->setFont(font);
         verticalLayout->addWidget(titleLabel);
@@ -748,7 +760,7 @@ QStringList QtSLiMRunLineEditArrayDialog(QWidget *p_parent, QString title, QStri
     {
         QStringList returnList;
         
-        for (QLineEdit *lineEdit : lineEdits)
+        for (QLineEdit *lineEdit : qAsConst(lineEdits))
             returnList.append(lineEdit->text());
         
         delete dialog;
@@ -1195,6 +1207,134 @@ void QtSLiMFlashHighlightInTextEdit(QPlainTextEdit *te)
     QTimer::singleShot(delayMillisec * 3, te, [te]() { te->setPalette(qApp->palette(te)); });
 }
 
+// A QLabel that shows shortened text with an ellipsis; see https://stackoverflow.com/a/73316405/2752221
+QtSLiMEllipsisLabel::QtSLiMEllipsisLabel(QWidget *parent)
+    : QtSLiMEllipsisLabel("", parent)
+{
+}
+
+QtSLiMEllipsisLabel::QtSLiMEllipsisLabel(QString text, QWidget *parent)
+    : QLabel(parent)
+{
+    setText(text);
+}
+
+void QtSLiMEllipsisLabel::setText(QString text)
+{
+    m_text = text;
+    updateText();
+}
+
+QSize QtSLiMEllipsisLabel::minimumSizeHint() const
+{
+    return QSize(0, QLabel::minimumSizeHint().height());
+}
+
+void QtSLiMEllipsisLabel::resizeEvent(QResizeEvent *p_event)
+{
+    QLabel::resizeEvent(p_event);
+    updateText();
+}
+
+void QtSLiMEllipsisLabel::updateText()
+{
+    QFontMetrics metrics(font());
+    QString elided = metrics.elidedText(m_text, Qt::ElideRight, width());
+    QLabel::setText(elided);
+}
+
+void QtSLiMEllipsisLabel::mousePressEvent(QMouseEvent *p_event)
+{
+    // check the mouse position and only take the click if it is within the displayed label's extent
+    QPoint curPoint = p_event->pos();
+    int clickX = curPoint.x();
+    
+    QFontMetrics metrics(font());
+    int labelLength = metrics.size(0, text()).width();
+    
+    if ((clickX >= 0) && (clickX <= labelLength + 1))
+        emit pressed();     // triggers QtSLiMWindow::jumpToPopupButtonPressed()
+}
+
+// Natural sorting (sorting numerically when the first difference is a numeric substring)
+bool EidosNaturalSort(QString &a, QString &b)
+{
+    QChar *aptr = a.data();
+    int alen = a.length();
+    
+    QChar *bptr = b.data();
+    int blen = b.length();
+    
+    do {
+        // look for a shared non-numeric prefix and remove it
+        while ((alen >= 1) && (blen >= 1))
+        {
+            QChar ach = *aptr;
+            QChar bch = *bptr;
+            
+            if ((ach == bch) && !ach.isDigit())
+            {
+                aptr++;
+                alen--;
+                
+                bptr++;
+                blen--;
+            }
+            else break;
+        }
+        
+        // parse a leading integer from both strings
+        bool anum = false;
+        int aval = 0;
+        
+        while ((alen >= 1) && aptr->isDigit())
+        {
+            char ach = aptr->toLatin1();    // we assume that if isDigit() is true, the digit is ASCII
+            
+            if ((ach >= '0') && (ach <= '9'))
+            {
+                aval = aval * 10 + (ach - '0');
+                aptr++;
+                alen--;
+                anum = true;
+            }
+        }
+        
+        bool bnum = false;
+        int bval = 0;
+        
+        while ((blen >= 1) && bptr->isDigit())
+        {
+            char bch = bptr->toLatin1();    // we assume that if isDigit() is true, the digit is ASCII
+            
+            if ((bch >= '0') && (bch <= '9'))
+            {
+                bval = bval * 10 + (bch - '0');
+                bptr++;
+                blen--;
+                bnum = true;
+            }
+        }
+        
+        // look for a shared numeric (integer) prefix
+        if (anum && bnum)
+        {
+            // if a numeric prefix is present in both, compare numerically
+            if (aval != bval)
+            {
+                return aval < bval;
+            }
+            // else if the numeric prefixes are identical, drop through and repeat the process
+        }
+        else
+        {
+            // if one or both strings do not have a numeric prefix, compare alphabetically
+            return a < b;
+        }
+    } while (true);
+    
+    return a < b;
+}
 
 
 

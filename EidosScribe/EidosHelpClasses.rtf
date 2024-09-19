@@ -130,7 +130,7 @@
 \f3\fs18 Dictionary
 \f4\fs20 , like 
 \f3\fs18 DataFrame
-\f4\fs20 ) to make a copy, or with a singleton string in JSON format.  See the 
+\f4\fs20 ) to make a copy, or with a string in JSON format.  See the 
 \f3\fs18 Dictionary
 \f4\fs20  class for further documentation.  However, note that 
 \f3\fs18 DataFrame
@@ -567,11 +567,19 @@ Another alternative is to call
 \f4\fs20  to copy key-value pairs over; it is just a shorthand for convenience.\
 A final alternative is to call 
 \f3\fs18 Dictionary()
-\f4\fs20  with a singleton 
+\f4\fs20  with a 
 \f3\fs18 string
-\f4\fs20  as its only argument; this creates a new 
+\f4\fs20  vector as its only argument; this creates a new 
 \f3\fs18 Dictionary
-\f4\fs20  from the string, assuming that it is a data archive in JSON format.  Note that a JSON string can be generated from the 
+\f4\fs20  from the string, assuming that it is a data archive in JSON format.  If the 
+\f3\fs18 string
+\f4\fs20  value is not a singleton, its elements will be joined together by newlines to make a singleton 
+\f3\fs18 string
+\f4\fs20  value; this allows the result from 
+\f3\fs18 readFile()
+\f4\fs20  to be passed directly to 
+\f3\fs18 Dictionary()
+\f4\fs20  even for a multiline (prettyprinted) JSON file.  Note that a JSON string can be generated from the 
 \f3\fs18 serialize()
 \f4\fs20  method of 
 \f3\fs18 Dictionary
@@ -915,7 +923,7 @@ Note that if
 \f4\fs20  parameter: 
 \f3\fs18 "slim"
 \f4\fs20  and 
-\f3\fs18 \'93json"
+\f3\fs18 "json"
 \f4\fs20  produce a singleton string, whereas 
 \f3\fs18 "csv"
 \f4\fs20  and 
@@ -955,14 +963,53 @@ The default
 \f3\fs18 '"string1"=\{int1=value1;int2=value2;\};'
 \f4\fs20 .  Keys that are of type 
 \f3\fs18 string
-\f4\fs20  will be quoted (always; note that this is a change in behavior starting in SLiM 5.0) and backslash-escaped (as needed, as for 
+\f4\fs20  will be quoted (always; note that this is a change in behavior starting in SLiM 4.1) and backslash-escaped (as needed, as for 
 \f3\fs18 string
 \f4\fs20  values); keys that are of type 
 \f3\fs18 integer
 \f4\fs20  are not quoted.  No facility for parsing 
 \f3\fs18 "slim"
 \f4\fs20  serializations back into Eidos is presently provided.\
-The 
+For a more extended example, here is an input 
+\f3\fs18 Dictionary
+\f4\fs20 , assigned into a variable 
+\f3\fs18 x
+\f4\fs20 :\
+\pard\tx990\tx1260\tx1530\tx1800\tx2070\tx2340\pardeftab720\li907\sb180\sa180\partightenfactor0
+
+\f3\fs18 \cf2 x = Dictionary("a", 17, "b", 1:5, "c", c("foo", "bar"),\uc0\u8232                   "d", Dictionary("seq", 1.5:5),\u8232                   "e", Dictionary());\
+\pard\pardeftab397\li547\ri720\sb60\sa60\partightenfactor0
+
+\f4\fs20 \cf2 and here is the result of 
+\f3\fs18 x.serialize("json")
+\f4\fs20 , omitting the enclosing quotes that would indicate that this is a 
+\f3\fs18 string
+\f4\fs20  value:\
+\pard\tx990\tx1260\tx1530\tx1800\tx2070\tx2340\pardeftab720\li907\sb180\sa180\partightenfactor0
+
+\f3\fs18 \cf2 "a"=17;"b"=1 2 3 4 5;"c"="foo" "bar";"d"=\{"seq"=1.5 2.5 3.5 4.5;\};"e"=\{\};\
+\pard\pardeftab397\li547\ri720\sb60\sa60\partightenfactor0
+
+\f4\fs20 \cf2 The 
+\f3\fs18 "pretty"
+\f4\fs20  format is intended for human-readable output, for purposes such as debugging output.  It is similar to the 
+\f3\fs18 "slim"
+\f4\fs20  format, but (1)\'a0it prints an enclosing set of braces at the top level, (2)\'a0it adds newlines inside braces, (3)\'a0it tracks an indentation level that increments for nested dictionaries, (4)\'a0it adds whitespace it some positions for readability, such as around the equals signs that separate keys from values, and (5)\'a0it omits the semicolon at the end of a value, adding a newline instead.  No facility for parsing 
+\f3\fs18 "pretty"
+\f4\fs20  serializations back into Eidos is presently provided.\
+For the same extended example 
+\f3\fs18 Dictionary
+\f4\fs20  as above, here is the result of 
+\f3\fs18 x.serialize("pretty")
+\f4\fs20 , again omitting the enclosing quotes that would indicate that this is a 
+\f3\fs18 string
+\f4\fs20  value:\
+\pard\tx990\tx1260\tx1530\tx1800\tx2070\tx2340\pardeftab720\li907\sb180\sa180\partightenfactor0
+
+\f3\fs18 \cf2 \{\uc0\u8232    "a" = 17\u8232    "b" = 1 2 3 4 5\u8232    "c" = "foo" "bar"\u8232    "d" = \{\u8232       "seq" = 1.5 2.5 3.5 4.5\u8232    \}\u8232    "e" = \{\}\u8232 \}\
+\pard\pardeftab397\li547\ri720\sb60\sa60\partightenfactor0
+
+\f4\fs20 \cf2 The 
 \f3\fs18 "json"
 \f4\fs20  format, introduced in Eidos 2.7 (SLiM 3.7), provides serialization of the 
 \f3\fs18 Dictionary

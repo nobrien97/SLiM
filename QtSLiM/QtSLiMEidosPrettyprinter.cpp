@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 8/1/2019.
-//  Copyright (c) 2019-2023 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2019-2024 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -24,6 +24,10 @@
 #include <QString>
 #include <QChar>
 #include <QDebug>
+
+#include <string>
+#include <algorithm>
+#include <vector>
 
 
 static int Eidos_indentForStack(std::vector<const EidosToken *> &indentStack, bool startingNewStatement, EidosTokenType nextTokenType)
@@ -150,7 +154,7 @@ bool Eidos_prettyprintTokensFromScript(const std::vector<EidosToken> &tokens, Ei
 			{
                 // We use QString to get intelligent treatment of Unicode and UTF-8; std::string is just too dumb.
                 // In SLiMGui this is done with NSString.  We want to count newlines in a mac/unix/windows agnostic way.
-                QString q_tokenString = QString::fromStdString(tokenString);
+                const QString q_tokenString = QString::fromStdString(tokenString);
                 int newlineCount = 0;
                 bool prevWasCR = false, prevWasLF = false;
                 

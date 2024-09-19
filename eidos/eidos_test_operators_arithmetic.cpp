@@ -3,7 +3,7 @@
 //  Eidos
 //
 //  Created by Ben Haller on 7/11/20.
-//  Copyright (c) 2020-2023 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2020-2024 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -66,6 +66,7 @@ void _RunOperatorPlusTests1(void)
 	EidosAssertScriptSuccess_SV("'foo'+c('bar', 'baz');", {"foobar", "foobaz"});
 	EidosAssertScriptSuccess_SV("c('bar', 'baz')+'foo';", {"barfoo", "bazfoo"});
 	EidosAssertScriptSuccess_SV("c('bar', 'baz')+c('foo', 'biz');", {"barfoo", "bazbiz"});
+	EidosAssertScriptRaise("c('bar', 'baz')+c('foo', 'biz', 'boz');", 15, "operator requires that either");
 	EidosAssertScriptSuccess_SV("c('bar', 'baz')+T;", {"barT", "bazT"});
 	EidosAssertScriptSuccess_SV("F+c('bar', 'baz');", {"Fbar", "Fbaz"});
 	EidosAssertScriptRaise("T+F;", 1, "combination of operand types");

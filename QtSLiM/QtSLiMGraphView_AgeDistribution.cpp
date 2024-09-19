@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 8/30/2020.
-//  Copyright (c) 2020-2023 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2020-2024 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -27,6 +27,9 @@
 #include <QGuiApplication>
 #include <QDebug>
 
+#include <string>
+#include <algorithm>
+
 #include "QtSLiMWindow.h"
 #include "subpopulation.h"
 
@@ -36,8 +39,11 @@ QtSLiMGraphView_AgeDistribution::QtSLiMGraphView_AgeDistribution(QWidget *p_pare
     histogramBinCount_ = 10;        // max age (no age 0 since we display after tick increment); this rescales automatically
     allowBinCountRescale_ = false;
     
-    xAxisMin_ = 0;
-    xAxisMax_ = histogramBinCount_;
+    x0_ = 0;
+    x1_ = histogramBinCount_;
+    
+    xAxisMin_ = x0_;
+    xAxisMax_ = x1_;
     xAxisHistogramStyle_ = true;
     xAxisTickValuePrecision_ = 0;
     tweakXAxisTickLabelAlignment_ = true;
@@ -86,6 +92,7 @@ void QtSLiMGraphView_AgeDistribution::subpopulation1PopupChanged(int /* index */
         // Reset our autoscaling x axis
         histogramBinCount_ = 10;
         xAxisMax_ = histogramBinCount_;
+        x1_ = xAxisMax_;               // the same as xAxisMax_, for base plots
         
         invalidateCachedData();
         update();
@@ -103,9 +110,11 @@ void QtSLiMGraphView_AgeDistribution::controllerRecycled(void)
     // Reset our autoscaling x axis
     histogramBinCount_ = 10;
     xAxisMax_ = histogramBinCount_;
+    x1_ = xAxisMax_;               // the same as xAxisMax_, for base plots
     
     // Reset our autoscaling y axis
     yAxisMax_ = 1.0;
+    y1_ = yAxisMax_;               // the same as yAxisMax_, for base plots
     yAxisMajorTickInterval_ = 0.5;
     yAxisMinorTickInterval_ = 0.25;
     
@@ -167,6 +176,7 @@ void QtSLiMGraphView_AgeDistribution::drawGraph(QPainter &painter, QRect interio
         {
             histogramBinCount_ = binCount;
             xAxisMax_ = histogramBinCount_;
+            x1_ = xAxisMax_;               // the same as xAxisMax_, for base plots
             invalidateCachedData();
         }
         
@@ -182,6 +192,7 @@ void QtSLiMGraphView_AgeDistribution::drawGraph(QPainter &painter, QRect interio
                 ((ceilingFreq < yAxisMax_) && (maxFreq + 0.05 < ceilingFreq)))    // require a margin of error to jump down
         {
             yAxisMax_ = ceilingFreq;
+            y1_ = yAxisMax_;               // the same as yAxisMax_, for base plots
             yAxisMajorTickInterval_ = ceilingFreq / 2.0;
             yAxisMinorTickInterval_ = ceilingFreq / 4.0;
         }
@@ -205,11 +216,8 @@ QtSLiMLegendSpec QtSLiMGraphView_AgeDistribution::legendKey(void)
     {
         QtSLiMLegendSpec legend_key;
         
-        legend_key.resize(2);
-        legend_key[0].first = "M";
-        legend_key[0].second = controller_->blackContrastingColorForIndex(0);
-        legend_key[1].first = "F";
-        legend_key[1].second = controller_->blackContrastingColorForIndex(1);
+        legend_key.emplace_back("M", controller_->blackContrastingColorForIndex(0));
+        legend_key.emplace_back("F", controller_->blackContrastingColorForIndex(1));
         
         return legend_key;
     }
@@ -250,6 +258,8 @@ void QtSLiMGraphView_AgeDistribution::appendStringForData(QString &string)
             for (int i = 0; i < binCount; ++i)
                 string.append(QString("%1, ").arg(ageDist[i], 0, 'f', 4));
         }
+        
+        free(ageDist);
     }
     
     string.append("\n");
@@ -270,6 +280,9 @@ double *QtSLiMGraphView_AgeDistribution::ageDistribution(int *binCount, bool tal
     for (const Individual *individual : subpop1->CurrentIndividuals())
         maxAge = std::max(maxAge, individual->age_);
     
+    // compare to the logic in QtSLiMGraphView_LifetimeReproduction::reproductionDistribution();
+    // it is different here because we subtract 1 from every age in the tallying code below,
+    // there is no bin for age==0, and age==1 goes into bin #0; confusing!
     if (maxAge > *binCount)
         *binCount = (slim_age_t)(std::ceil(maxAge / 10.0) * 10.0);
     

@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 02/06/2021.
-//  Copyright (c) 2021-2023 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2021-2024 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -22,11 +22,18 @@
 
 #include <QWidget>
 
+#include <vector>
+#include <string>
+
+#include "eidos_globals.h"
+
 
 class QCloseEvent;
 class QtSLiMWindow;
 class QtSLiMTextEdit;
 class QTableWidget;
+class QTableWidgetItem;
+class LogFile;
 
 
 namespace Ui {
@@ -50,6 +57,9 @@ public:
     void takeLogFileOutput(std::vector<std::string> &lineElements, const std::string &path);
     void takeFileOutput(std::vector<std::string> &lines, bool append, const std::string &path);
     
+    EidosValue_SP dataForColumn(LogFile *logFile, int64_t columnIndex);
+    EidosValue_SP dataForColumn(LogFile *logFile, const std::string &columnName);
+    
 public slots:
     void clearAllOutput(void);
     void clearOutputClicked(void);
@@ -69,6 +79,7 @@ private slots:
     virtual void closeEvent(QCloseEvent *p_event) override;
     void clearOutputPressed(void);
     void clearOutputReleased(void);
+    void logFileRightClick(const QPoint &pos);
     
 private:
     Ui::QtSLiMDebugOutputWindow *ui;
@@ -77,6 +88,8 @@ private:
     std::vector<std::string> logfilePaths;
     std::vector<QTableWidget *> logfileViews;
     std::vector<size_t> logfileLineNumbers;
+    
+    QTableWidget *logFileTableForPath(const std::string &path);
     
     // all the ordinary file paths we have seen, from writeFile() and similar, and output views
     std::vector<std::string> filePaths;

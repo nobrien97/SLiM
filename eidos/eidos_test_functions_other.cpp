@@ -3,7 +3,7 @@
 //  Eidos
 //
 //  Created by Ben Haller on 7/11/20.
-//  Copyright (c) 2020-2023 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2020-2024 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -47,6 +47,50 @@ void _RunFunctionMatrixArrayTests(void)
 	EidosAssertScriptSuccess_L("identical(cbind(matrix(1:6, nrow=2), matrix(7:12, nrow=2)), matrix(1:12, nrow=2));", true);
 	EidosAssertScriptSuccess_L("identical(cbind(matrix(1:6, ncol=2), matrix(7:12, ncol=2)), matrix(1:12, nrow=3));", true);
 	EidosAssertScriptSuccess_L("identical(cbind(matrix(1:6, nrow=1), matrix(7:12, nrow=1)), matrix(1:12, nrow=1));", true);
+	
+	// diag()
+	EidosAssertScriptRaise("diag(array(5, c(1, 1, 1)));", 0, "a vector or a matrix");
+	EidosAssertScriptRaise("diag(matrix(5), nrow=1);", 0, "must be NULL");
+	EidosAssertScriptRaise("diag(matrix(5), ncol=1);", 0, "must be NULL");
+	EidosAssertScriptSuccess_IV("diag(matrix(5));", {5});
+	EidosAssertScriptSuccess_IV("diag(matrix(1:10, ncol=5));", {1, 4});
+	EidosAssertScriptSuccess_IV("diag(t(matrix(1:10, ncol=5)));", {1, 4});
+	EidosAssertScriptSuccess_IV("diag(matrix(1:16, ncol=4));", {1, 6, 11, 16});
+	EidosAssertScriptSuccess_IV("diag(t(matrix(1:16, ncol=4)));", {1, 6, 11, 16});
+	
+	EidosAssertScriptRaise("diag(ncol=3);", 0, "one of four specific");
+	EidosAssertScriptRaise("diag(nrow=0);", 0, "matrix must be >= 1");
+	EidosAssertScriptRaise("diag(nrow=1, ncol=0);", 0, "matrix must be >= 1");
+	EidosAssertScriptSuccess_L("d = diag(nrow=1); identical(d, matrix(1));", true);
+	EidosAssertScriptSuccess_L("d = diag(nrow=3); identical(d, matrix(c(1, 0, 0, 0, 1, 0, 0, 0, 1), nrow=3, ncol=3));", true);
+	EidosAssertScriptSuccess_L("d = diag(nrow=3, ncol=2); identical(d, matrix(c(1, 0, 0, 0, 1, 0), nrow=3, ncol=2));", true);
+	EidosAssertScriptSuccess_L("d = diag(nrow=2, ncol=3); identical(d, matrix(c(1, 0, 0, 1, 0, 0), nrow=2, ncol=3));", true);
+	
+	EidosAssertScriptRaise("diag(T);", 0, "one of four specific");
+	EidosAssertScriptRaise("diag(F);", 0, "one of four specific");
+	EidosAssertScriptRaise("diag(1.5);", 0, "one of four specific");
+	EidosAssertScriptRaise("diag('foo');", 0, "one of four specific");
+	EidosAssertScriptRaise("diag(0);", 0, "size must be >= 1");
+	EidosAssertScriptSuccess_L("d = diag(1); identical(d, matrix(1));", true);
+	EidosAssertScriptSuccess_L("d = diag(3); identical(d, matrix(c(1, 0, 0, 0, 1, 0, 0, 0, 1), nrow=3, ncol=3));", true);
+	
+	EidosAssertScriptSuccess_L("d = diag(c(1,4)); identical(d, matrix(c(1, 0, 0, 4), nrow=2));", true);
+	EidosAssertScriptSuccess_L("d = diag(c(1,4), ncol=3); identical(d, matrix(c(1, 0, 0, 4, 0, 0), nrow=2));", true);
+	EidosAssertScriptRaise("diag(c(1,4), nrow=3);", 0, "truncated or recycled");
+	EidosAssertScriptSuccess_L("d = diag(c(1,4), nrow=3, ncol=2); identical(d, matrix(c(1, 0, 0, 0, 4, 0), nrow=3));", true);
+	EidosAssertScriptSuccess_L("d = diag(c(1,4), nrow=2, ncol=3); identical(d, matrix(c(1, 0, 0, 4, 0, 0), nrow=2));", true);
+	EidosAssertScriptRaise("diag(c(1,4), nrow=3, ncol=3);", 0, "truncated or recycled");
+	EidosAssertScriptRaise("diag(c(1,4), nrow=1);", 0, "truncated or recycled");
+	EidosAssertScriptRaise("diag(c(1,4), ncol=1);", 0, "truncated or recycled");
+	
+	EidosAssertScriptSuccess_L("d = diag(c(1.0,4)); identical(d, matrix(c(1.0, 0, 0, 4), nrow=2));", true);
+	EidosAssertScriptSuccess_L("d = diag(c(1.0,4), ncol=3); identical(d, matrix(c(1.0, 0, 0, 4, 0, 0), nrow=2));", true);
+	EidosAssertScriptRaise("diag(c(1.0,4), nrow=3);", 0, "truncated or recycled");
+	EidosAssertScriptSuccess_L("d = diag(c(1.0,4), nrow=3, ncol=2); identical(d, matrix(c(1.0, 0, 0, 0, 4, 0), nrow=3));", true);
+	EidosAssertScriptSuccess_L("d = diag(c(1.0,4), nrow=2, ncol=3); identical(d, matrix(c(1.0, 0, 0, 4, 0, 0), nrow=2));", true);
+	EidosAssertScriptRaise("diag(c(1.0,4), nrow=3, ncol=3);", 0, "truncated or recycled");
+	EidosAssertScriptRaise("diag(c(1.0,4), nrow=1);", 0, "truncated or recycled");
+	EidosAssertScriptRaise("diag(c(1.0,4), ncol=1);", 0, "truncated or recycled");
 	
 	// dim()
 	EidosAssertScriptSuccess_NULL("dim(NULL);");
@@ -92,6 +136,17 @@ void _RunFunctionMatrixArrayTests(void)
 	EidosAssertScriptSuccess_L("identical(drop(array(1:6, c(2,1,3))), matrix(1:6, nrow=2));", true);
 	EidosAssertScriptSuccess_L("identical(drop(array(1:12, c(12,1,1))), 1:12);", true);
 	EidosAssertScriptSuccess_L("identical(drop(array(1:12, c(2,3,2))), array(1:12, c(2,3,2)));", true);
+	
+	// lowerTri()
+	EidosAssertScriptRaise("ut = lowerTri(0);", 5, "is not a matrix");
+	EidosAssertScriptSuccess_L("ut = lowerTri(matrix(5)); identical(ut, matrix(F));", true);
+	EidosAssertScriptSuccess_L("ut = lowerTri(matrix(5), T); identical(ut, matrix(T));", true);
+	EidosAssertScriptSuccess_IV("x = matrix(1:16, 4); ut = lowerTri(x); x[c(ut)];", {2, 3, 4, 7, 8, 12});
+	EidosAssertScriptSuccess_IV("x = matrix(1:16, 4); ut = lowerTri(x, T); x[c(ut)];", {1, 2, 3, 4, 6, 7, 8, 11, 12, 16});
+	EidosAssertScriptSuccess_IV("x = matrix(1:12, 3); ut = lowerTri(x); x[c(ut)];", {2, 3, 6});
+	EidosAssertScriptSuccess_IV("x = matrix(1:12, 3); ut = lowerTri(x, T); x[c(ut)];", {1, 2, 3, 5, 6, 9});
+	EidosAssertScriptSuccess_IV("x = matrix(1:12, 4); ut = lowerTri(x); x[c(ut)];", {2, 3, 4, 7, 8, 12});
+	EidosAssertScriptSuccess_IV("x = matrix(1:12, 4); ut = lowerTri(x, T); x[c(ut)];", {1, 2, 3, 4, 6, 7, 8, 11, 12});
 	
 	// matrix()
 	EidosAssertScriptSuccess_IV("matrix(3);", {3});
@@ -231,6 +286,17 @@ void _RunFunctionMatrixArrayTests(void)
 	EidosAssertScriptSuccess_L("identical(t(matrix(1.0:6, ncol=2, byrow=T)), matrix(1.0:6, nrow=2, byrow=F));", true);
 	EidosAssertScriptRaise("t(array(1:24, c(2,3,4)));", 0, "is not a matrix");
 	EidosAssertScriptRaise("t(array(1:48, c(2,3,4,2)));", 0, "is not a matrix");
+	
+	// upperTri()
+	EidosAssertScriptRaise("ut = upperTri(0);", 5, "is not a matrix");
+	EidosAssertScriptSuccess_L("ut = upperTri(matrix(5)); identical(ut, matrix(F));", true);
+	EidosAssertScriptSuccess_L("ut = upperTri(matrix(5), T); identical(ut, matrix(T));", true);
+	EidosAssertScriptSuccess_IV("x = matrix(1:16, 4); ut = upperTri(x); x[c(ut)];", {5, 9, 10, 13, 14, 15});
+	EidosAssertScriptSuccess_IV("x = matrix(1:16, 4); ut = upperTri(x, T); x[c(ut)];", {1, 5, 6, 9, 10, 11, 13, 14, 15, 16});
+	EidosAssertScriptSuccess_IV("x = matrix(1:12, 3); ut = upperTri(x); x[c(ut)];", {4, 7, 8, 10, 11, 12});
+	EidosAssertScriptSuccess_IV("x = matrix(1:12, 3); ut = upperTri(x, T); x[c(ut)];", {1, 4, 5, 7, 8, 9, 10, 11, 12});
+	EidosAssertScriptSuccess_IV("x = matrix(1:12, 4); ut = upperTri(x); x[c(ut)];", {5, 9, 10});
+	EidosAssertScriptSuccess_IV("x = matrix(1:12, 4); ut = upperTri(x, T); x[c(ut)];", {1, 5, 6, 9, 10, 11});
 }
 
 #pragma mark filesystem access
@@ -310,10 +376,11 @@ void _RunColorManipulationTests(void)
 	EidosAssertScriptSuccess_SV("cmColors(4);", {"#80FFFF", "#D4FFFF", "#FFD5FF", "#FF80FF"});
 	EidosAssertScriptSuccess_SV("cmColors(7);", {"#80FFFF", "#AAFFFF", "#D4FFFF", "#FFFFFF", "#FFD5FF", "#FFAAFF", "#FF80FF"});
 	
-	// colors() (we test only palettes 'cm', 'heat', and 'terrain' here)
+	// colors() (only palettes 'cm', 'heat', and 'terrain' get checked for their specific values)
 	EidosAssertScriptRaise("colors(-1, 'cm');", 0, "requires 0 <= x <= 100000");
 	EidosAssertScriptRaise("colors(10000000, 'cm');", 0, "requires 0 <= x <= 100000");
 	EidosAssertScriptRaise("colors(5, 'foo');", 0, "unrecognized color palette name");
+	EidosAssertScriptRaise("colors(c(0, 1), 'cm');", 0, "to be singleton");
 	EidosAssertScriptSuccess("colors(0, 'cm');", gStaticEidosValue_String_ZeroVec);
 	EidosAssertScriptSuccess_SV("colors(1, 'cm');", {"#80FFFF"});
 	EidosAssertScriptSuccess_SV("colors(2, 'cm');", {"#80FFFF", "#FF80FF"});
@@ -330,6 +397,16 @@ void _RunColorManipulationTests(void)
 	EidosAssertScriptSuccess_SV("colors(5, 'heat');", {"#FF0000", "#FF5500", "#FFAA00", "#FFFF00", "#FFFFFF"});
 	EidosAssertScriptSuccess_SV("colors(1, 'terrain');", {"#00A600"});
 	EidosAssertScriptSuccess_SV("colors(5, 'terrain');", {"#00A600", "#63C600", "#E6E600", "#ECB176", "#F2F2F2"});
+	EidosAssertScriptSuccess_L("colors(5, 'parula'); T;", true);
+	EidosAssertScriptSuccess_L("colors(5, 'hot'); T;", true);
+	EidosAssertScriptSuccess_L("colors(5, 'jet'); T;", true);
+	EidosAssertScriptSuccess_L("colors(5, 'turbo'); T;", true);
+	EidosAssertScriptSuccess_L("colors(5, 'gray'); T;", true);
+	EidosAssertScriptSuccess_L("colors(5, 'magma'); T;", true);
+	EidosAssertScriptSuccess_L("colors(5, 'inferno'); T;", true);
+	EidosAssertScriptSuccess_L("colors(5, 'plasma'); T;", true);
+	EidosAssertScriptSuccess_L("colors(5, 'viridis'); T;", true);
+	EidosAssertScriptSuccess_L("colors(5, 'cividis'); T;", true);
 	
 	// heatColors()
 	EidosAssertScriptRaise("heatColors(-1);", 0, "requires 0 <= n <= 100000");
@@ -681,6 +758,9 @@ void _RunFunctionMiscTests(const std::string &temp_path)
 	
 	// clock()
 	EidosAssertScriptSuccess_L("c = clock(); isFloat(c);", true);
+	EidosAssertScriptSuccess_L("c = clock('cpu'); isFloat(c);", true);
+	EidosAssertScriptSuccess_L("c = clock('mono'); isFloat(c);", true);
+	EidosAssertScriptRaise("clock('foo');", 0, "unrecognized clock type");
 	
 	// date()
 	EidosAssertScriptSuccess_I("size(strsplit(date(), '-'));", 3);
@@ -697,6 +777,17 @@ void _RunFunctionMiscTests(const std::string &temp_path)
 	EidosAssertScriptRaise("defineConstant('foo', 5:10); defineConstant('foo', 5:10); sum(foo);", 29, "is already defined");
 	EidosAssertScriptRaise("foo = 5:10; defineConstant('foo', 5:10); sum(foo);", 12, "is already defined");
 	EidosAssertScriptRaise("defineConstant('foo', 5:10); rm('foo');", 29, "cannot be removed");
+	EidosAssertScriptSuccess_I("defineConstant('foo', _Test(5)); foo._yolk;", 5);
+	EidosAssertScriptRaise("defineConstant('foo', _TestNRR(5)); foo._yolk;", 0, "retain/release");	// leaks due to _TestNRR, not a bug
+	
+	// defineGlobal()
+	EidosAssertScriptSuccess_I("defineGlobal('foo', 5:10); sum(foo);", 45);
+	EidosAssertScriptRaise("defineGlobal('T', 5:10);", 0, "cannot be redefined");
+	EidosAssertScriptSuccess_I("defineGlobal('foo', 5:11); defineGlobal('foo', 5:10); sum(foo);", 45);
+	EidosAssertScriptSuccess_I("foo = 5:11; defineGlobal('foo', 5:10); sum(foo);", 45);		// we're in the global namespace anyway
+	EidosAssertScriptRaise("defineGlobal('foo', 5:10); rm('foo'); sum(foo);", 42, "undefined identifier");
+	EidosAssertScriptSuccess_I("defineGlobal('foo', _Test(5)); foo._yolk;", 5);
+	EidosAssertScriptRaise("defineGlobal('foo', _TestNRR(5)); foo._yolk;", 0, "retain/release");	// leaks due to _TestNRR, not a bug
 	
 	// doCall()
 	EidosAssertScriptSuccess_L("abs(doCall('sin', 0.0) - 0) < 0.000001;", true);
@@ -712,6 +803,10 @@ void _RunFunctionMiscTests(const std::string &temp_path)
 	EidosAssertScriptRaise("x=7; executeLambda(c('x^2;', '5;'));", 5, "must be a singleton");
 	EidosAssertScriptRaise("x=7; executeLambda(string(0));", 5, "must be a singleton");
 	EidosAssertScriptSuccess_F("x=7; executeLambda('x=x^2+4;'); x;", 53);
+	EidosAssertScriptSuccess_F("x=7; executeLambda('x=x^2+4;', timed=T); x;", 53);
+	EidosAssertScriptSuccess_F("x=7; executeLambda('x=x^2+4;', timed='cpu'); x;", 53);
+	EidosAssertScriptSuccess_F("x=7; executeLambda('x=x^2+4;', timed='mono'); x;", 53);
+	//EidosAssertScriptRaise("x=7; executeLambda('x=x^2+4;', timed='foo'); x;", 5, "clock type");	// FIXME raise doesn't come through correctly!
 	EidosAssertScriptRaise("executeLambda(NULL);", 0, "cannot be type");
 	EidosAssertScriptRaise("executeLambda(T);", 0, "cannot be type");
 	EidosAssertScriptRaise("executeLambda(3);", 0, "cannot be type");
@@ -869,14 +964,16 @@ void _RunFunctionMiscTests(const std::string &temp_path)
 		#ifdef _WIN32
 		EidosAssertScriptSuccess_S("system('set /a 5 + 5');", "10");
 		EidosAssertScriptSuccess_S("system('set', args=c('/a', '5', '+', '5'));", "10");
-		EidosAssertScriptSuccess_S("system('set /a 5 / 0', stderr=T);", "Divide by zero error.");
+		// BCH 2/16/2024: This is a continuing source of confusion since the "Divide by zero error" is localization-specific.  Commenting out; not worth it.
+		//EidosAssertScriptSuccess_S("system('set /a 5 / 0', stderr=T);", "Divide by zero error.");
 		EidosAssertScriptSuccess_S("system('echo foo');", "foo");
 		// input doesn't currently work because ofstream() fails
 		EidosAssertScriptSuccess_SV("system('echo foo&echo bar&echo baz');", {"foo", "bar", "baz"});
 		#else
 		EidosAssertScriptSuccess_S("system('expr 5 + 5');", "10");
 		EidosAssertScriptSuccess_S("system('expr', args=c('5', '+', '5'));", "10");
-		EidosAssertScriptSuccess_L("err = system('expr 5 / 0', stderr=T); (err == 'expr: division by zero') | (err == 'expr: división por cero') | (err == 'expr: division par zéro') | (substr(err, 0, 5) == 'expr: ');", true);	// unfortunately system localization makes the message returned vary
+		// BCH 2/16/2024: This is a continuing source of confusion since the "Divide by zero error" is localization-specific.  Commenting out; not worth it.
+		//EidosAssertScriptSuccess_L("err = system('expr 5 / 0', stderr=T); (err == 'expr: division by zero') | (err == 'expr: división por cero') | (err == 'expr: division par zéro') | (substr(err, 0, 5) == 'expr: ');", true);
 		EidosAssertScriptSuccess_S("system('printf foo');", "foo");
 		EidosAssertScriptSuccess_S("system(\"printf 'foo bar baz' | wc -m | sed 's/ //g'\");", "11");
 		EidosAssertScriptSuccess_S("system(\"(wc -l | sed 's/ //g')\", input='foo\\nbar\\nbaz\\n');", "3");
@@ -898,6 +995,10 @@ void _RunFunctionMiscTests(const std::string &temp_path)
 	EidosAssertScriptSuccess_L("usage() >= 0.0;", true);
 	EidosAssertScriptSuccess_L("usage(F) >= 0.0;", true);
 	EidosAssertScriptSuccess_L("usage(T) >= 0.0;", true);
+	EidosAssertScriptSuccess_L("usage('rss') >= 0.0;", true);
+	EidosAssertScriptSuccess_L("usage('rss_peak') >= 0.0;", true);
+	EidosAssertScriptSuccess_L("usage('vm') >= 0.0;", true);
+	EidosAssertScriptRaise("usage('foo') >= 0.0;", 0, "type should be");
 	
 	// version()
 	EidosAssertScriptSuccess_L("type(version(T)) == 'float';", true);
@@ -1139,6 +1240,38 @@ void _RunClassTests(const std::string &temp_path)
 	EidosAssertScriptSuccess_S("x = Dictionary(); x.setValue(5, 1:3); x.setValue(3, 'baz'); x.serialize('slim');", "3=\"baz\";5=1 2 3;");
 	EidosAssertScriptSuccess_S("x = Dictionary(); x.setValue(5, 1:3); y = Dictionary(); y.setValue(20, 1.5); y.setValue(30, T); x.setValue(11, y); x.serialize('slim');", "5=1 2 3;11={20=1.5;30=T;};");
 	
+	EidosAssertScriptSuccess_S("x = Dictionary(); x.serialize('pretty');", "{}");
+	EidosAssertScriptSuccess_S("x = Dictionary(); x.setValue('foo', 1:3); x.serialize('pretty');", R"V0G0N({
+	"foo" = 1 2 3
+})V0G0N");
+	EidosAssertScriptSuccess_S("x = Dictionary(); x.setValue('foo', 1:3); x.setValue('bar', 'baz'); x.serialize('pretty');", R"V0G0N({
+	"bar" = "baz"
+	"foo" = 1 2 3
+})V0G0N");
+	EidosAssertScriptSuccess_S("x = Dictionary(); x.setValue('foo', 1:3); y = Dictionary(); y.setValue('a', 1.5); y.setValue('b', T); x.setValue('xyzzy', y); x.serialize('pretty');", R"V0G0N({
+	"foo" = 1 2 3
+	"xyzzy" = {
+		"a" = 1.5
+		"b" = T
+	}
+})V0G0N");
+	
+	EidosAssertScriptSuccess_S("x = Dictionary(); x.serialize('pretty');", "{}");
+	EidosAssertScriptSuccess_S("x = Dictionary(); x.setValue(5, 1:3); x.serialize('pretty');", R"V0G0N({
+	5 = 1 2 3
+})V0G0N");
+	EidosAssertScriptSuccess_S("x = Dictionary(); x.setValue(5, 1:3); x.setValue(3, 'baz'); x.serialize('pretty');", R"V0G0N({
+	3 = "baz"
+	5 = 1 2 3
+})V0G0N");
+	EidosAssertScriptSuccess_S("x = Dictionary(); x.setValue(5, 1:3); y = Dictionary(); y.setValue(20, 1.5); y.setValue(30, T); x.setValue(11, y); x.serialize('pretty');", R"V0G0N({
+	5 = 1 2 3
+	11 = {
+		20 = 1.5
+		30 = T
+	}
+})V0G0N");
+	
 	EidosAssertScriptSuccess_S("x = Dictionary(); x.serialize('json');", "{}");
 	EidosAssertScriptSuccess_S("x = Dictionary(); x.setValue('foo', 1:3); x.serialize('json');", "{\"foo\":[1,2,3]}");
 	EidosAssertScriptSuccess_S("x = Dictionary(); x.setValue('foo', 1:3); x.setValue('bar', 'baz'); x.serialize('json');", R"V0G0N({"bar":["baz"],"foo":[1,2,3]})V0G0N");
@@ -1225,6 +1358,12 @@ void _RunClassTests(const std::string &temp_path)
 	EidosAssertScriptSuccess_S(R"V0G0N(a = Dictionary('{"a": ["b"]}'); a.serialize('json');)V0G0N", R"V0G0N({"a":["b"]})V0G0N");
 	EidosAssertScriptSuccess_L("a = Dictionary(); a.setValue('logical_empty', logical(0)); a.setValue('logical_T', T); a.setValue('logical_F', F); a.setValue('logical_vector', c(T, F, T, F)); a.setValue('int_empty', integer(0)); a.setValue('int_singleton', 1); a.setValue('int_vector', 1:3); a.setValue('float_empty', float(0)); a.setValue('float_singleton', 1.0); a.setValue('float_vector', 1.0:3); a.setValue('string_empty', string(0)); a.setValue('string_singleton', 'foo'); a.setValue('string_vector', c('foo', 'bar', 'baz')); sa_json = a.serialize('json'); b = Dictionary(sa_json); sb_json = b.serialize('json'); identical(sa_json,sb_json);", true);
 	EidosAssertScriptSuccess_L("x = Dictionary('a', 5:7, 'b', 'foo'); x.setValue('c', Dictionary('d', 18)); y = x.serialize('json'); z = Dictionary(y); z = z.serialize('json'); identical(y, z);", true);
+	
+	EidosAssertScriptSuccess_L("x = Dictionary('a', 1:3, 'b', 2:4); z = Dictionary('{\"a\":[1,2,3],\"b\":[2,3,4]}'); x.identicalContents(z);", true);
+	EidosAssertScriptSuccess_L("x = Dictionary('a', 1:3, 'b', c('foo', 'bar')); z = Dictionary('{\"a\":[1,2,3],\"b\":[\"foo\",\"bar\"]}'); x.identicalContents(z);", true);
+	EidosAssertScriptSuccess_L("x = Dictionary('a', 1:3, 'b', c('foo', 'bar')); z = Dictionary('{\\n   \"a\":[1,2,3],\\n   \"b\":[\"foo\",\"bar\"]\\n}'); x.identicalContents(z);", true);				// multiline string singleton
+	EidosAssertScriptSuccess_L("x = Dictionary('a', 1:3, 'b', c('foo', 'bar')); z = Dictionary(c('{', '   \"a\":[1,2,3],', '   \"b\":[\"foo\",\"bar\"]', '}')); x.identicalContents(z);", true);		// string vector, as from readFile()
+	EidosAssertScriptRaise("Dictionary(c('{', '   \"a\":[1,2,3],', '   \"b\":[\"fo', 'o\",\"bar\"]', '}'));", 0, "valid JSON string");																	// line break inside a JSON string value -- illegal
 	
 	// DataFrame(...)
 	// identicalContents()
@@ -1503,7 +1642,7 @@ void _RunCodeExampleTests(void)
 									fib = c(fib, next_fib);									\
 								}															\
 								fib;",
-							 EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Int_vector{1,1,2,3,5,8,13,21,34,55,89,144,233,377,610,987,1597,2584,4181,6765}));
+							 EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Int{1,1,2,3,5,8,13,21,34,55,89,144,233,377,610,987,1597,2584,4181,6765}));
 	
 	EidosAssertScriptSuccess(	"counter = 12;							\
 								factorial = 1;							\
@@ -1514,7 +1653,7 @@ void _RunCodeExampleTests(void)
 								}										\
 								while (counter > 0);					\
 								factorial;",
-							 EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Int_singleton(479001600)));
+							 EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Int(479001600)));
 	
 	EidosAssertScriptSuccess(	"last = 200;				\
 								p = integer(0);				\
@@ -1528,7 +1667,7 @@ void _RunCodeExampleTests(void)
 									x = x[x % v != 0];		\
 								} while (T);				\
 								c(p, x);",
-							 EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Int_vector{2,3,5,7,11,13,17,19,23,29,31,37,41,43,47,53,59,61,67,71,73,79,83,89,97,101,103,107,109,113,127,131,137,139,149,151,157,163,167,173,179,181,191,193,197,199}));
+							 EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Int{2,3,5,7,11,13,17,19,23,29,31,37,41,43,47,53,59,61,67,71,73,79,83,89,97,101,103,107,109,113,127,131,137,139,149,151,157,163,167,173,179,181,191,193,197,199}));
 }
 
 #pragma mark user-defined functions

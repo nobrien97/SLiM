@@ -3,7 +3,7 @@
 //  SLiM_OpenMP
 //
 //  Created by Benjamin C. Haller on 8/4/20.
-//  Copyright (c) 2014-2023 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2014-2024 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -62,6 +62,19 @@
 #include <errno.h>
 #include <string.h>
 #include <iostream>
+
+
+/*
+ *	For simplicity, ongoing work related to the parallelization of SLiM with OpenMP now resides in the master branch.
+ *	However, multithreaded SLiM is not released, not thoroughly tested, and generally not yet ready for prime time.
+ *	It is not recommended for end-user use, especially not for "production" runs, and the documentation for it is
+ *	not yet public.  Please do not ask for any kind of support for this feature if you choose to experiment with it.
+ *
+ *		- BCH 12/4/2023
+ */
+#ifdef _OPENMP
+#error Building multithreaded SLiM is presently disabled and unsupported.  This feature is still under development.
+#endif
 
 
 // This is the largest number of threads we allow the user to set.  There is no hard limit in the code;

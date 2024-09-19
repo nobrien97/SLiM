@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 12/6/2019.
-//  Copyright (c) 2019-2023 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2019-2024 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -25,7 +25,6 @@
 #include <QKeyEvent>
 #include <QDesktopServices>
 
-#include "QtSLiMWindow.h"
 #include "QtSLiMAppDelegate.h"
 
 

@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 2/28/2022.
-//  Copyright (c) 2022-2023 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2022-2024 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -81,8 +81,11 @@ extern "C" {
 #pragma mark Community
 #pragma mark -
 
-Community::Community(void) : self_symbol_(gID_community, EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Object_singleton(this, gSLiM_Community_Class)))
+Community::Community(void) : self_symbol_(gID_community, EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Object(this, gSLiM_Community_Class)))
 {
+	// self_symbol_ is always a constant, but can't be marked as such on construction
+	self_symbol_.second->MarkAsConstant();
+	
 	// BCH 3/16/2022: We used to allocate the Species object here, as the first thing we did.  In SLiM 4 there can
 	// be multiple species and they can have names other than "sim", so we delay species creation until parse time.
 	
@@ -103,6 +106,11 @@ Community::Community(void) : self_symbol_(gID_community, EidosValue_SP(new (gEid
 Community::~Community(void)
 {
 	//EIDOS_ERRSTREAM << "Community::~Community" << std::endl;
+	
+	// our log file registry retains all log files
+	for (LogFile *log_file : log_file_registry_)
+		log_file->Release();
+	log_file_registry_.clear();
 	
 	all_mutation_types_.clear();
 	all_genomic_element_types_.clear();
@@ -432,6 +440,31 @@ void Community::InitializeFromFile(std::istream &p_infile)
 	gEidosErrorContext.executingRuntimeScript = false;
 }
 
+void Community::FinishInitialization(void)
+{
+	// BCH 7/19/2024: At the very end of initialization of the Community, after script blocks
+	// have been parsed, command-line constants have been defined, etc., we evaluate tick
+	// ranges for script blocks for the first time.  Anything that doesn't involve
+	// defined constants, or involves constants defined on the command line, can already
+	// be evaluated at this time, which makes the appearance of things in SLiMgui cleaner.
+	if (!all_tick_ranges_evaluated_)
+	{
+		// Set up top-level error-reporting info
+		gEidosErrorContext.currentScript = script_;
+		gEidosErrorContext.executingRuntimeScript = false;
+		
+		// Do the tick range evaluation work
+		EvaluateScriptBlockTickRanges();
+		
+		// Reset error position indicators used by SLiMgui
+		ClearErrorPosition();
+		
+		// Zero out error-reporting info so raises elsewhere don't get attributed to this script
+		gEidosErrorContext.currentScript = nullptr;
+		gEidosErrorContext.executingRuntimeScript = false;
+	}
+}
+
 void Community::ValidateScriptBlockCaches(void)
 {
 #if DEBUG_BLOCK_REG_DEREG
@@ -470,6 +503,10 @@ void Community::ValidateScriptBlockCaches(void)
 		
 		for (auto script_block : script_blocks)
 		{
+			// only blocks that have been scheduled are eligible; others have to wait until the next call to EvaluateScriptBlockTickRanges()
+			if (!script_block->tick_range_evaluated_)
+				continue;
+			
 			switch (script_block->type_)
 			{
 				case SLiMEidosBlockType::SLiMEidosEventFirst:				cached_first_events_.emplace_back(script_block);				break;
@@ -484,12 +521,9 @@ void Community::ValidateScriptBlockCaches(void)
 					// in how we look them up, which is good since sometimes we have a very large number of them.
 					// We put those that are registered for just a single tick in a separate vector, which we sort
 					// by tick, allowing us to look them up quickly
-					slim_tick_t start = script_block->start_tick_;
-					slim_tick_t end = script_block->end_tick_;
-					
-					if (start == end)
+					if (script_block->tick_range_is_sequence_ && (script_block->tick_start_ == script_block->tick_end_))
 					{
-						cached_fitnessEffect_callbacks_onetick_.emplace(start, script_block);
+						cached_fitnessEffect_callbacks_onetick_.emplace(script_block->tick_start_, script_block);
 					}
 					else
 					{
@@ -553,9 +587,26 @@ std::vector<SLiMEidosBlock*> Community::ScriptBlocksMatching(slim_tick_t p_tick,
 	
 	for (SLiMEidosBlock *script_block : *block_list)
 	{
-		// check that the tick is in range
-		if ((script_block->start_tick_ > p_tick) || (script_block->end_tick_ < p_tick))
+#if DEBUG_TICK_RANGES
+		// all the blocks here should have an evaluated tick range
+		if (!script_block->tick_range_evaluated_)
+		{
+			std::cout << "### unscheduled block seen in ScriptBlocksMatching()" << std::endl;
 			continue;
+		}
+#endif
+		
+		// check that the tick is in range
+		if (script_block->tick_range_is_sequence_)
+		{
+			if ((p_tick < script_block->tick_start_) || (p_tick > script_block->tick_end_))
+				continue;
+		}
+		else
+		{
+			if (script_block->tick_set_.find(p_tick) == script_block->tick_set_.end())
+				continue;
+		}
 		
 		// check that the script type matches (event, callback, etc.) - now guaranteed by the caching mechanism
 		//if (script_block->type_ != p_event_type)
@@ -1181,7 +1232,7 @@ bool Community::SubpopulationIDInUse(slim_objectid_t p_subpop_id)
 	
 	// First check our own data structures; we now do not allow reuse of subpop ids, even disjoint in time
 	for (Species *species : all_species_)
-		if (species->subpop_ids_.count(p_subpop_id))
+		if (species->used_subpop_ids_.find(p_subpop_id) != species->used_subpop_ids_.end())
 			return true;
 	
 	// Then have each species check for a conflict with its tree-sequence population table
@@ -1199,7 +1250,7 @@ bool Community::SubpopulationNameInUse(const std::string &p_subpop_name)
 	
 	// First check our own data structures; we now do not allow reuse of subpop names, even disjoint in time
 	for (Species *species : all_species_)
-		if (species->subpop_names_.count(p_subpop_name))
+		if (species->used_subpop_names_.count(p_subpop_name))
 			return true;
 	
 	// The tree-sequence population table does not keep names for populations, so no conflicts can occur
@@ -1212,6 +1263,19 @@ Subpopulation *Community::SubpopulationWithID(slim_objectid_t p_subpop_id)
 	for (Species *species : all_species_)
 	{
 		Subpopulation *found_subpop = species->SubpopulationWithID(p_subpop_id);
+		
+		if (found_subpop)
+			return found_subpop;
+	}
+	
+	return nullptr;
+}
+
+Subpopulation *Community::SubpopulationWithName(const std::string &p_subpop_name)
+{
+	for (Species *species : all_species_)
+	{
+		Subpopulation *found_subpop = species->SubpopulationWithName(p_subpop_name);
 		
 		if (found_subpop)
 			return found_subpop;
@@ -1287,7 +1351,7 @@ void Community::InvalidateInteractionsForSubpopulation(Subpopulation *p_invalid_
 		iter.second->InvalidateForSubpopulation(p_invalid_subpop);
 }
 
-Species *Community::SpeciesForIndividualsVector(Individual **individuals, int value_count)
+Species *Community::SpeciesForIndividualsVector(const Individual * const *individuals, int value_count)
 {
 	if (value_count == 0)
 		return nullptr;
@@ -1324,15 +1388,15 @@ Species *Community::SpeciesForIndividuals(EidosValue *value)
 		EIDOS_TERMINATION << "ERROR (Community::SpeciesForIndividuals): (internal error) value is not of class Individual." << EidosTerminate();
 	
 	if (value_count == 1)
-		return &((Individual *)object_value->ObjectElementAtIndex(0, nullptr))->subpopulation_->species_;
+		return &((Individual *)object_value->ObjectElementAtIndex_NOCAST(0, nullptr))->subpopulation_->species_;
 	
-	EidosValue_Object_vector *object_vector_value = (EidosValue_Object_vector *)object_value;
-	Individual **individuals = (Individual **)object_vector_value->data();
+	EidosValue_Object *object_vector_value = (EidosValue_Object *)object_value;
+	const Individual * const *individuals = (Individual **)object_vector_value->data();
 	
 	return Community::SpeciesForIndividualsVector(individuals, value_count);
 }
 
-Species *Community::SpeciesForGenomesVector(Genome **genomes, int value_count)
+Species *Community::SpeciesForGenomesVector(const Genome * const *genomes, int value_count)
 {
 	if (value_count == 0)
 		return nullptr;
@@ -1344,7 +1408,7 @@ Species *Community::SpeciesForGenomesVector(Genome **genomes, int value_count)
 	
 	for (int value_index = 1; value_index < value_count; ++value_index)
 	{
-		Species *species = &genomes[value_index]->OwningIndividual()->subpopulation_->species_;
+		const Species *species = &genomes[value_index]->OwningIndividual()->subpopulation_->species_;
 		
 		if (species != consensus_species)
 			return nullptr;
@@ -1369,15 +1433,15 @@ Species *Community::SpeciesForGenomes(EidosValue *value)
 		EIDOS_TERMINATION << "ERROR (Community::SpeciesForGenomes): (internal error) value is not of class Genome." << EidosTerminate();
 	
 	if (value_count == 1)
-		return &((Genome *)object_value->ObjectElementAtIndex(0, nullptr))->OwningIndividual()->subpopulation_->species_;
+		return &((Genome *)object_value->ObjectElementAtIndex_NOCAST(0, nullptr))->OwningIndividual()->subpopulation_->species_;
 	
-	EidosValue_Object_vector *object_vector_value = (EidosValue_Object_vector *)object_value;
-	Genome **genomes = (Genome **)object_vector_value->data();
+	EidosValue_Object *object_vector_value = (EidosValue_Object *)object_value;
+	const Genome * const *genomes = (Genome **)object_vector_value->data();
 	
 	return Community::SpeciesForGenomesVector(genomes, value_count);
 }
 
-Species *Community::SpeciesForMutationsVector(Mutation **mutations, int value_count)
+Species *Community::SpeciesForMutationsVector(const Mutation * const *mutations, int value_count)
 {
 	if (value_count == 0)
 		return nullptr;
@@ -1414,12 +1478,423 @@ Species *Community::SpeciesForMutations(EidosValue *value)
 		EIDOS_TERMINATION << "ERROR (Community::SpeciesForMutations): (internal error) value is not of class Mutation." << EidosTerminate();
 	
 	if (value_count == 1)
-		return &((Mutation *)object_value->ObjectElementAtIndex(0, nullptr))->mutation_type_ptr_->species_;
+		return &((Mutation *)object_value->ObjectElementAtIndex_NOCAST(0, nullptr))->mutation_type_ptr_->species_;
 	
-	EidosValue_Object_vector *object_vector_value = (EidosValue_Object_vector *)object_value;
-	Mutation **mutations = (Mutation **)object_vector_value->data();
+	EidosValue_Object *object_vector_value = (EidosValue_Object *)object_value;
+	const Mutation * const *mutations = (Mutation **)object_vector_value->data();
 	
 	return Community::SpeciesForMutationsVector(mutations, value_count);
+}
+
+EidosValue_SP Community::_EvaluateTickRangeNode(const EidosASTNode *p_node, std::string &p_error_string)
+{
+	// We have a tick range expression that we need to execute, and it should return an integer value to us.
+	// This is basically a lambda call, so the code here is parallel to the executeLambda() code in many ways.
+	// Additional semantic restrictions are imposed by Community::EvaluateScriptBlockTickRanges().
+	
+	// We consider the tick range to be the union of the ranges of all of the tokens it comprises.
+	// We don't need to do any error-handling in try/catch since we are not creating a new error-handling
+	// scope (the way executing a lambda or a script block does).
+	
+	// Unusually, we want to allow only global constants to be used in tick range expressions;
+	// anything else (context constants like community and sim, global variables, etc.) will
+	// potentially change value, and thus imply that the tick range is dynamically based on
+	// current simulation state, which is not true.  There is still a hole here, in that a
+	// global constant might refer to a Dictionary, and the tick range could reference a
+	// value in that Dictionary that changes dynamically; but that is contrived, and the user
+	// will soon discover that it doesn't work, and I'm not going to worry about it.  Better
+	// would be to have a real concept in Eidos of constant expressions, and require one here.
+	
+	// BCH 7/19/2024: This method can now return nullptr, beware!  It does so if evaluating the
+	// tick range node raises, specifically with an "undefined identifier" warning.  It is then
+	// assumed that that is a global constant that will be defined later, and so we return
+	// nullptr to indicate "not ready yet, try again later".  That particular error is not
+	// reported to the user, since it is not, in fact, an error in this context.  Other raises
+	// will not be caught here and will continue upwards and be reported.
+	
+	EidosSymbolTable *client_symbols = nullptr;
+	
+	{
+		client_symbols = &SymbolTable();
+		
+		while (client_symbols &&
+			   (client_symbols->TableType() != EidosSymbolTableType::kEidosDefinedConstantsTable) &&
+			   (client_symbols->TableType() != EidosSymbolTableType::kEidosIntrinsicConstantsTable))
+			client_symbols = client_symbols->ChainSymbolTable();
+		
+		if (!client_symbols)
+			EIDOS_TERMINATION << "ERROR (Community::_EvaluateTickRangeNode): (internal error) couldn't find the defined constants or intrinsic constants symbol tables." << EidosTerminate(nullptr);
+		
+		//std::cout << std::endl << "Community::_EvaluateTickRangeNode() client_symbols:" << std::endl;
+		//client_symbols->PrintSymbolTableChain(std::cout);
+	}
+	
+	EidosFunctionMap &function_map = FunctionMap();
+	EidosInterpreter interpreter(p_node, *client_symbols, function_map, this, SLIM_OUTSTREAM, SLIM_ERRSTREAM);
+	EidosValue_SP result_SP;
+	
+	// BCH 7/19/2024: Here we enable the use of a special exception, SLiMUndefinedIdentifierException,
+	// when an identifier is undefined inside the tick range expression.  This allows us to catch that
+	// specific exception type and handle it.  This is gross but effective!  I think it works in every
+	// case but x[Y] where x is defined but y is undefined; that will still raise.  Nobody will notice
+	// that they can't defer that specific expression type.  :->  SLiMUndefinedIdentifierException is
+	// raised by _GetValue_SpecialRaise(), a special EidosSymbolTable method that is used to fetch
+	// symbol table values in EidosInterpreter::Evaluate_Identifier() only when a special flag is set
+	// enabling this mode of operation.  We set that flag with SetUseCustomUndefinedIdentifierRaise().
+	// This rather convoluted design is necessary because Eidos normally does not necessarily throw for
+	// errors at all; when running on the command line, it simply logs the error and exits.  So we
+	// needed a special flag to change that behavior to throwing a custom exception in all cases, to
+	// make the interpreter tolerant at runtime of this specific case.
+	interpreter.SetUseCustomUndefinedIdentifierRaise(true);
+	
+	try
+	{
+		result_SP = interpreter.FastEvaluateNode(p_node);
+	}
+	catch (SLiMUndefinedIdentifierException &e)
+	{
+		// for undefined identifiers, cache the name of the undefined constant and return nullptr
+		p_error_string = e.what();
+		return EidosValue_SP();
+	}
+	
+	// no need to set the "custom undefined identifier raise" flag back, it's a local interpreter anyway
+	
+	p_error_string = "";	// no execution error, so clear out any cached error string present
+	
+	EidosValueType result_type = result_SP->Type();
+	
+	if (result_type != EidosValueType::kValueInt)
+		EIDOS_TERMINATION << "ERROR (Community::_EvaluateTickRangeNode): tick range expressions must evaluate to an integer value." << EidosTerminate(p_node->ErrorPositionForNodeAndChildren());
+	
+	int result_count = result_SP->Count();
+	const int64_t *int_data = result_SP->IntData();
+	
+	for (int index = 0; index < result_count; ++index)
+	{
+		int64_t result_element = int_data[index];
+		
+		if ((result_element < 1) || (result_element > SLIM_MAX_TICK))
+			EIDOS_TERMINATION << "ERROR (Community::_EvaluateTickRangeNode): the tick expression " << p_node->token_->token_string_ << " contains an element that is out of range (" << result_element << ")." << EidosTerminate(p_node->ErrorPositionForNodeAndChildren());
+	}
+	
+	return result_SP;
+}
+
+void Community::EvaluateScriptBlockTickRanges()
+{
+	if (all_tick_ranges_evaluated_)
+		EIDOS_TERMINATION << "ERROR (Community::EvaluateScriptBlockTickRanges): (internal error) EvaluateScriptBlockTickRanges() called unexpectedly." << EidosTerminate(nullptr);
+	
+	std::vector<SLiMEidosBlock*> &script_blocks = AllScriptBlocks();
+	
+	// Evaluate tick range expressions to determine the start and end tick for each block
+	// Assume all succeed in evaluating, until one fails
+	all_tick_ranges_evaluated_ = true;
+	
+	for (auto script_block : script_blocks)
+	{
+		if ((script_block->type_ != SLiMEidosBlockType::SLiMEidosInitializeCallback) &&
+			!script_block->tick_range_evaluated_)
+		{
+			const EidosASTNode *start_tick_node = script_block->start_tick_node_;
+			const EidosASTNode *colon_node = script_block->colon_node_;
+			const EidosASTNode *end_tick_node = script_block->end_tick_node_;
+			
+#if DEBUG_TICK_RANGES
+			std::cout << "script block " << *script_block << " (" << script_block << "):";
+			
+			std::cout << "\n  start tick expression:";
+			if (start_tick_node)
+				start_tick_node->PrintTreeWithIndent(std::cout, 2);
+			else
+				std::cout << "\n    -- none --";
+			
+			if (colon_node)
+				std::cout << "\n  colon node present";
+			
+			std::cout << "\n  end tick expression:";
+			if (end_tick_node)
+				end_tick_node->PrintTreeWithIndent(std::cout, 2);
+			else
+				std::cout << "\n    -- none --";
+			
+			std::cout << std::endl;
+#endif
+			
+			if (start_tick_node && colon_node && end_tick_node)
+			{
+				// e.g., 5:10 -- both expressions must evaluate to singletons, AND both must be "primary"/"postfix".  That means they must be a simple
+				// number or identifier, a dot-expression (property access), a bracket-expression (subset), a paren-expression (function or method call),
+				// or an expression that was grouped by parentheses.  The last one is tricky, because the parser doesn't generate a node representing
+				// the grouping parentheses; instead, for this work, I added a flag, was_parenthesized_, that is set on a node if it was originally
+				// inside grouping parentheses.  This flag gets the information we need out of the parser.  This requirement exists in the first place
+				// so that X:Y range expressions don't violate the normal Eidos precedence rules for operator :.  Basically, X and Y both have to be
+				// higher precedence than operator :, so that X:Y and (X):(Y) mean the same thing.  That is what our restrictions guarantee.
+				// See Parse_SLiMEidosBlock() for more comments on this rather complicated problem, which is rooted in wanting to allow the X: and :Y
+				// range syntaxes, as well as wanting to avoid user errors with the (surprising) operator : precedence rules.
+				EidosTokenType start_type = start_tick_node->token_->token_type_;
+				EidosTokenType end_type = end_tick_node->token_->token_type_;
+				
+				if ((start_type != EidosTokenType::kTokenNumber) && (start_type != EidosTokenType::kTokenIdentifier) &&
+					(start_type != EidosTokenType::kTokenDot) && (start_type != EidosTokenType::kTokenLBracket) &&
+					(start_type != EidosTokenType::kTokenLParen) && !start_tick_node->was_parenthesized_)
+					EIDOS_TERMINATION << "ERROR (Community::EvaluateScriptBlockTickRanges): the start and end tick expressions must both be simple expressions (numbers, identifiers, expressions inside parentheses, and similar) when a tick range, X:Y, is used; this avoids precedence issues with the sequence operator, ':'.  To avoid this error, use parentheses to group the start and end tick expressions to make the precedence explicit." << EidosTerminate(start_tick_node->ErrorPositionForNodeAndChildren());
+				
+				if ((end_type != EidosTokenType::kTokenNumber) && (end_type != EidosTokenType::kTokenIdentifier) &&
+					(end_type != EidosTokenType::kTokenDot) && (end_type != EidosTokenType::kTokenLBracket) &&
+					(end_type != EidosTokenType::kTokenLParen) && !end_tick_node->was_parenthesized_)
+					EIDOS_TERMINATION << "ERROR (Community::EvaluateScriptBlockTickRanges): the start and end tick expressions must both be simple expressions (numbers, identifiers, expressions inside parentheses, and similar) when a tick range, X:Y, is used; this avoids precedence issues with the sequence operator, ':'.  To avoid this error, use parentheses to group the left and right sides to make the precedence explicit." << EidosTerminate(end_tick_node->ErrorPositionForNodeAndChildren());
+				
+				EidosValue_SP start_expr_value = _EvaluateTickRangeNode(start_tick_node, script_block->unevaluated_error_string_);
+				
+				if (!start_expr_value)
+				{
+					all_tick_ranges_evaluated_ = false;
+					continue;
+				}
+				
+				EidosValue_SP end_expr_value = _EvaluateTickRangeNode(end_tick_node, script_block->unevaluated_error_string_);
+				
+				if (!end_expr_value)
+				{
+					all_tick_ranges_evaluated_ = false;
+					continue;
+				}
+				
+				if (start_expr_value->Count() != 1)
+					EIDOS_TERMINATION << "ERROR (Community::EvaluateScriptBlockTickRanges): the start and end tick expressions must both evaluate to a singleton integer when a tick range, X:Y, is used." << EidosTerminate(start_tick_node->ErrorPositionForNodeAndChildren());
+				
+				if (end_expr_value->Count() != 1)
+					EIDOS_TERMINATION << "ERROR (Community::EvaluateScriptBlockTickRanges): the start and end tick expressions must both evaluate to a singleton integer when a tick range, X:Y, is used." << EidosTerminate(end_tick_node->ErrorPositionForNodeAndChildren());
+				
+				script_block->tick_range_evaluated_ = true;
+				script_block->tick_range_is_sequence_ = true;
+				script_block->tick_start_ = (slim_tick_t)start_expr_value->IntAtIndex_NOCAST(0, nullptr);
+				script_block->tick_end_ = (slim_tick_t)end_expr_value->IntAtIndex_NOCAST(0, nullptr);
+				script_block->tick_set_.clear();
+				
+				if (script_block->tick_end_ < script_block->tick_start_)
+					EIDOS_TERMINATION << "ERROR (Community::EvaluateScriptBlockTickRanges): the end tick expression " << end_tick_node->token_->token_string_ << " evaluated to be less than the start tick expression " << start_tick_node->token_->token_string_ << " (" << script_block->tick_end_ << " < " << script_block->tick_start_ << ")." << EidosTerminate(end_tick_node->ErrorPositionForNodeAndChildren());
+				
+				// With a specified start tick, it is an error for that start tick
+				// to be past/present, since a fire of the event will be missed
+				if (script_block->tick_start_ <= tick_)
+					EIDOS_TERMINATION << "ERROR (Community::EvaluateScriptBlockTickRanges): the start tick expression " << start_tick_node->token_->token_string_ << " evaluated to " << script_block->tick_start_ << ", which is past/present; the current tick is " << tick_ << ".  This means that the event will not be able to execute in one or more of its scheduled ticks, which is an error." << EidosTerminate(start_tick_node->ErrorPositionForNodeAndChildren());
+				
+#if DEBUG_TICK_RANGES
+				std::cout << "  tick range " << script_block->tick_start_ << " to " << script_block->tick_end_ << std::endl;
+#endif
+			}
+			else if (start_tick_node && colon_node)
+			{
+				// e.g., 5: -- the start expression must evaluate to a singleton
+				EidosValue_SP start_expr_value = _EvaluateTickRangeNode(start_tick_node, script_block->unevaluated_error_string_);
+				
+				if (!start_expr_value)
+				{
+					all_tick_ranges_evaluated_ = false;
+					continue;
+				}
+				
+				if (start_expr_value->Count() != 1)
+					EIDOS_TERMINATION << "ERROR (Community::EvaluateScriptBlockTickRanges): the start tick expression must evaluate to a singleton integer when a tick range, X:, is used." << EidosTerminate(start_tick_node->ErrorPositionForNodeAndChildren());
+				
+				script_block->tick_range_evaluated_ = true;
+				script_block->tick_range_is_sequence_ = true;
+				script_block->tick_start_ = (slim_tick_t)start_expr_value->IntAtIndex_NOCAST(0, nullptr);
+				script_block->tick_end_ = SLIM_MAX_TICK + 1;
+				script_block->tick_set_.clear();
+				
+				// With a specified start tick, it is an error for that start tick
+				// to be past/present, since a fire of the event will be missed
+				if (script_block->tick_start_ <= tick_)
+					EIDOS_TERMINATION << "ERROR (Community::EvaluateScriptBlockTickRanges): the start tick expression " << start_tick_node->token_->token_string_ << " evaluated to " << script_block->tick_start_ << ", which is past/present; the current tick is " << tick_ << ".  This means that the event will not be able to execute in one or more of its scheduled ticks, which is an error." << EidosTerminate(start_tick_node->ErrorPositionForNodeAndChildren());
+				
+#if DEBUG_TICK_RANGES
+				std::cout << "  tick range " << script_block->tick_start_ << " to end." << std::endl;
+#endif
+			}
+			else if (colon_node && end_tick_node)
+			{
+				// e.g., :5 -- the end expression must evaluate to a singleton
+				EidosValue_SP end_expr_value = _EvaluateTickRangeNode(end_tick_node, script_block->unevaluated_error_string_);
+				
+				if (!end_expr_value)
+				{
+					all_tick_ranges_evaluated_ = false;
+					continue;
+				}
+				
+				if (end_expr_value->Count() != 1)
+					EIDOS_TERMINATION << "ERROR (Community::EvaluateScriptBlockTickRanges): the end tick expression must evaluate to a singleton integer when a tick range, :X, is used." << EidosTerminate(start_tick_node->ErrorPositionForNodeAndChildren());
+				
+				script_block->tick_range_evaluated_ = true;
+				script_block->tick_range_is_sequence_ = true;
+				script_block->tick_start_ = 1;
+				script_block->tick_end_ = (slim_tick_t)end_expr_value->IntAtIndex_NOCAST(0, nullptr);
+				script_block->tick_set_.clear();
+				
+				// With an implied start, it is an error for that start tick
+				// to be past/present, since a fire of the event will be missed
+				if (tick_ > 0)
+					EIDOS_TERMINATION << "ERROR (Community::EvaluateScriptBlockTickRanges): with an implied start tick at the start of model execution, the event has missed one or more of its scheduled ticks, which is an error." << EidosTerminate(colon_node->ErrorPositionForNodeAndChildren());
+				
+#if DEBUG_TICK_RANGES
+				std::cout << "  tick range beginning to " << script_block->tick_end_ << "." << std::endl;
+#endif
+			}
+			else if (start_tick_node && !colon_node)
+			{
+				// e.g., 5 -- in this case, the expression may evaluate to a non-singleton integer value, like "seq(1, 100, by=2)"
+				EidosValue_SP expr_value = _EvaluateTickRangeNode(start_tick_node, script_block->unevaluated_error_string_);
+				
+				if (!expr_value)
+				{
+					all_tick_ranges_evaluated_ = false;
+					continue;
+				}
+				
+				const int64_t *expr_data = expr_value->IntData();
+				int expr_count = expr_value->Count();
+				
+				if (expr_count == 0)
+				{
+					// set to run in no ticks; we do this with an empty set
+					script_block->tick_range_evaluated_ = true;
+					script_block->tick_range_is_sequence_ = false;
+					script_block->tick_set_.clear();
+				}
+				else
+				{
+					// if it is a singleton, or a consecutive range, we detect that and handle it efficiently
+					bool is_sequential = true;
+					int64_t first_value = expr_data[0];
+					int64_t prev_value = first_value;
+					
+					for (int index = 1; index < expr_count; ++index)
+					{
+						int64_t value = expr_data[index];
+						
+						if (value != prev_value + 1)
+						{
+							is_sequential = false;
+							break;
+						}
+						
+						prev_value = value;
+					}
+					
+					if (is_sequential)
+					{
+						script_block->tick_range_evaluated_ = true;
+						script_block->tick_range_is_sequence_ = true;
+						script_block->tick_start_ = (slim_tick_t)first_value;
+						script_block->tick_end_ = (slim_tick_t)prev_value;
+						script_block->tick_set_.clear();
+						
+						// With a specified start tick, it is an error for that start tick
+						// to be past/present, since a fire of the event will be missed
+						if (script_block->tick_start_ <= tick_)
+						{
+							if (script_block->tick_start_ == script_block->tick_end_)
+								EIDOS_TERMINATION << "ERROR (Community::EvaluateScriptBlockTickRanges): the tick range expression " << start_tick_node->token_->token_string_ << " evaluated to tick " << script_block->tick_start_ << ", which is past/present; the current tick is " << tick_ << ".  This means that the event will not be able to execute in its scheduled tick, which is an error." << EidosTerminate(start_tick_node->ErrorPositionForNodeAndChildren());
+							else
+								EIDOS_TERMINATION << "ERROR (Community::EvaluateScriptBlockTickRanges): the tick range expression " << start_tick_node->token_->token_string_ << " evaluated to begin in tick " << script_block->tick_start_ << ", which is past/present; the current tick is " << tick_ << ".  This means that the event will not be able to execute in one or more of its scheduled ticks, which is an error." << EidosTerminate(start_tick_node->ErrorPositionForNodeAndChildren());
+						}
+						
+#if DEBUG_TICK_RANGES
+						std::cout << "  tick range " << script_block->tick_start_ << " to " << script_block->tick_end_ << std::endl;
+#endif
+					}
+					else
+					{
+						if (expr_count > 1000000)
+							EIDOS_TERMINATION << "ERROR (Community::EvaluateScriptBlockTickRanges): for efficiency reasons, a non-sequential tick range expression may not contain more than 1,000,000 values; use rescheduleScriptBlock() if you really need to do this, but be aware that it may not perform well.  Often a better solution is to use a sequential range, and test an additional criterion inside the event or callback body." << EidosTerminate(start_tick_node->ErrorPositionForNodeAndChildren());
+						
+						script_block->tick_range_evaluated_ = true;
+						script_block->tick_range_is_sequence_ = false;
+						
+						std::unordered_set<slim_tick_t> &tick_set = script_block->tick_set_;
+						
+						tick_set.clear();
+						
+						for (int index = 0; index < expr_count; ++index)
+						{
+							slim_tick_t tick = (slim_tick_t)expr_data[index];
+							
+							if (tick_set.find(tick) == tick_set.end())
+							{
+								tick_set.emplace(tick);
+								
+								// With a non-sequential range, it is an error for any tick
+								// to be past/present, since a fire of the event will be missed
+								if (tick <= tick_)
+									EIDOS_TERMINATION << "ERROR (Community::EvaluateScriptBlockTickRanges): the tick range expression " << start_tick_node->token_->token_string_ << " evaluated to include tick " << tick << ", which is past/present; the current tick is " << tick_ << ".  This means that the event will not be able to execute in one or more of its scheduled ticks, which is an error." << EidosTerminate(start_tick_node->ErrorPositionForNodeAndChildren());
+							}
+							else
+							{
+								EIDOS_TERMINATION << "ERROR (Community::EvaluateScriptBlockTickRanges): a non-sequential tick range expression may not contain duplicate elements (" << tick << " is duplicated).  Use unique() to remove duplicates if desired." << EidosTerminate(start_tick_node->ErrorPositionForNodeAndChildren());
+							}
+						}
+						
+#if DEBUG_TICK_RANGES
+						std::cout << "  non-sequential tick range (" << tick_set.size() << " elements)." << std::endl;
+#endif
+					}
+				}
+			}
+			else if (!start_tick_node && !colon_node && !end_tick_node)
+			{
+				// no tick specifier -- active in every tick
+				// since there is no dependency on an expression, this will always be evaluated immediately
+				script_block->tick_range_evaluated_ = true;
+				script_block->tick_range_is_sequence_ = true;
+				script_block->tick_start_ = -1;
+				script_block->tick_end_ = SLIM_MAX_TICK + 1;
+				script_block->tick_set_.clear();
+				
+#if DEBUG_TICK_RANGES
+				std::cout << "  tick range is every tick." << std::endl;
+#endif
+			}
+			else
+			{
+				EIDOS_TERMINATION << "ERROR (Community::EvaluateScriptBlockTickRanges): (internal error) unhandled tick range case." << EidosTerminate(nullptr);
+			}
+		}
+	}
+	
+	// Notify the various interested parties that the script blocks have changed
+	last_script_block_tick_cached_ = false;
+	script_block_types_cached_ = false;
+	scripts_changed_ = true;
+	
+	// We are now open for business
+}
+
+void Community::FlagUnevaluatedScriptBlockTickRanges()
+{
+	// This is called at execution end, to error if any script blocks did not execute because their
+	// tick range could not be evaluated; this depends on script_block->unevaluated_error_string_
+	// being set up by _EvaluateTickRangeNode(), based on the error message string set up in
+	// SLiMUndefinedIdentifierException by EidosSymbolTable::_GetValue_SpecialRaise().
+	if (all_tick_ranges_evaluated_)
+		return;
+	
+	std::vector<SLiMEidosBlock*> &script_blocks = AllScriptBlocks();
+	
+	for (auto script_block : script_blocks)
+	{
+		if ((script_block->type_ != SLiMEidosBlockType::SLiMEidosInitializeCallback) &&
+			!script_block->tick_range_evaluated_)
+		{
+			if (!script_block->unevaluated_error_string_.length())
+				EIDOS_TERMINATION << "ERROR (Community::FlagUnevaluatedScriptBlockTickRanges): (internal error) An internal error occurred regarding script block scheduling. Please report this error." << EidosTerminate(script_block->root_node_->ErrorPositionForNodeAndChildren());
+			
+			EIDOS_TERMINATION << "ERROR (Community::FlagUnevaluatedScriptBlockTickRanges): At simulation end, this script block had never been executed because its tick range could never be evaluated.  This was due to a reference to a global constant, " << script_block->unevaluated_error_string_ << ", that was never defined. (Note that variables, including global variables, are not visible in tick range expressions and cannot be used; only global constants may be used.)\n\nIf the non-execution of this script block is intentional, you can avoid this error by calling deregisterScriptBlock() to deregister the block before the simulation ends." << EidosTerminate(script_block->root_node_->ErrorPositionForNodeAndChildren());
+		}
+	}
 }
 
 slim_tick_t Community::FirstTick(void)
@@ -1430,9 +1905,26 @@ slim_tick_t Community::FirstTick(void)
 	// Figure out our first tick; it is the earliest tick in which an Eidos event is set up to run,
 	// since an Eidos event that adds a subpopulation is necessary to get things started
 	for (auto script_block : script_blocks)
-		if (((script_block->type_ == SLiMEidosBlockType::SLiMEidosEventFirst) || (script_block->type_ == SLiMEidosBlockType::SLiMEidosEventEarly) || (script_block->type_ == SLiMEidosBlockType::SLiMEidosEventLate))
-			&& (script_block->start_tick_ < first_tick) && (script_block->start_tick_ > 0))
-			first_tick = script_block->start_tick_;
+	{
+		if ((script_block->type_ == SLiMEidosBlockType::SLiMEidosEventFirst) ||
+			(script_block->type_ == SLiMEidosBlockType::SLiMEidosEventEarly) ||
+			(script_block->type_ == SLiMEidosBlockType::SLiMEidosEventLate))
+		{
+			if (script_block->tick_range_is_sequence_)
+			{
+				if ((script_block->tick_start_ < first_tick) && (script_block->tick_start_ >= 1))
+					first_tick = script_block->tick_start_;
+			}
+			else
+			{
+				for (const auto &tick : script_block->tick_set_)
+				{
+					if ((tick < first_tick) && (tick >= 1))
+						first_tick = tick;
+				}
+			}
+		}
+	}
 	
 	return first_tick;
 }
@@ -1451,8 +1943,19 @@ slim_tick_t Community::EstimatedLastTick(void)
 	// Any block type works, since the simulation could plausibly be stopped within a callback.
 	// However, blocks that do not specify an end tick don't count.
 	for (auto script_block : script_blocks)
-		if ((script_block->end_tick_ > last_tick) && (script_block->end_tick_ != SLIM_MAX_TICK + 1))
-			last_tick = script_block->end_tick_;
+	{
+		if (script_block->tick_range_is_sequence_)
+		{
+			if ((script_block->tick_end_ > last_tick) && (script_block->tick_end_ <= SLIM_MAX_TICK))
+				last_tick = script_block->tick_end_;
+		}
+		else
+		{
+			for (const auto &tick : script_block->tick_set_)
+				if ((tick > last_tick) && (tick <= SLIM_MAX_TICK))
+					last_tick = tick;
+		}
+	}
 	
 	last_script_block_tick_ = last_tick;
 	last_script_block_tick_cached_ = true;
@@ -1606,9 +2109,11 @@ bool Community::_RunOneTick(void)
 		{
 			script_block->block_active_ = 0;			// block is inactive this tick
 			
-			// Check for deactivation causing a block not to execute at all; we consider this an error since it is almost certainly not what the user wants...
-			if ((script_block->start_tick_ == script_block->end_tick_) && (script_block->start_tick_ == tick_))
-				EIDOS_TERMINATION << "ERROR (Community::_RunOneTick): A script block that is scheduled to execute only in a single tick (tick " << tick_ << ") was deactivated in that tick due to a 'species' or 'ticks' specifier in its declaration; the script block will thus not execute at all." << EidosTerminate(script_block->identifier_token_);
+			// Check for deactivation causing a block not to execute at all; we consider this an error since it is almost certainly not what the user wants
+			if (script_block->tick_range_evaluated_)
+				if ((script_block->tick_range_is_sequence_ && (script_block->tick_start_ == script_block->tick_end_) && (script_block->tick_start_ == tick_)) ||
+				(!script_block->tick_range_is_sequence_ && (script_block->tick_set_.size() == 1) && (script_block->tick_set_.find(tick_) == script_block->tick_set_.begin())))
+					EIDOS_TERMINATION << "ERROR (Community::_RunOneTick): A script block that is scheduled to execute only in a single tick (tick " << tick_ << ") was deactivated in that tick due to a 'species' or 'ticks' specifier in its declaration; the script block will thus not execute at all." << EidosTerminate(script_block->identifier_token_);
 		}
 	}
 	
@@ -1682,6 +2187,15 @@ void Community::AllSpecies_RunInitializeCallbacks(void)
 	
 	// we're done with the initialization tick, so remove the zero-tick functions
 	RemoveZeroTickFunctionsFromMap(simulation_functions_);
+	
+	// BCH 3/6/2024: Here is where we now determine the tick ranges for script blocks; we now
+	// do this in a deferred fashion to allow tick ranges to contain constant expressions.
+	// It needs to be done before the call to FirstTick() below so tick ranges are valid.
+	// Nobody should call FirstTick() or EstimatedLastTick() before this point!
+	// BCH 7/19/2024: Note that we will try again in each tick, if some expressions can't be
+	// evaluated right away; but that won't figure into the first tick calculated here.
+	if (!all_tick_ranges_evaluated_)
+		EvaluateScriptBlockTickRanges();
 	
 	// determine the first tick and emit our start log
 	tick_start_ = FirstTick();	// SLIM_MAX_TICK + 1 if it can't find a first block
@@ -2211,18 +2725,20 @@ bool Community::_RunOneTickWF(void)
 		for (LogFile *log_file : log_file_registry_)
 			log_file->TickEndCallout();
 		
+		// BCH 7/19/2024: At the end of each tick we again try to determine the tick ranges
+		// for script blocks; we now do this in a deferred fashion to allow tick ranges to
+		// contain constant expressions, including expressions involving constants that only
+		// get defined later in the run.  We do it at tick end so the result is immediately
+		// visible in SLiMgui.  It must be done before the tick counter increments, and
+		// before the call to EstimatedLastTick() below.
+		if (!all_tick_ranges_evaluated_)
+			EvaluateScriptBlockTickRanges();
+		
 		// Advance the tick and cycle counters (note that tree_seq_tick_ was incremented earlier!)
 		tick_++;
 		for (Species *species : all_species_)
 			if (species->Active())
 				species->AdvanceCycleCounter();
-		
-		// Use a special cycle stage for the interstitial space between ticks, when Eidos console input runs
-		cycle_stage_ = SLiMCycleStage::kStagePostCycle;
-		
-		// Zero out error-reporting info so raises elsewhere don't get attributed to this script
-		gEidosErrorContext.currentScript = nullptr;
-		gEidosErrorContext.executingRuntimeScript = false;
 		
 #if (SLIMPROFILING == 1)
 		// PROFILING
@@ -2267,6 +2783,13 @@ bool Community::_RunOneTickWF(void)
 		
 		if (!result)
 			SimulationHasFinished();
+		
+		// Use a special cycle stage for the interstitial space between ticks, when Eidos console input runs
+		cycle_stage_ = SLiMCycleStage::kStagePostCycle;
+		
+		// Zero out error-reporting info so raises elsewhere don't get attributed to this script
+		gEidosErrorContext.currentScript = nullptr;
+		gEidosErrorContext.executingRuntimeScript = false;
 		
 		return result;
 	}
@@ -2627,6 +3150,15 @@ bool Community::_RunOneTickNonWF(void)
 		for (LogFile *log_file : log_file_registry_)
 			log_file->TickEndCallout();
 		
+		// BCH 7/19/2024: At the end of each tick we again try to determine the tick ranges
+		// for script blocks; we now do this in a deferred fashion to allow tick ranges to
+		// contain constant expressions, including expressions involving constants that only
+		// get defined later in the run.  We do it at tick end so the result is immediately
+		// visible in SLiMgui.  It must be done before the tick counter increments, and
+		// before the call to EstimatedLastTick() below.
+		if (!all_tick_ranges_evaluated_)
+			EvaluateScriptBlockTickRanges();
+		
 		// Advance the tick counter (note that tree_seq_tick_ is incremented after first() events in the next tick!)
 		tick_++;
 		for (Species *species : all_species_)
@@ -2639,13 +3171,6 @@ bool Community::_RunOneTickNonWF(void)
 				for (std::pair<const slim_objectid_t,Subpopulation*> &subpop_pair : species->population_.subpops_)
 					subpop_pair.second->IncrementIndividualAges();
 		}
-		
-		// Use a special cycle stage for the interstitial space between ticks, when Eidos console input runs
-		cycle_stage_ = SLiMCycleStage::kStagePostCycle;
-		
-		// Zero out error-reporting info so raises elsewhere don't get attributed to this script
-		gEidosErrorContext.currentScript = nullptr;
-		gEidosErrorContext.executingRuntimeScript = false;
 		
 #if (SLIMPROFILING == 1)
 		// PROFILING
@@ -2665,6 +3190,13 @@ bool Community::_RunOneTickNonWF(void)
 		if (!result)
 			SimulationHasFinished();
 		
+		// Use a special cycle stage for the interstitial space between ticks, when Eidos console input runs
+		cycle_stage_ = SLiMCycleStage::kStagePostCycle;
+		
+		// Zero out error-reporting info so raises elsewhere don't get attributed to this script
+		gEidosErrorContext.currentScript = nullptr;
+		gEidosErrorContext.executingRuntimeScript = false;
+		
 		return result;
 	}
 }
@@ -2674,6 +3206,9 @@ void Community::SimulationHasFinished(void)
 	// This is an opportunity for final calculation/output when a simulation finishes
 	for (Species *species : all_species_)
 		species->SimulationHasFinished();
+	
+	// Error on any script blocks that never got scheduled
+	FlagUnevaluatedScriptBlockTickRanges();
 }
 
 void Community::TabulateSLiMMemoryUsage_Community(SLiMMemoryUsage_Community *p_usage, EidosSymbolTable *p_current_symbols)

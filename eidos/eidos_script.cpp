@@ -3,7 +3,7 @@
 //  Eidos
 //
 //  Created by Ben Haller on 4/1/15.
-//  Copyright (c) 2015-2023 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2015-2024 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -687,64 +687,8 @@ void EidosScript::Tokenize(bool p_make_bad_tokens, bool p_keep_nonsignificant)
 			if (token_type == EidosTokenType::kTokenIdentifier)
 			{
 				std::string identifierString = script_string_.substr(token_start, token_end - token_start + 1);
-				bool contains_illegal = false;
 				
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunknown-warning-option"
-#pragma GCC diagnostic ignored "-Wbidi-chars"
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wunknown-warning-option"
-#pragma clang diagnostic ignored "-Wbidi-chars"
-				// BCH 8/14/2023: Note that seven lines are commented out below.  They are correct, but they
-				// produce a warning "unpaired UTF-8 bidirectional control character detected [-Wbidi-chars=]",
-				// and disabling the bidi-chars warning does not suppress that warning, annoyingly.  This is
-				// very edge anyhow, so I'm commenting these lines out for now.  A better fix should be
-				// possible, but it doesn't seem worth worrying about for now.
-				contains_illegal = contains_illegal || (identifierString.find("\u2000") != std::string::npos);
-				contains_illegal = contains_illegal || (identifierString.find("\u2001") != std::string::npos);
-				contains_illegal = contains_illegal || (identifierString.find("\u2002") != std::string::npos);
-				contains_illegal = contains_illegal || (identifierString.find("\u2003") != std::string::npos);
-				contains_illegal = contains_illegal || (identifierString.find("\u2004") != std::string::npos);
-				contains_illegal = contains_illegal || (identifierString.find("\u2005") != std::string::npos);
-				contains_illegal = contains_illegal || (identifierString.find("\u2006") != std::string::npos);
-				contains_illegal = contains_illegal || (identifierString.find("\u2007") != std::string::npos);
-				contains_illegal = contains_illegal || (identifierString.find("\u2008") != std::string::npos);
-				contains_illegal = contains_illegal || (identifierString.find("\u2009") != std::string::npos);
-				contains_illegal = contains_illegal || (identifierString.find("\u200a") != std::string::npos);
-				contains_illegal = contains_illegal || (identifierString.find("\u200b") != std::string::npos);
-				contains_illegal = contains_illegal || (identifierString.find("\u200c") != std::string::npos);
-				contains_illegal = contains_illegal || (identifierString.find("\u200d") != std::string::npos);
-				contains_illegal = contains_illegal || (identifierString.find("\u200e") != std::string::npos);
-				contains_illegal = contains_illegal || (identifierString.find("\u200f") != std::string::npos);
-				contains_illegal = contains_illegal || (identifierString.find("\u2028") != std::string::npos);
-				contains_illegal = contains_illegal || (identifierString.find("\u2029") != std::string::npos);
-				//contains_illegal = contains_illegal || (identifierString.find("\u202a") != std::string::npos);
-				//contains_illegal = contains_illegal || (identifierString.find("\u202b") != std::string::npos);
-				contains_illegal = contains_illegal || (identifierString.find("\u202c") != std::string::npos);
-				//contains_illegal = contains_illegal || (identifierString.find("\u202d") != std::string::npos);
-				//contains_illegal = contains_illegal || (identifierString.find("\u202e") != std::string::npos);
-				contains_illegal = contains_illegal || (identifierString.find("\u202f") != std::string::npos);
-				contains_illegal = contains_illegal || (identifierString.find("\u205f") != std::string::npos);
-				contains_illegal = contains_illegal || (identifierString.find("\u2060") != std::string::npos);
-				contains_illegal = contains_illegal || (identifierString.find("\u2061") != std::string::npos);
-				contains_illegal = contains_illegal || (identifierString.find("\u2062") != std::string::npos);
-				contains_illegal = contains_illegal || (identifierString.find("\u2063") != std::string::npos);
-				contains_illegal = contains_illegal || (identifierString.find("\u2064") != std::string::npos);
-				contains_illegal = contains_illegal || (identifierString.find("\u2065") != std::string::npos);
-				//contains_illegal = contains_illegal || (identifierString.find("\u2066") != std::string::npos);
-				//contains_illegal = contains_illegal || (identifierString.find("\u2067") != std::string::npos);
-				//contains_illegal = contains_illegal || (identifierString.find("\u2068") != std::string::npos);
-				contains_illegal = contains_illegal || (identifierString.find("\u2069") != std::string::npos);
-				contains_illegal = contains_illegal || (identifierString.find("\u206a") != std::string::npos);
-				contains_illegal = contains_illegal || (identifierString.find("\u206b") != std::string::npos);
-				contains_illegal = contains_illegal || (identifierString.find("\u206c") != std::string::npos);
-				contains_illegal = contains_illegal || (identifierString.find("\u206d") != std::string::npos);
-				contains_illegal = contains_illegal || (identifierString.find("\u206e") != std::string::npos);
-				contains_illegal = contains_illegal || (identifierString.find("\u206f") != std::string::npos);
-#pragma clang diagnostic pop
-#pragma GCC diagnostic pop
-				
-				if (contains_illegal)
+				if (Eidos_ContainsIllegalUnicode(identifierString))
 				{
 					if (p_make_bad_tokens)
 					{
@@ -1186,19 +1130,31 @@ EidosASTNode *EidosScript::Parse_ForStatement(void)
 		Match(EidosTokenType::kTokenFor, "for statement");
 		Match(EidosTokenType::kTokenLParen, "for statement");
 		
-		identifier = new (gEidosASTNodePool->AllocateChunk()) EidosASTNode(current_token_);
-		node->AddChild(identifier);
-		
-		Match(EidosTokenType::kTokenIdentifier, "for statement");
-		Match(EidosTokenType::kTokenIn, "for statement");
-		
-		range_expr = Parse_Expr();
-		node->AddChild(range_expr);
-		
+		// in Eidos 3.2 (SLiM 4.2) we allow for loops with multiple "in" clause
+		// each "in" clause becomes a pair of children: identifier and expression
+		do
+		{
+			identifier = new (gEidosASTNodePool->AllocateChunk()) EidosASTNode(current_token_);
+			node->AddChild(identifier);
+			
+			Match(EidosTokenType::kTokenIdentifier, "for statement");
+			Match(EidosTokenType::kTokenIn, "for statement");
+			
+			range_expr = Parse_Expr();
+			node->AddChild(range_expr);
+			
 #if (SLIMPROFILING == 1)
-		// PROFILING
-		node->full_range_end_token_ = current_token_;
+			// PROFILING
+			node->full_range_end_token_ = current_token_;
 #endif
+			
+			// look for a comma, indicating another "in" clause
+			if (current_token_type_ == EidosTokenType::kTokenComma)
+				Match(EidosTokenType::kTokenComma, "parameter list");
+			else
+				break;		// not a comma, so we're done
+		}
+		while (true);
 		
 		Match(EidosTokenType::kTokenRParen, "for statement");
 		
@@ -1844,6 +1800,10 @@ EidosASTNode *EidosScript::Parse_PrimaryExpr(void)
 			node = Parse_Expr();
 			
 			Match(EidosTokenType::kTokenRParen, "primary parenthesized expression");
+			
+			// we mark nodes that were parenthesized with a flag; this is for the benefit of range expression
+			// evaluation in SLiM, which needs to know this; see EvaluateScriptBlockTickRanges()
+			node->was_parenthesized_ = true;
 		}
 		else if (current_token_type_ == EidosTokenType::kTokenIdentifier)
 		{
@@ -2228,8 +2188,16 @@ EidosASTNode *EidosScript::Parse_ObjectClassSpec(EidosASTNode *p_type_node)
 		}
 		
 		if (!p_type_node->typespec_.object_class)
+		{
 			if (!parse_make_bad_nodes_)
-				EIDOS_TERMINATION << "ERROR (EidosScript::Parse_ObjectClassSpec): could not find an Eidos class named '" << object_class << "')." << EidosTerminate(current_token_);
+			{
+				// A little concession to SLiM compatibility here; if you try to use a SLiM class name in pure Eidos, you get a more helpful error message
+				if ((object_class == "Chromosome") || (object_class == "Community") || (object_class == "Genome") || (object_class == "GenomicElement") || (object_class == "GenomicElementType") || (object_class == "Individual") || (object_class == "InteractionType") || (object_class == "LogFile") || (object_class == "Mutation") || (object_class == "MutationType") || (object_class == "Plot") || (object_class == "SLiMEidosBlock") || (object_class == "SLiMgui") || (object_class == "SpatialMap") || (object_class == "Species") || (object_class == "Subpopulation") || (object_class == "Substitution"))
+					EIDOS_TERMINATION << "ERROR (EidosScript::Parse_ObjectClassSpec): could not find an Eidos class named '" << object_class << "'.  Note that " << object_class << " is the name of a class in SLiM, but you are coding in pure Eidos; SLiM classes are not defined." << EidosTerminate(current_token_);
+				
+				EIDOS_TERMINATION << "ERROR (EidosScript::Parse_ObjectClassSpec): could not find an Eidos class named '" << object_class << "'." << EidosTerminate(current_token_);
+			}
+		}
 		
 		Match(EidosTokenType::kTokenIdentifier, "object-class specifier");
 		Match(EidosTokenType::kTokenGt, "object-class specifier");
@@ -2405,13 +2373,13 @@ EidosASTNode *EidosScript::Parse_DefaultValue(void)
 					
 					if (numeric_value->Type() == EidosValueType::kValueFloat)
 					{
-						double float_value = numeric_value->FloatAtIndex(0, current_token_);
-						negated_value = EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float_singleton(-float_value));
+						double float_value = numeric_value->FloatAtIndex_NOCAST(0, current_token_);
+						negated_value = EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float(-float_value));
 					}
 					else if (numeric_value->Type() == EidosValueType::kValueInt)
 					{
-						int64_t int_value = numeric_value->IntAtIndex(0, current_token_);
-						negated_value = EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Int_singleton(-int_value));	// note that overflow is not possible
+						int64_t int_value = numeric_value->IntAtIndex_NOCAST(0, current_token_);
+						negated_value = EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Int(-int_value));	// note that overflow is not possible
 					}
 					else
 					{
@@ -2433,6 +2401,7 @@ EidosASTNode *EidosScript::Parse_DefaultValue(void)
 				
 				node->AddChild(numeric_node);
 				node->cached_literal_value_ = negated_value;	// cache the negated value for fast default argument processing
+				node->cached_literal_value_->MarkAsConstant();
 			}
 			else
 			{
@@ -2477,6 +2446,291 @@ EidosASTNode *EidosScript::Parse_DefaultValue(void)
 	}
 	
 	return node;
+}
+
+EidosASTNode *EidosScript::Parse_ConditionalExpr_NOSEQ(void)
+{
+	EidosASTNode *left_expr = nullptr, *node = nullptr;
+	
+	try
+	{
+		left_expr = Parse_LogicalOrExpr_NOSEQ();
+		
+		if (current_token_type_ == EidosTokenType::kTokenConditional)
+		{
+			node = new (gEidosASTNodePool->AllocateChunk()) EidosASTNode(current_token_, left_expr);
+			left_expr = nullptr;
+			Consume();
+			
+			node->AddChild(Parse_ConditionalExpr_NOSEQ());	// arguably should be Parse_ConditionalExpr()
+			
+			Match(EidosTokenType::kTokenElse, "ternary conditional expression");
+			
+			node->AddChild(Parse_ConditionalExpr_NOSEQ());	// arguably should be Parse_ConditionalExpr()
+		}
+	}
+	catch (...)
+	{
+		if (left_expr)
+		{
+			left_expr->~EidosASTNode();
+			gEidosASTNodePool->DisposeChunk(const_cast<EidosASTNode*>(left_expr));
+		}
+		
+		if (node)
+		{
+			node->~EidosASTNode();
+			gEidosASTNodePool->DisposeChunk(const_cast<EidosASTNode*>(node));
+		}
+		
+		throw;
+	}
+	
+	return (node ? node : left_expr);
+}
+
+EidosASTNode *EidosScript::Parse_LogicalOrExpr_NOSEQ(void)
+{
+	EidosASTNode *left_expr = nullptr, *node = nullptr;
+	
+	try
+	{
+		left_expr = Parse_LogicalAndExpr_NOSEQ();
+		
+		while (current_token_type_ == EidosTokenType::kTokenOr)
+		{
+			if (!node)
+			{
+				node = new (gEidosASTNodePool->AllocateChunk()) EidosASTNode(current_token_, left_expr);
+				left_expr = nullptr;
+			}
+			Consume();
+			
+			node->AddChild(Parse_LogicalAndExpr_NOSEQ());
+		}
+	}
+	catch (...)
+	{
+		if (left_expr)
+		{
+			left_expr->~EidosASTNode();
+			gEidosASTNodePool->DisposeChunk(const_cast<EidosASTNode*>(left_expr));
+		}
+		
+		if (node)
+		{
+			node->~EidosASTNode();
+			gEidosASTNodePool->DisposeChunk(const_cast<EidosASTNode*>(node));
+		}
+		
+		throw;
+	}
+	
+	return (node ? node : left_expr);
+}
+
+EidosASTNode *EidosScript::Parse_LogicalAndExpr_NOSEQ(void)
+{
+	EidosASTNode *left_expr = nullptr, *node = nullptr;
+	
+	try
+	{
+		left_expr = Parse_EqualityExpr_NOSEQ();
+		
+		while (current_token_type_ == EidosTokenType::kTokenAnd)
+		{
+			if (!node)
+			{
+				node = new (gEidosASTNodePool->AllocateChunk()) EidosASTNode(current_token_, left_expr);
+				left_expr = nullptr;
+			}
+			Consume();
+			
+			node->AddChild(Parse_EqualityExpr_NOSEQ());
+		}
+	}
+	catch (...)
+	{
+		if (left_expr)
+		{
+			left_expr->~EidosASTNode();
+			gEidosASTNodePool->DisposeChunk(const_cast<EidosASTNode*>(left_expr));
+		}
+		
+		if (node)
+		{
+			node->~EidosASTNode();
+			gEidosASTNodePool->DisposeChunk(const_cast<EidosASTNode*>(node));
+		}
+		
+		throw;
+	}
+	
+	return (node ? node : left_expr);
+}
+
+EidosASTNode *EidosScript::Parse_EqualityExpr_NOSEQ(void)
+{
+	EidosASTNode *left_expr = nullptr, *node = nullptr;
+	
+	try
+	{
+		left_expr = Parse_RelationalExpr_NOSEQ();
+		
+		while ((current_token_type_ == EidosTokenType::kTokenEq) || (current_token_type_ == EidosTokenType::kTokenNotEq))
+		{
+			node = new (gEidosASTNodePool->AllocateChunk()) EidosASTNode(current_token_, left_expr);
+			left_expr = nullptr;
+			
+			Consume();
+			
+			node->AddChild(Parse_RelationalExpr_NOSEQ());
+			
+			left_expr = node;
+			node = nullptr;
+		}
+	}
+	catch (...)
+	{
+		if (left_expr)
+		{
+			left_expr->~EidosASTNode();
+			gEidosASTNodePool->DisposeChunk(const_cast<EidosASTNode*>(left_expr));
+		}
+		
+		if (node)
+		{
+			node->~EidosASTNode();
+			gEidosASTNodePool->DisposeChunk(const_cast<EidosASTNode*>(node));
+		}
+		
+		throw;
+	}
+	
+	return (node ? node : left_expr);
+}
+
+EidosASTNode *EidosScript::Parse_RelationalExpr_NOSEQ(void)
+{
+	EidosASTNode *left_expr = nullptr, *node = nullptr;
+	
+	try
+	{
+		left_expr = Parse_AddExpr_NOSEQ();
+		
+		while ((current_token_type_ == EidosTokenType::kTokenLt) || (current_token_type_ == EidosTokenType::kTokenGt) || (current_token_type_ == EidosTokenType::kTokenLtEq) || (current_token_type_ == EidosTokenType::kTokenGtEq))
+		{
+			node = new (gEidosASTNodePool->AllocateChunk()) EidosASTNode(current_token_, left_expr);
+			left_expr = nullptr;
+			
+			Consume();
+			
+			node->AddChild(Parse_AddExpr_NOSEQ());
+			
+			left_expr = node;
+			node = nullptr;
+		}
+	}
+	catch (...)
+	{
+		if (left_expr)
+		{
+			left_expr->~EidosASTNode();
+			gEidosASTNodePool->DisposeChunk(const_cast<EidosASTNode*>(left_expr));
+		}
+		
+		if (node)
+		{
+			node->~EidosASTNode();
+			gEidosASTNodePool->DisposeChunk(const_cast<EidosASTNode*>(node));
+		}
+		
+		throw;
+	}
+	
+	return (node ? node : left_expr);
+}
+
+EidosASTNode *EidosScript::Parse_AddExpr_NOSEQ(void)
+{
+	EidosASTNode *left_expr = nullptr, *node = nullptr;
+	
+	try
+	{
+		left_expr = Parse_MultExpr_NOSEQ();
+		
+		while ((current_token_type_ == EidosTokenType::kTokenPlus) || (current_token_type_ == EidosTokenType::kTokenMinus))
+		{
+			node = new (gEidosASTNodePool->AllocateChunk()) EidosASTNode(current_token_, left_expr);
+			left_expr = nullptr;
+			
+			Consume();
+			
+			node->AddChild(Parse_MultExpr_NOSEQ());
+			
+			left_expr = node;
+			node = nullptr;
+		}
+	}
+	catch (...)
+	{
+		if (left_expr)
+		{
+			left_expr->~EidosASTNode();
+			gEidosASTNodePool->DisposeChunk(const_cast<EidosASTNode*>(left_expr));
+		}
+		
+		if (node)
+		{
+			node->~EidosASTNode();
+			gEidosASTNodePool->DisposeChunk(const_cast<EidosASTNode*>(node));
+		}
+		
+		throw;
+	}
+	
+	return (node ? node : left_expr);
+}
+
+EidosASTNode *EidosScript::Parse_MultExpr_NOSEQ(void)
+{
+	EidosASTNode *left_expr = nullptr, *node = nullptr;
+	
+	try
+	{
+		left_expr = Parse_UnaryExpExpr();			// instead of Parse_SeqExpr()
+		
+		while ((current_token_type_ == EidosTokenType::kTokenMult) || (current_token_type_ == EidosTokenType::kTokenDiv) || (current_token_type_ == EidosTokenType::kTokenMod))
+		{
+			node = new (gEidosASTNodePool->AllocateChunk()) EidosASTNode(current_token_, left_expr);
+			left_expr = nullptr;
+			
+			Consume();
+			
+			node->AddChild(Parse_UnaryExpExpr());	// instead of Parse_SeqExpr()
+			
+			left_expr = node;
+			node = nullptr;
+		}
+	}
+	catch (...)
+	{
+		if (left_expr)
+		{
+			left_expr->~EidosASTNode();
+			gEidosASTNodePool->DisposeChunk(const_cast<EidosASTNode*>(left_expr));
+		}
+		
+		if (node)
+		{
+			node->~EidosASTNode();
+			gEidosASTNodePool->DisposeChunk(const_cast<EidosASTNode*>(node));
+		}
+		
+		throw;
+	}
+	
+	return (node ? node : left_expr);
 }
 
 void EidosScript::ParseInterpreterBlockToAST(bool p_allow_functions, bool p_make_bad_nodes)

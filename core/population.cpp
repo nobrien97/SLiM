@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 12/13/14.
-//  Copyright (c) 2014-2023 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2014-2024 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -215,7 +215,7 @@ Subpopulation *Population::AddSubpopulation(slim_objectid_t p_subpop_id, slim_po
 #endif
 	
 	subpops_.emplace(p_subpop_id, new_subpop);
-	species_.subpop_ids_.emplace(p_subpop_id);
+	species_.used_subpop_ids_.emplace(p_subpop_id, new_subpop->name_);
 	
 	// cached mutation counts/frequencies are no longer accurate; mark the cache as invalid
 	InvalidateMutationReferencesCache();
@@ -259,7 +259,7 @@ Subpopulation *Population::AddSubpopulationSplit(slim_objectid_t p_subpop_id, Su
 #endif
 	
 	subpops_.emplace(p_subpop_id, new_subpop);
-	species_.subpop_ids_.emplace(p_subpop_id);
+	species_.used_subpop_ids_.emplace(p_subpop_id, new_subpop->name_);
 	
 	// then draw parents from the source population according to fitness, obeying the new subpop's sex ratio
 	Subpopulation &subpop = *new_subpop;
@@ -541,10 +541,11 @@ void Population::CheckForDeferralInGenomes(EidosValue_Object *p_genomes, const s
 	if (HasDeferredGenomes())
 	{
 		int element_count = p_genomes->Count();
+		EidosObject * const *genomes_data = p_genomes->ObjectData();
 		
 		for (int element_index = 0; element_index < element_count; ++element_index)
 		{
-			Genome *genome = (Genome *)p_genomes->ObjectElementAtIndex(element_index, nullptr);
+			Genome *genome = (Genome *)genomes_data[element_index];
 			
 			if (genome->IsDeferred())
 				EIDOS_TERMINATION << "ERROR (" << p_caller << "): the mutations of deferred genomes cannot be accessed." << EidosTerminate();
@@ -769,7 +770,7 @@ slim_popsize_t Population::ApplyMateChoiceCallbacks(slim_popsize_t p_parent1_ind
 				
 				if (mate_choice_callback->contains_weights_)
 				{
-					local_weights_ptr = EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float_vector(current_weights, weights_length));
+					local_weights_ptr = EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float(current_weights, weights_length));
 					callback_symbols.InitializeConstantSymbolEntry(gEidosID_weights, local_weights_ptr);
 				}
 				
@@ -791,7 +792,13 @@ slim_popsize_t Population::ApplyMateChoiceCallbacks(slim_popsize_t p_parent1_ind
 						// A singleton vector of type Individual may be returned to choose a specific mate
 						if ((result->Count() == 1) && (((EidosValue_Object *)result)->Class() == gSLiM_Individual_Class))
 						{
-							chosen_mate = (Individual *)result->ObjectElementAtIndex(0, mate_choice_callback->identifier_token_);
+#if DEBUG
+							// this checks the value type at runtime
+							chosen_mate = (Individual *)result->ObjectData()[0];
+#else
+							// unsafe cast for speed
+							chosen_mate = (Individual *)((EidosValue_Object *)result)->data()[0];
+#endif
 							weights_reflect_chosen_mate = false;
 							
 							// remember this callback for error attribution below
@@ -826,13 +833,8 @@ slim_popsize_t Population::ApplyMateChoiceCallbacks(slim_popsize_t p_parent1_ind
 								weights_modified = true;
 							}
 							
-							// We really want to use EidosValue_Float_vector's FloatVector() method to get the values;
-							// if we have an EidosValue_Float_singleton we have to get its value with FloatAtIndex.
-							// BCH 1/18/2018: IsSingleton() should be much faster than the dynamic_cast<> used here before
-							if (!result->IsSingleton())
-								memcpy(current_weights, ((EidosValue_Float_vector *)result)->FloatVector()->data(), sizeof(double) * weights_length);
-							else
-								current_weights[0] = result->FloatAtIndex(0, nullptr);
+							// use FloatData() to get the values, copy them with memcpy()
+							memcpy(current_weights, result->FloatData(), sizeof(double) * weights_length);
 							
 							// remember this callback for error attribution below
 							last_interventionist_mate_choice_callback = mate_choice_callback;
@@ -1117,7 +1119,13 @@ bool Population::ApplyModifyChildCallbacks(Individual *p_child, Individual *p_pa
 				if ((result->Type() != EidosValueType::kValueLogical) || (result->Count() != 1))
 					EIDOS_TERMINATION << "ERROR (Population::ApplyModifyChildCallbacks): modifyChild() callbacks must provide a logical singleton return value." << EidosTerminate(modify_child_callback->identifier_token_);
 				
-				eidos_logical_t generate_child = result->LogicalAtIndex(0, nullptr);
+#if DEBUG
+				// this checks the value type at runtime
+				eidos_logical_t generate_child = result->LogicalData()[0];
+#else
+				// unsafe cast for speed
+				eidos_logical_t generate_child = ((EidosValue_Logical *)result)->data()[0];
+#endif
 				
 				// If this callback told us not to generate the child, we do not call the rest of the callback chain; we're done
 				if (!generate_child)
@@ -1466,7 +1474,7 @@ void Population::EvolveSubpopulation(Subpopulation &p_subpop, bool p_mate_choice
 							species_.RecordNewGenome(nullptr, &child_genome_2, &parent_genome_2, nullptr);
 						}
 						
-						// BCH 9/26/2023: inherit the spatial position of the first parent by default, to set up for pointDeviated()
+						// BCH 9/26/2023: inherit the spatial position of the first parent by default, to set up for deviatePositions()/pointDeviated()
 						new_child->InheritSpatialPosition(species_.SpatialDimensionality(), source_subpop.parent_individuals_[parent1]);
 						
 						DoClonalMutation(&source_subpop, child_genome_1, parent_genome_1, child_sex, mutation_callbacks);
@@ -1539,7 +1547,7 @@ void Population::EvolveSubpopulation(Subpopulation &p_subpop, bool p_mate_choice
 						if (recording_tree_sequence)
 							species_.SetCurrentNewIndividual(new_child);
 						
-						// BCH 9/26/2023: inherit the spatial position of the first parent by default, to set up for pointDeviated()
+						// BCH 9/26/2023: inherit the spatial position of the first parent by default, to set up for deviatePositions()/pointDeviated()
 						new_child->InheritSpatialPosition(species_.SpatialDimensionality(), source_subpop.parent_individuals_[parent1]);
 						
 						// recombination, gene-conversion, mutation
@@ -1629,7 +1637,7 @@ void Population::EvolveSubpopulation(Subpopulation &p_subpop, bool p_mate_choice
 					if (recording_tree_sequence)
 						species_.SetCurrentNewIndividual(new_child);
 					
-					// BCH 9/26/2023: inherit the spatial position of the first parent by default, to set up for pointDeviated()
+					// BCH 9/26/2023: inherit the spatial position of the first parent by default, to set up for deviatePositions()/pointDeviated()
 					new_child->InheritSpatialPosition(species_.SpatialDimensionality(), source_subpop.parent_individuals_[parent1]);
 					
 					// recombination, gene-conversion, mutation
@@ -1924,7 +1932,7 @@ void Population::EvolveSubpopulation(Subpopulation &p_subpop, bool p_mate_choice
 						species_.RecordNewGenome(nullptr, &child_genome_2, &parent_genome_2, nullptr);
 					}
 					
-					// BCH 9/26/2023: inherit the spatial position of the first parent by default, to set up for pointDeviated()
+					// BCH 9/26/2023: inherit the spatial position of the first parent by default, to set up for deviatePositions()/pointDeviated()
 					new_child->InheritSpatialPosition(species_.SpatialDimensionality(), source_subpop->parent_individuals_[parent1]);
 					
 					DoClonalMutation(source_subpop, child_genome_1, parent_genome_1, child_sex, mutation_callbacks);
@@ -1997,7 +2005,7 @@ void Population::EvolveSubpopulation(Subpopulation &p_subpop, bool p_mate_choice
 					if (recording_tree_sequence)
 						species_.SetCurrentNewIndividual(new_child);
 					
-					// BCH 9/26/2023: inherit the spatial position of the first parent by default, to set up for pointDeviated()
+					// BCH 9/26/2023: inherit the spatial position of the first parent by default, to set up for deviatePositions()/pointDeviated()
 					new_child->InheritSpatialPosition(species_.SpatialDimensionality(), source_subpop->parent_individuals_[parent1]);
 					
 					// recombination, gene-conversion, mutation
@@ -2197,7 +2205,7 @@ void Population::EvolveSubpopulation(Subpopulation &p_subpop, bool p_mate_choice
 									//if (recording_tree_sequence)
 									//	species_.SetCurrentNewIndividual(new_child);	// this is disabled because it is not thread-safe, and we have no callbacks so we will not retract this child
 									
-									// BCH 9/26/2023: inherit the spatial position of the first parent by default, to set up for pointDeviated()
+									// BCH 9/26/2023: inherit the spatial position of the first parent by default, to set up for deviatePositions()/pointDeviated()
 									new_child->InheritSpatialPosition(species_.SpatialDimensionality(), source_subpop.parent_individuals_[parent1]);
 									
 									// recombination, gene-conversion, mutation
@@ -2238,7 +2246,7 @@ void Population::EvolveSubpopulation(Subpopulation &p_subpop, bool p_mate_choice
 									//if (recording_tree_sequence)
 									//	species_.SetCurrentNewIndividual(new_child);	// this is disabled because it is not thread-safe, and we have no callbacks so we will not retract this child
 									
-									// BCH 9/26/2023: inherit the spatial position of the first parent by default, to set up for pointDeviated()
+									// BCH 9/26/2023: inherit the spatial position of the first parent by default, to set up for deviatePositions()/pointDeviated()
 									new_child->InheritSpatialPosition(species_.SpatialDimensionality(), source_subpop.parent_individuals_[parent1]);
 									
 									// recombination, gene-conversion, mutation
@@ -2298,7 +2306,7 @@ void Population::EvolveSubpopulation(Subpopulation &p_subpop, bool p_mate_choice
 										}
 									}
 									
-									// BCH 9/26/2023: inherit the spatial position of the first parent by default, to set up for pointDeviated()
+									// BCH 9/26/2023: inherit the spatial position of the first parent by default, to set up for deviatePositions()/pointDeviated()
 									new_child->InheritSpatialPosition(species_.SpatialDimensionality(), source_subpop.parent_individuals_[parent1]);
 									
 									DoClonalMutation(&source_subpop, child_genome_1, parent_genome_1, child_sex, nullptr);
@@ -2355,7 +2363,7 @@ void Population::EvolveSubpopulation(Subpopulation &p_subpop, bool p_mate_choice
 									//if (recording_tree_sequence)
 									//	species_.SetCurrentNewIndividual(new_child);	// this is disabled because it is not thread-safe, and we have no callbacks so we will not retract this child
 									
-									// BCH 9/26/2023: inherit the spatial position of the first parent by default, to set up for pointDeviated()
+									// BCH 9/26/2023: inherit the spatial position of the first parent by default, to set up for deviatePositions()/pointDeviated()
 									new_child->InheritSpatialPosition(species_.SpatialDimensionality(), source_subpop.parent_individuals_[parent1]);
 									
 									// recombination, gene-conversion, mutation
@@ -2459,7 +2467,7 @@ bool Population::ApplyRecombinationCallbacks(slim_popsize_t p_parent_index, Geno
 			if (recombination_callback->contains_breakpoints_)
 			{
 				if (!local_crossovers_ptr)
-					local_crossovers_ptr = EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Int_vector(p_crossovers));
+					local_crossovers_ptr = EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Int(p_crossovers));
 				client_symbols.SetValueForSymbolNoCopy(gID_breakpoints, local_crossovers_ptr);
 			}
 			
@@ -2472,7 +2480,13 @@ bool Population::ApplyRecombinationCallbacks(slim_popsize_t p_parent_index, Geno
 				if ((result->Type() != EidosValueType::kValueLogical) || (result->Count() != 1))
 					EIDOS_TERMINATION << "ERROR (Population::ApplyRecombinationCallbacks): recombination() callbacks must provide a logical singleton return value." << EidosTerminate(recombination_callback->identifier_token_);
 				
-				eidos_logical_t breakpoints_changed = result->LogicalAtIndex(0, nullptr);
+#if DEBUG
+				// this checks the value type at runtime
+				eidos_logical_t breakpoints_changed = result->LogicalData()[0];
+#else
+				// unsafe cast for speed
+				eidos_logical_t breakpoints_changed = ((EidosValue_Logical *)result)->data()[0];
+#endif
 				
 				// If the callback says that breakpoints were changed, check for an actual change in value for the variables referenced by the callback
 				if (breakpoints_changed)
@@ -2508,17 +2522,11 @@ bool Population::ApplyRecombinationCallbacks(slim_popsize_t p_parent_index, Geno
 		
 		p_crossovers.resize(count);		// zero-fills only new entries at the margin, so is minimally wasteful
 		
-		if (count == 1)
-			p_crossovers[0] = (slim_position_t)local_crossovers_ptr->IntAtIndex(0, nullptr);
-		else
-		{
-			const EidosValue_Int_vector *new_crossover_vector = local_crossovers_ptr->IntVector();
-			const int64_t *new_crossover_data = new_crossover_vector->data();
-			slim_position_t *p_crossovers_data = p_crossovers.data();
-			
-			for (int value_index = 0; value_index < count; ++value_index)
-				p_crossovers_data[value_index] = (slim_position_t)new_crossover_data[value_index];
-		}
+		const int64_t *new_crossover_data = local_crossovers_ptr->IntData();
+		slim_position_t *p_crossovers_data = p_crossovers.data();
+		
+		for (int value_index = 0; value_index < count; ++value_index)
+			p_crossovers_data[value_index] = (slim_position_t)new_crossover_data[value_index];
 		
 		breakpoints_changed = true;
 	}
@@ -5079,7 +5087,7 @@ void Population::RecalculateFitness(slim_tick_t p_tick)
 						
 						if ((result->Type() == EidosValueType::kValueFloat) && (result->Count() == 1))
 						{
-							if (result->FloatAtIndex(0, nullptr) == 1.0)
+							if (result->FloatData()[0] == 1.0)
 							{
 								// the callback returns 1.0, so it makes the mutation types to which it applies become neutral
 								slim_objectid_t mutation_type_id = mutationEffect_callback->mutation_type_id_;
@@ -5985,20 +5993,7 @@ slim_refcount_t Population::TallyMutationRunReferencesForPopulation(void)
 			slim_popsize_t subpop_genome_count = subpop->CurrentGenomeCount();
 			std::vector<Genome *> &subpop_genomes = subpop->CurrentGenomes();
 			
-			if ((species_.ModeledChromosomeType() == GenomeType::kAutosome) && !subpop->has_null_genomes_)
-			{
-				// optimized case when null genomes do not exist in this subpop
-				for (slim_popsize_t i = 0; i < subpop_genome_count; i++)
-				{
-					Genome &genome = *subpop_genomes[i];
-					
-					for (int run_index = first_mutrun_index; run_index <= last_mutrun_index; ++run_index)
-						genome.mutruns_[run_index]->increment_use_count();
-				}
-				
-				total_genome_count += subpop_genome_count;
-			}
-			else
+			if (subpop->CouldContainNullGenomes())
 			{
 				for (slim_popsize_t i = 0; i < subpop_genome_count; i++)
 				{
@@ -6012,6 +6007,19 @@ slim_refcount_t Population::TallyMutationRunReferencesForPopulation(void)
 						total_genome_count++;
 					}
 				}
+			}
+			else
+			{
+				// optimized case when null genomes do not exist in this subpop
+				for (slim_popsize_t i = 0; i < subpop_genome_count; i++)
+				{
+					Genome &genome = *subpop_genomes[i];
+					
+					for (int run_index = first_mutrun_index; run_index <= last_mutrun_index; ++run_index)
+						genome.mutruns_[run_index]->increment_use_count();
+				}
+				
+				total_genome_count += subpop_genome_count;
 			}
 		}
 	}
@@ -6125,20 +6133,7 @@ slim_refcount_t Population::TallyMutationRunReferencesForSubpops(std::vector<Sub
 			slim_popsize_t subpop_genome_count = subpop->CurrentGenomeCount();
 			std::vector<Genome *> &subpop_genomes = subpop->CurrentGenomes();
 			
-			if ((species_.ModeledChromosomeType() == GenomeType::kAutosome) && !subpop->has_null_genomes_)
-			{
-				// optimized case when null genomes do not exist in this subpop
-				for (slim_popsize_t i = 0; i < subpop_genome_count; i++)
-				{
-					Genome &genome = *subpop_genomes[i];
-					
-					for (int run_index = first_mutrun_index; run_index <= last_mutrun_index; ++run_index)
-						genome.mutruns_[run_index]->increment_use_count();
-				}
-				
-				total_genome_count += subpop_genome_count;
-			}
-			else
+			if (subpop->CouldContainNullGenomes())
 			{
 				for (slim_popsize_t i = 0; i < subpop_genome_count; i++)
 				{
@@ -6153,13 +6148,26 @@ slim_refcount_t Population::TallyMutationRunReferencesForSubpops(std::vector<Sub
 					}
 				}
 			}
+			else
+			{
+				// optimized case when null genomes do not exist in this subpop
+				for (slim_popsize_t i = 0; i < subpop_genome_count; i++)
+				{
+					Genome &genome = *subpop_genomes[i];
+					
+					for (int run_index = first_mutrun_index; run_index <= last_mutrun_index; ++run_index)
+						genome.mutruns_[run_index]->increment_use_count();
+				}
+				
+				total_genome_count += subpop_genome_count;
+			}
 		}
 	}
 	
 	return total_genome_count;
 }
 
-slim_refcount_t Population::TallyMutationRunReferencesForGenomes(std::vector<Genome*> *p_genomes_to_tally)
+slim_refcount_t Population::TallyMutationRunReferencesForGenomes(const Genome * const *genomes_ptr, slim_popsize_t genomes_count)
 {
 	slim_refcount_t total_genome_count = 0;
 	int mutrun_count_multiplier = species_.chromosome_->mutrun_count_multiplier_;
@@ -6199,8 +6207,10 @@ slim_refcount_t Population::TallyMutationRunReferencesForGenomes(std::vector<Gen
 		int first_mutrun_index = omp_get_thread_num() * mutrun_count_multiplier;
 		int last_mutrun_index = first_mutrun_index + mutrun_count_multiplier - 1;
 		
-		for (Genome *genome : *p_genomes_to_tally)
+		for (slim_popsize_t genome_index = 0; genome_index < genomes_count; ++genome_index)
 		{
+			const Genome *genome = genomes_ptr[genome_index];
+			
 			if (!genome->IsNull())
 			{
 				for (int run_index = first_mutrun_index; run_index <= last_mutrun_index; ++run_index)
@@ -6267,11 +6277,7 @@ slim_refcount_t Population::_CountNonNullGenomes(void)
 		
 		slim_popsize_t subpop_genome_count = subpop->CurrentGenomeCount();
 		
-		if ((species_.ModeledChromosomeType() == GenomeType::kAutosome) && !subpop->has_null_genomes_)
-		{
-			total_genome_count += subpop_genome_count;
-		}
-		else
+		if (subpop->CouldContainNullGenomes())
 		{
 			std::vector<Genome *> &subpop_genomes = subpop->CurrentGenomes();
 			
@@ -6282,6 +6288,11 @@ slim_refcount_t Population::_CountNonNullGenomes(void)
 				if (!genome.IsNull())
 					total_genome_count++;
 			}
+		}
+		else
+		{
+			// optimized case when null genomes do not exist in this subpop
+			total_genome_count += subpop_genome_count;
 		}
 	}
 	
@@ -6369,24 +6380,26 @@ slim_refcount_t Population::TallyMutationReferencesAcrossPopulation(bool p_force
 		_TallyMutationReferences_FAST_FromMutationRunUsage();
 		
 #if DEBUG
-		std::vector<Genome*> genomes;
-		
-		for (const std::pair<const slim_objectid_t,Subpopulation*> &subpop_pair : subpops_)
 		{
-			Subpopulation *subpop = subpop_pair.second;
-			slim_popsize_t subpop_genome_count = subpop->CurrentGenomeCount();
-			std::vector<Genome *> &subpop_genomes = subpop->CurrentGenomes();
+			std::vector<Genome*> genomes;
 			
-			for (slim_popsize_t i = 0; i < subpop_genome_count; i++)
+			for (const std::pair<const slim_objectid_t,Subpopulation*> &subpop_pair : subpops_)
 			{
-				Genome *genome = subpop_genomes[i];
+				Subpopulation *subpop = subpop_pair.second;
+				slim_popsize_t subpop_genome_count = subpop->CurrentGenomeCount();
+				std::vector<Genome *> &subpop_genomes = subpop->CurrentGenomes();
 				
-				if (!genome->IsNull())
-					genomes.push_back(genome);
+				for (slim_popsize_t i = 0; i < subpop_genome_count; i++)
+				{
+					Genome *genome = subpop_genomes[i];
+					
+					if (!genome->IsNull())
+						genomes.push_back(genome);
+				}
 			}
+			
+			_CheckMutationTallyAcrossGenomes(genomes.data(), (slim_popsize_t)genomes.size());
 		}
-		
-		_CheckMutationTallyAcrossGenomes(genomes);
 #endif
 	}
 	else
@@ -6586,7 +6599,7 @@ slim_refcount_t Population::TallyMutationReferencesAcrossSubpopulations(std::vec
 				}
 			}
 			
-			_CheckMutationTallyAcrossGenomes(genomes);
+			_CheckMutationTallyAcrossGenomes(genomes.data(), (slim_popsize_t)genomes.size());
 		}
 #endif
 	}
@@ -6632,11 +6645,9 @@ slim_refcount_t Population::TallyMutationReferencesAcrossSubpopulations(std::vec
 	return total_genome_count;
 }
 
-slim_refcount_t Population::TallyMutationReferencesAcrossGenomes(std::vector<Genome*> *p_genomes_to_tally)
+slim_refcount_t Population::TallyMutationReferencesAcrossGenomes(const Genome * const *genomes_ptr, slim_popsize_t genomes_count)
 {
 	slim_refcount_t *refcount_block_ptr = gSLiM_Mutation_Refcounts;
-	slim_popsize_t genome_count = (slim_popsize_t)p_genomes_to_tally->size();
-	std::vector<Genome *> &genomes = *p_genomes_to_tally;
 	slim_refcount_t total_genome_count = 0;
 	
 	// We have two ways of tallying; here we decide which way to use.  We tally directly by
@@ -6648,19 +6659,19 @@ slim_refcount_t Population::TallyMutationReferencesAcrossGenomes(std::vector<Gen
 	// pay a small fixed overhead, but if you do genomes and you're wrong, it can hurt a lot.
 	bool can_tally_using_mutruns = true;
 	
-	if (genomes.size() <= 10)
+	if (genomes_count <= 10)
 		can_tally_using_mutruns = false;
 	
 	if (can_tally_using_mutruns)
 	{
 		// FAST PATH: Tally mutation run usage first, and then leverage that to tally mutations
-		total_genome_count = TallyMutationRunReferencesForGenomes(p_genomes_to_tally);
+		total_genome_count = TallyMutationRunReferencesForGenomes(genomes_ptr, genomes_count);
 		
 		// Give the core work to our fast worker method; this zeroes and then tallies
 		_TallyMutationReferences_FAST_FromMutationRunUsage();
 		
 #if DEBUG
-		_CheckMutationTallyAcrossGenomes(*p_genomes_to_tally);
+		_CheckMutationTallyAcrossGenomes(genomes_ptr, genomes_count);
 #endif
 	}
 	else
@@ -6668,9 +6679,9 @@ slim_refcount_t Population::TallyMutationReferencesAcrossGenomes(std::vector<Gen
 		// SLOW PATH: Increment the refcounts through all pointers to Mutation in all genomes
 		SLiM_ZeroRefcountBlock(mutation_registry_, /* p_registry_only */ community_.AllSpecies().size() > 1);
 		
-		for (slim_popsize_t i = 0; i < genome_count; i++)
+		for (slim_popsize_t i = 0; i < genomes_count; i++)
 		{
-			Genome &genome = *genomes[i];
+			const Genome &genome = *genomes_ptr[i];
 			
 			if (!genome.IsNull())
 			{
@@ -6746,7 +6757,7 @@ void Population::_TallyMutationReferences_FAST_FromMutationRunUsage(void)
 }
 
 #if DEBUG
-void Population::_CheckMutationTallyAcrossGenomes(std::vector<Genome*> &p_genomes)
+void Population::_CheckMutationTallyAcrossGenomes(const Genome * const *genomes_ptr, slim_popsize_t genomes_count)
 {
 	// This does a DEBUG check on the results of _TallyMutationReferences_FAST_FromMutationRunUsage().
 	// It should be called immediately after that method, and passed a vector of the genomes tallied across.
@@ -6760,8 +6771,9 @@ void Population::_CheckMutationTallyAcrossGenomes(std::vector<Genome*> &p_genome
 		mut->refcount_CHECK_ = 0;
 	}
 	
-	for (Genome *genome : p_genomes)
+	for (slim_popsize_t genome_index = 0; genome_index < genomes_count; ++genome_index)
 	{
+		const Genome *genome = genomes_ptr[genome_index];
 		int mutrun_count = genome->mutrun_count_;
 		
 		for (int run_index = 0; run_index < mutrun_count; ++run_index)
@@ -6811,11 +6823,13 @@ EidosValue_SP Population::Eidos_FrequenciesForTalliedMutations(EidosValue *mutat
 	{
 		// a vector of mutations was given, so loop through them and take their tallies
 		int mutations_count = mutations_value->Count();
+		EidosObject * const *mutations_data = mutations_value->ObjectData();
+		EidosValue_Float *float_result = (new (gEidosValuePool->AllocateChunk()) EidosValue_Float())->resize_no_initialize(mutations_count);
+		result_SP = EidosValue_SP(float_result);
 		
-		if (mutations_count == 1)
+		for (int value_index = 0; value_index < mutations_count; ++value_index)
 		{
-			// Handle the one-mutation case separately so we can return a singleton
-			Mutation *mut = (Mutation *)(mutations_value->ObjectElementAtIndex(0, nullptr));
+			Mutation *mut = (Mutation *)mutations_data[value_index];
 			int8_t mut_state = mut->state_;
 			double freq;
 			
@@ -6823,25 +6837,7 @@ EidosValue_SP Population::Eidos_FrequenciesForTalliedMutations(EidosValue *mutat
 			else if (mut_state == MutationState::kLostAndRemoved)	freq = 0.0;
 			else													freq = 1.0;
 			
-			result_SP = EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float_singleton(freq));
-		}
-		else
-		{
-			EidosValue_Float_vector *float_result = (new (gEidosValuePool->AllocateChunk()) EidosValue_Float_vector())->resize_no_initialize(mutations_count);
-			result_SP = EidosValue_SP(float_result);
-			
-			for (int value_index = 0; value_index < mutations_count; ++value_index)
-			{
-				Mutation *mut = (Mutation *)(mutations_value->ObjectElementAtIndex(value_index, nullptr));
-				int8_t mut_state = mut->state_;
-				double freq;
-				
-				if (mut_state == MutationState::kInRegistry)			freq = *(refcount_block_ptr + mut->BlockIndex()) / denominator;
-				else if (mut_state == MutationState::kLostAndRemoved)	freq = 0.0;
-				else													freq = 1.0;
-				
-				float_result->set_float_no_check(freq, value_index);
-			}
+			float_result->set_float_no_check(freq, value_index);
 		}
 	}
 	else if (MutationRegistryNeedsCheck())
@@ -6852,7 +6848,7 @@ EidosValue_SP Population::Eidos_FrequenciesForTalliedMutations(EidosValue *mutat
 		const MutationIndex *registry = MutationRegistry(&registry_size);
 		Mutation *mutation_block_ptr = gSLiM_Mutation_Block;
 		
-		EidosValue_Float_vector *float_result = (new (gEidosValuePool->AllocateChunk()) EidosValue_Float_vector())->resize_no_initialize(registry_size);
+		EidosValue_Float *float_result = (new (gEidosValuePool->AllocateChunk()) EidosValue_Float())->resize_no_initialize(registry_size);
 		result_SP = EidosValue_SP(float_result);
 		
 		for (int registry_index = 0; registry_index < registry_size; registry_index++)
@@ -6873,7 +6869,7 @@ EidosValue_SP Population::Eidos_FrequenciesForTalliedMutations(EidosValue *mutat
 		int registry_size;
 		const MutationIndex *registry = MutationRegistry(&registry_size);
 		
-		EidosValue_Float_vector *float_result = (new (gEidosValuePool->AllocateChunk()) EidosValue_Float_vector())->resize_no_initialize(registry_size);
+		EidosValue_Float *float_result = (new (gEidosValuePool->AllocateChunk()) EidosValue_Float())->resize_no_initialize(registry_size);
 		result_SP = EidosValue_SP(float_result);
 		
 		for (int registry_index = 0; registry_index < registry_size; registry_index++)
@@ -6899,11 +6895,13 @@ EidosValue_SP Population::Eidos_CountsForTalliedMutations(EidosValue *mutations_
 	{
 		// a vector of mutations was given, so loop through them and take their tallies
 		int mutations_count = mutations_value->Count();
+		EidosObject * const *mutations_data = mutations_value->ObjectData();
+		EidosValue_Int *int_result = (new (gEidosValuePool->AllocateChunk()) EidosValue_Int())->resize_no_initialize(mutations_count);
+		result_SP = EidosValue_SP(int_result);
 		
-		if (mutations_count == 1)
+		for (int value_index = 0; value_index < mutations_count; ++value_index)
 		{
-			// Handle the one-mutation case separately so we can return a singleton
-			Mutation *mut = (Mutation *)(mutations_value->ObjectElementAtIndex(0, nullptr));
+			Mutation *mut = (Mutation *)mutations_data[value_index];
 			int8_t mut_state = mut->state_;
 			slim_refcount_t count;
 			
@@ -6911,25 +6909,7 @@ EidosValue_SP Population::Eidos_CountsForTalliedMutations(EidosValue *mutations_
 			else if (mut_state == MutationState::kLostAndRemoved)	count = 0;
 			else													count = total_genome_count;
 			
-			result_SP = EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Int_singleton(count));
-		}
-		else
-		{
-			EidosValue_Int_vector *int_result = (new (gEidosValuePool->AllocateChunk()) EidosValue_Int_vector())->resize_no_initialize(mutations_count);
-			result_SP = EidosValue_SP(int_result);
-			
-			for (int value_index = 0; value_index < mutations_count; ++value_index)
-			{
-				Mutation *mut = (Mutation *)(mutations_value->ObjectElementAtIndex(value_index, nullptr));
-				int8_t mut_state = mut->state_;
-				slim_refcount_t count;
-				
-				if (mut_state == MutationState::kInRegistry)			count = *(refcount_block_ptr + mut->BlockIndex());
-				else if (mut_state == MutationState::kLostAndRemoved)	count = 0;
-				else													count = total_genome_count;
-				
-				int_result->set_int_no_check(count, value_index);
-			}
+			int_result->set_int_no_check(count, value_index);
 		}
 	}
 	else if (MutationRegistryNeedsCheck())
@@ -6940,7 +6920,7 @@ EidosValue_SP Population::Eidos_CountsForTalliedMutations(EidosValue *mutations_
 		const MutationIndex *registry = MutationRegistry(&registry_size);
 		Mutation *mutation_block_ptr = gSLiM_Mutation_Block;
 		
-		EidosValue_Int_vector *int_result = (new (gEidosValuePool->AllocateChunk()) EidosValue_Int_vector())->resize_no_initialize(registry_size);
+		EidosValue_Int *int_result = (new (gEidosValuePool->AllocateChunk()) EidosValue_Int())->resize_no_initialize(registry_size);
 		result_SP = EidosValue_SP(int_result);
 		
 		for (int registry_index = 0; registry_index < registry_size; registry_index++)
@@ -6961,7 +6941,7 @@ EidosValue_SP Population::Eidos_CountsForTalliedMutations(EidosValue *mutations_
 		int registry_size;
 		const MutationIndex *registry = MutationRegistry(&registry_size);
 		
-		EidosValue_Int_vector *int_result = (new (gEidosValuePool->AllocateChunk()) EidosValue_Int_vector())->resize_no_initialize(registry_size);
+		EidosValue_Int *int_result = (new (gEidosValuePool->AllocateChunk()) EidosValue_Int())->resize_no_initialize(registry_size);
 		result_SP = EidosValue_SP(int_result);
 		
 		for (int registry_index = 0; registry_index < registry_size; registry_index++)

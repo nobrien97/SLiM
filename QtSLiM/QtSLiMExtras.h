@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 7/28/2019.
-//  Copyright (c) 2019-2023 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2019-2024 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -21,6 +21,7 @@
 #define QTSLIMEXTRAS_H
 
 #include <QObject>
+#include <QString>
 #include <QWidget>
 #include <QColor>
 #include <QRect>
@@ -34,6 +35,7 @@
 #include <QSplitterHandle>
 #include <QStatusBar>
 #include <QPlainTextEdit>
+#include <QLabel>
 
 #include <cmath>
 #include <algorithm>
@@ -43,6 +45,14 @@
 
 class QPaintEvent;
 
+// legend positions for QtSLiMGraphView
+typedef enum {
+    kUnconfigured = -1,
+    kTopLeft = 0,
+    kTopRight,
+    kBottomLeft,
+    kBottomRight
+} QtSLiM_LegendPosition;
 
 void QtSLiMFrameRect(const QRect &p_rect, const QColor &p_color, QPainter &p_painter);
 void QtSLiMFrameRect(const QRectF &p_rect, const QColor &p_color, QPainter &p_painter, double p_lineWidth);
@@ -119,6 +129,9 @@ QColor slimColorForFraction(double fraction);
 // Nicely formatted memory usage strings
 QString stringForByteCount(uint64_t bytes);
 QString attributedStringForByteCount(uint64_t bytes, double total, QTextCharFormat &format);
+
+// Nicely formatted dateline for output
+QString slimDateline(void);
 
 // Running a panel to obtain numbers from the user
 QStringList QtSLiMRunLineEditArrayDialog(QWidget *p_parent, QString title, QStringList captions, QStringList values);
@@ -225,6 +238,32 @@ protected:
 QPixmap QtSLiMDarkenPixmap(QPixmap p_pixmap);
 
 void QtSLiMFlashHighlightInTextEdit(QPlainTextEdit *te);
+
+// A QLabel subclass that shows shortened text with an ellipsis; see https://stackoverflow.com/a/73316405/2752221
+class QtSLiMEllipsisLabel : public QLabel
+{
+    Q_OBJECT
+    
+public:
+    explicit QtSLiMEllipsisLabel(QWidget *parent = nullptr);
+    explicit QtSLiMEllipsisLabel(QString text, QWidget *parent = nullptr);
+    void setText(QString);
+    virtual QSize minimumSizeHint() const;
+    
+signals:
+    void pressed(void);
+    
+protected:
+    void resizeEvent(QResizeEvent *p_event);
+    void mousePressEvent(QMouseEvent *p_event);
+    
+private:
+    void updateText();
+    QString m_text;
+};
+
+// Natural sorting (sorting numerically when the first difference is a numeric substring)
+bool EidosNaturalSort(QString &a, QString &b);
 
 
 // Incremental sorting

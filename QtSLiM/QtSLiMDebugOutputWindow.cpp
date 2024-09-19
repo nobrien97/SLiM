@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 02/06/2021.
-//  Copyright (c) 2021-2023 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2021-2024 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -25,12 +25,21 @@
 #include <QMenu>
 #include <QAction>
 #include <QTableWidget>
+#include <QTableWidgetItem>
+#include <QClipboard>
+#include <QGuiApplication>
 #include <QDebug>
 
+#include <utility>
+#include <string>
+#include <vector>
+#include <limits>
+
 #include "QtSLiMWindow.h"
-#include "QtSLiMEidosConsole.h"
 #include "QtSLiMAppDelegate.h"
 #include "QtSLiMExtras.h"
+
+#include "log_file.h"
 
 
 //
@@ -91,7 +100,7 @@ QtSLiMDebugOutputWindow::QtSLiMDebugOutputWindow(QtSLiMWindow *p_parent) :
     
     // fix the layout of the window
     ui->outputHeaderLayout->setSpacing(4);
-    ui->outputHeaderLayout->setMargin(0);
+    ui->outputHeaderLayout->setContentsMargins(0, 0, 0, 0);
     
     // QtSLiMTextEdit attributes
     ui->debugOutputTextEdit->setOptionClickEnabled(false);
@@ -220,6 +229,21 @@ void QtSLiMDebugOutputWindow::takeSchedulingOutput(QString str)
     tabReceivedInput(2);
 }
 
+QTableWidget *QtSLiMDebugOutputWindow::logFileTableForPath(const std::string &path)
+{
+    auto pathIter = std::find(logfilePaths.begin(), logfilePaths.end(), path);
+    QTableWidget *table = nullptr;
+    
+    if (pathIter != logfilePaths.end())
+    {
+        size_t tableIndex = std::distance(logfilePaths.begin(), pathIter);
+        
+        table = logfileViews[tableIndex];
+    }
+    
+    return table;
+}
+
 void QtSLiMDebugOutputWindow::takeLogFileOutput(std::vector<std::string> &lineElements, const std::string &path)
 {
     // First, find the index of the log file view we're taking input into
@@ -247,8 +271,15 @@ void QtSLiMDebugOutputWindow::takeLogFileOutput(std::vector<std::string> &lineEl
         table->horizontalHeader()->setResizeContentsPrecision(100);     // look at the first 100 rows to determine sizing
         table->horizontalHeader()->setMinimumSectionSize(100);          // wide enough to fit most floating-point output
         table->horizontalHeader()->setMaximumSectionSize(400);          // don't let super-wide output push the table width too far
+        table->horizontalHeader()->setSectionsClickable(false);
         table->setVisible(false);
         windowLayout->addWidget(table);
+        
+        // Get right-clicks on table widget headers and items, to run our context menu
+        table->setContextMenuPolicy(Qt::CustomContextMenu);
+        connect(table, &QTableWidget::customContextMenuRequested, this, &QtSLiMDebugOutputWindow::logFileRightClick);
+        table->horizontalHeader()->setContextMenuPolicy(Qt::CustomContextMenu);
+        connect(table->horizontalHeader(), &QHeaderView::customContextMenuRequested, this, &QtSLiMDebugOutputWindow::logFileRightClick);
         
         // Make a new tab and insert it at the correct position in the tab bar
         QString filename = QString::fromStdString(Eidos_LastPathComponent(path));
@@ -321,6 +352,340 @@ void QtSLiMDebugOutputWindow::takeLogFileOutput(std::vector<std::string> &lineEl
     table->resizeColumnsToContents();
     
     tabReceivedInput(tableIndex + 3);
+}
+
+void QtSLiMDebugOutputWindow::logFileRightClick(const QPoint &pos)
+{
+    for (QTableWidget *table : logfileViews)
+    {
+        if (table->isVisible())
+        {
+            // found the visible/active table
+            int clickedColumnIndex = table->horizontalHeader()->logicalIndexAt(pos);
+            
+            if (clickedColumnIndex != -1)
+            {
+                int rowCount = table->rowCount();
+                int columnCount = table->columnCount();
+                
+                if ((rowCount > 0) && (columnCount > 0))
+                {
+                    std::vector<uint8_t> columnIsNumeric;        // were any conversion errors to double detected?
+                    
+                    for (int columnIndex = 0; columnIndex < columnCount; ++columnIndex)
+                    {
+                        columnIsNumeric.push_back(true);
+                        
+                        for (int rowIndex = 0; rowIndex < rowCount; ++rowIndex)
+                        {
+                            QTableWidgetItem *item = table->item(rowIndex, columnIndex);
+                            
+                            if (item)
+                            {
+                                QString itemText = item->text();
+                                
+                                if ((itemText == "NAN") || (itemText == "INF") || (itemText == "-INF"))
+                                {
+                                    // NAN / INF / -INF are acceptable as double values, although
+                                    // whatever parser the data ends up in might not like it...
+                                }
+                                else
+                                {
+                                    bool ok;
+                                    
+                                    itemText.toDouble(&ok);
+                                    if (!ok)
+                                    {
+                                        columnIsNumeric.back() = false;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    
+                    // make a context menu
+                    QMenu contextMenu("logfile_menu", this);
+                    QString columnName = table->horizontalHeaderItem(clickedColumnIndex)->text();
+                    
+                    QString copyDataTitle("Copy Data for ");
+                    copyDataTitle.append(columnName);
+                    QAction *copyDataAction = contextMenu.addAction(copyDataTitle);
+                    copyDataAction->setEnabled(true);
+                    
+                    QString graphData1DTitle("Graph ");
+                    graphData1DTitle.append(columnName);
+                    QAction *graphData1DAction = contextMenu.addAction(graphData1DTitle);
+                    graphData1DAction->setEnabled(columnIsNumeric[clickedColumnIndex]);
+                    
+                    if (columnIsNumeric[clickedColumnIndex])
+                    {
+                        // if the clicked column is numeric, we can potentially plot it as the
+                        // dependent variable with a different column as the independent variable
+                        bool has2DGraphActions = false;
+                        
+                        for (int columnIndex = 0; columnIndex < columnCount; ++columnIndex)
+                        {
+                            if ((columnIndex != clickedColumnIndex) && (columnIsNumeric[columnIndex]))
+                            {
+                                if (!has2DGraphActions)
+                                {
+                                    contextMenu.addSeparator();
+                                    
+                                    {
+                                        QString graphData2DTitle("Graph ");
+                                        graphData2DTitle.append(columnName);
+                                        graphData2DTitle.append(" ~ ");
+                                        graphData2DTitle.append(table->horizontalHeaderItem(columnIndex)->text());
+                                        graphData2DTitle.append(" (line plot)");
+                                        QAction *graphData2DAction = contextMenu.addAction(graphData2DTitle);
+                                        graphData2DAction->setEnabled(true);
+                                        graphData2DAction->setData(columnIndex);
+                                    }
+                                    {
+                                        QString graphData2DTitle("Graph ");
+                                        graphData2DTitle.append(columnName);
+                                        graphData2DTitle.append(" ~ ");
+                                        graphData2DTitle.append(table->horizontalHeaderItem(columnIndex)->text());
+                                        graphData2DTitle.append(" (scatter plot)");
+                                        QAction *graphData2DAction = contextMenu.addAction(graphData2DTitle);
+                                        graphData2DAction->setEnabled(true);
+                                        graphData2DAction->setData(columnIndex + 10000);    // 10000 is "scatter plot"
+                                    }
+                                    
+                                    has2DGraphActions = true;
+                                }
+                            }
+                        }
+                    }
+                    
+                    // could also add items for, e.g., Graph Data for FST ~ cycle
+                    // just need to vet all columns to determine which are double/integer
+                    
+                    // run the context menu synchronously
+                    QPoint globalPoint = table->mapToGlobal(pos);
+                    QAction *action = contextMenu.exec(globalPoint);
+                    
+                    if (action == copyDataAction)
+                    {
+                        QString string("# LogFile data: ");
+                        
+                        string.append(columnName);
+                        string.append("\n");
+                        string.append(slimDateline());
+                        string.append("\n\n");
+                        
+                        if (columnIsNumeric[clickedColumnIndex])
+                        {
+                            // if the values are all double, we can just dump
+                            // the value strings unquoted, as numeric data
+                            for (int rowIndex = 0; rowIndex < rowCount; ++rowIndex)
+                            {
+                                QTableWidgetItem *item = table->item(rowIndex, clickedColumnIndex);
+                                
+                                if (rowIndex > 0)
+                                    string.append(QString(", "));
+                                string.append(item->text());
+                            }
+                        }
+                        else
+                        {
+                            // otherwise, we dump the value strings quoted
+                            // FIXME should worry about quoting issues here
+                            for (int rowIndex = 0; rowIndex < rowCount; ++rowIndex)
+                            {
+                                QTableWidgetItem *item = table->item(rowIndex, clickedColumnIndex);
+                                
+                                if (rowIndex > 0)
+                                    string.append(QString(", \""));
+                                else
+                                    string.append("\"");
+                                
+                                string.append(item->text());
+                                string.append("\"");
+                            }
+                        }
+                        
+                        QClipboard *clipboard = QGuiApplication::clipboard();
+                        clipboard->setText(string);
+                    }
+                    else if (action == graphData1DAction)
+                    {
+                        // all values are convertible to double; guaranteed above
+                        double *y_values = (double *)malloc(rowCount * sizeof(double));
+                        
+                        for (int rowIndex = 0; rowIndex < rowCount; ++rowIndex)
+                        {
+                            QTableWidgetItem *item = table->item(rowIndex, clickedColumnIndex);
+                            QString text = item->text();
+                            double value;
+                            
+                            if (text == "NAN")
+                                value = std::numeric_limits<double>::quiet_NaN();
+                            else if (text == "INF")
+                                value = std::numeric_limits<double>::infinity();
+                            else if (text == "-INF")
+                                value = -std::numeric_limits<double>::infinity();
+                            else
+                                value = text.toDouble();
+                            
+                            y_values[rowIndex] = value;
+                        }
+                        
+                        parentSLiMWindow->plotLogFileData_1D(columnName, columnName, y_values, rowCount);
+                    }
+                    else if (action)    // graphData2DAction
+                    {
+                        // all values are convertible to double; guaranteed above
+                        QVariant actiondata = action->data();
+                        int xColumnIndex = actiondata.toInt();
+                        bool makeScatterPlot = false;
+                        
+                        if (xColumnIndex >= 10000)
+                        {
+                            xColumnIndex -= 10000;
+                            makeScatterPlot = true;
+                        }
+                        
+                        QString xColumnName = table->horizontalHeaderItem(xColumnIndex)->text();
+                        
+                        double *x_values = (double *)malloc(rowCount * sizeof(double));
+                        double *y_values = (double *)malloc(rowCount * sizeof(double));
+                        
+                        for (int rowIndex = 0; rowIndex < rowCount; ++rowIndex)
+                        {
+                            QTableWidgetItem *x_item = table->item(rowIndex, xColumnIndex);
+                            QTableWidgetItem *y_item = table->item(rowIndex, clickedColumnIndex);
+                            QString x_text = x_item->text();
+                            QString y_text = y_item->text();
+                            double x_value, y_value;
+                            
+                            if (x_text == "NAN")
+                                x_value = std::numeric_limits<double>::quiet_NaN();
+                            else if (x_text == "INF")
+                                x_value = std::numeric_limits<double>::infinity();
+                            else if (x_text == "-INF")
+                                x_value = -std::numeric_limits<double>::infinity();
+                            else
+                                x_value = x_text.toDouble();
+                            
+                            if (y_text == "NAN")
+                                y_value = std::numeric_limits<double>::quiet_NaN();
+                            else if (y_text == "INF")
+                                y_value = std::numeric_limits<double>::infinity();
+                            else if (y_text == "-INF")
+                                y_value = -std::numeric_limits<double>::infinity();
+                            else
+                                y_value = y_text.toDouble();
+                            
+                            x_values[rowIndex] = x_value;
+                            y_values[rowIndex] = y_value;
+                        }
+                        
+                        QString title = QString("%1 ~ %2").arg(columnName).arg(xColumnName);
+                        
+                        parentSLiMWindow->plotLogFileData_2D(title, xColumnName, columnName, x_values, y_values, rowCount, makeScatterPlot);
+                    }
+                }
+            }
+        }
+    }
+}
+
+EidosValue_SP QtSLiMDebugOutputWindow::dataForColumn(LogFile *logFile, int64_t columnIndex)
+{
+    const std::string &logfile_path = logFile->UserFilePath();
+    QTableWidget *table = logFileTableForPath(logfile_path);
+    
+    if (table)
+    {
+        int rowCount = table->rowCount();
+        int columnCount = table->columnCount();
+        
+        if ((rowCount > 0) && (columnCount > 0) && (columnIndex < columnCount))
+        {
+            bool columnIsNumeric = true;        // were any conversion errors to double detected?
+            
+            for (int rowIndex = 0; rowIndex < rowCount; ++rowIndex)
+            {
+                QTableWidgetItem *item = table->item(rowIndex, columnIndex);
+                
+                if (item)
+                {
+                    QString itemText = item->text();
+                    
+                    if ((itemText == "NAN") || (itemText == "INF") || (itemText == "-INF"))
+                    {
+                        // NAN / INF / -INF are acceptable as double values, although
+                        // whatever parser the data ends up in might not like it...
+                    }
+                    else
+                    {
+                        bool ok;
+                        
+                        itemText.toDouble(&ok);
+                        if (!ok)
+                        {
+                            columnIsNumeric = false;
+                            break;
+                        }
+                    }
+                }
+            }
+            
+            if (columnIsNumeric)
+            {
+                EidosValue_Float *float_result = (new (gEidosValuePool->AllocateChunk()) EidosValue_Float())->resize_no_initialize(rowCount);
+                
+                for (int rowIndex = 0; rowIndex < rowCount; ++rowIndex)
+                {
+                    QTableWidgetItem *item = table->item(rowIndex, columnIndex);
+                    QString text = item->text();
+                    double value;
+                    
+                    if (text == "NAN")
+                        value = std::numeric_limits<double>::quiet_NaN();
+                    else if (text == "INF")
+                        value = std::numeric_limits<double>::infinity();
+                    else if (text == "-INF")
+                        value = -std::numeric_limits<double>::infinity();
+                    else
+                        value = text.toDouble();
+                    
+                    float_result->set_float_no_check(value, rowIndex);
+                }
+                
+                return EidosValue_SP(float_result);
+            }
+            else
+            {
+                EidosValue_String *string_result = (new (gEidosValuePool->AllocateChunk()) EidosValue_String())->Reserve(rowCount);
+                
+                for (int rowIndex = 0; rowIndex < rowCount; ++rowIndex)
+                {
+                    QTableWidgetItem *item = table->item(rowIndex, columnIndex);
+                    QString text = item->text();
+                    
+                    string_result->PushString(text.toStdString());
+                }
+                
+                return EidosValue_SP(string_result);
+            }
+        }
+    }
+    
+    return gStaticEidosValueNULL;
+}
+
+EidosValue_SP QtSLiMDebugOutputWindow::dataForColumn(LogFile *logFile, const std::string &columnName)
+{
+    std::vector<std::string> columnNames = logFile->SortedKeys_StringKeys();
+    auto columnIter = std::find(columnNames.begin(), columnNames.end(), columnName);
+    
+    if (columnIter != columnNames.end())
+        return dataForColumn(logFile, std::distance(columnNames.begin(), columnIter));
+    
+    return gStaticEidosValueNULL;
 }
 
 void QtSLiMDebugOutputWindow::takeFileOutput(std::vector<std::string> &lines, bool append, const std::string &path)

@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 11/24/2019.
-//  Copyright (c) 2019-2023 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2019-2024 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -22,6 +22,7 @@
 
 #include <QPlainTextEdit>
 #include <QPalette>
+#include <QtGlobal>     // for QT_VERSION
 
 #include "eidos_interpreter.h"
 #include "eidos_type_interpreter.h"
@@ -122,7 +123,11 @@ protected:
     
     // used to maintain the correct cursor (pointing hand when option is pressed)
     void fixMouseCursor(void);
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    virtual void enterEvent(QEnterEvent *p_event) override;
+#else
     virtual void enterEvent(QEvent *p_event) override;
+#endif
     
     // keeping track of undo/redo availability
     bool undoAvailable_ = false;
@@ -190,7 +195,10 @@ public:
     void clearScriptBlockColoring(void);
     void addScriptBlockColoring(int startPos, int endPos, Species *species);
     
+    QString exportAsHtml(void);
+    
 public slots:
+    void copyAsHTML(void);
     void shiftSelectionLeft(void);
     void shiftSelectionRight(void);
     void commentUncommentSelection(void);

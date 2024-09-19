@@ -57,7 +57,10 @@ cmake_minimum_required (VERSION 2.8.12 FATAL_ERROR)
 option(TIDY "Run clang-tidy on SLiM (for development)" OFF)
 
 if(TIDY)
-	cmake_minimum_required(VERSION 3.6 FATAL_ERROR)
+	# cmake_minimum_required(VERSION 3.6 FATAL_ERROR)
+  if(CMAKE_VERSION VERSION_LESS "3.6")
+    message(FATAL_ERROR "To use the clang-tidy wrapper TIDY in this project you will need a version of CMake at least as new as 3.6.")
+  endif()
 	message(STATUS "TIDY is ${TIDY}; building with clang-tidy (for development)")
 	set(CMAKE_C_COMPILER "/opt/local/libexec/llvm-17/bin/clang")
 	set(CMAKE_CXX_COMPILER "/opt/local/libexec/llvm-17/bin/clang++")
@@ -95,12 +98,17 @@ if(NOT CMAKE_BUILD_TYPE)
 endif(NOT CMAKE_BUILD_TYPE)
 
 # Add "-D BUILD_SLIMGUI=ON" to the CMake command to build SLiMgui
-# This requires that Qt 5, a widget framework, is installed
-option(BUILD_SLIMGUI "Build the Qt5-based GUI for SLiM" OFF)
+# This requires that Qt, a widget framework, is installed
+option(BUILD_SLIMGUI "Build the Qt-based GUI for SLiM" OFF)
 
 # Add "-D PARALLEL=ON" to the CMake command to make a parallel (multi-threaded) build
 # This is supported only for the command-line tools, not for SLiMgui; do not set BUILD_SLIMGUI
 option(PARALLEL "Build parallel versions of eidos and slim" OFF)
+
+if(PARALLEL)
+	# BCH 12/4/2023: Parallel SLiM is presently unreleased and unsupported.  Caveat lector.
+	message(FATAL_ERROR "Multithreaded SLiM is not released, not thoroughly tested, and generally not yet ready for prime time.  It is not recommended for end-user use, especially not for 'production' runs, and the documentation for it is not yet public.  Please do not ask for any kind of support for this feature if you choose to experiment with it." )
+endif(PARALLEL)
 
 # Add "-D PROFILE=ON" to the CMake command to make a build of command-line slim with runtime profiling
 # This makes SLiM slower, so it is not for production use.  It may be set ON only for Release builds.
@@ -237,42 +245,42 @@ if(BUILD_LTO)
 endif()
 
 # GSL - adding /usr/local/include so all targets that use GSL_INCLUDES get omp.h
-set(TARGET_NAME gsl)
+set(TARGET_NAME_GSL gsl)
 file(GLOB_RECURSE GSL_SOURCES ${PROJECT_SOURCE_DIR}/gsl/*.c ${PROJECT_SOURCE_DIR}/gsl/*/*.c)
 set(GSL_INCLUDES ${PROJECT_SOURCE_DIR}/gsl ${PROJECT_SOURCE_DIR}/gsl/specfunc ${PROJECT_SOURCE_DIR}/gsl/blas ${PROJECT_SOURCE_DIR}/gsl/rng ${PROJECT_SOURCE_DIR}/gsl/cdf ${PROJECT_SOURCE_DIR}/gsl/vector ${PROJECT_SOURCE_DIR}/gsl/err ${PROJECT_SOURCE_DIR}/gsl/sys ${PROJECT_SOURCE_DIR}/gsl/randist ${PROJECT_SOURCE_DIR}/gsl/matrix ${PROJECT_SOURCE_DIR}/gsl/cblas ${PROJECT_SOURCE_DIR}/gsl/complex ${PROJECT_SOURCE_DIR}/gsl/block ${PROJECT_SOURCE_DIR}/gsl/interpolation ${PROJECT_SOURCE_DIR}/gsl/linalg /usr/local/include)
-add_library(${TARGET_NAME} STATIC ${GSL_SOURCES})
-target_include_directories(${TARGET_NAME} PUBLIC ${GSL_INCLUDES})
+add_library(${TARGET_NAME_GSL} STATIC ${GSL_SOURCES})
+target_include_directories(${TARGET_NAME_GSL} PUBLIC ${GSL_INCLUDES})
 
 # ZLIB
-set(TARGET_NAME eidos_zlib)
+set(TARGET_NAME_ZLIB eidos_zlib)
 file(GLOB_RECURSE ZLIB_SOURCES ${PROJECT_SOURCE_DIR}/eidos_zlib/*.c)
 set(ZLIB_INCLUDES ${PROJECT_SOURCE_DIR}/eidos_zlib)
-add_library(${TARGET_NAME} STATIC ${ZLIB_SOURCES})
-target_include_directories(${TARGET_NAME} PUBLIC)
+add_library(${TARGET_NAME_ZLIB} STATIC ${ZLIB_SOURCES})
+target_include_directories(${TARGET_NAME_ZLIB} PUBLIC)
 
 # KASTORE
-set(TARGET_NAME kastore)
+set(TARGET_NAME_KASTORE kastore)
 file(GLOB_RECURSE KASTORE_SOURCES ${PROJECT_SOURCE_DIR}/treerec/tskit/kastore/*.c)
 set(KASTORE_INCLUDES ${PROJECT_SOURCE_DIR}/treerec/tskit/kastore)
-add_library(${TARGET_NAME} STATIC ${KASTORE_SOURCES})
-target_include_directories(${TARGET_NAME} PUBLIC)
+add_library(${TARGET_NAME_KASTORE} STATIC ${KASTORE_SOURCES})
+target_include_directories(${TARGET_NAME_KASTORE} PUBLIC)
 
 # TSKIT
-set(TARGET_NAME tables)
+set(TARGET_NAME_TSKIT tables)
 file(GLOB_RECURSE TABLE_SOURCES ${PROJECT_SOURCE_DIR}/treerec/tskit/*.c)
 set(TSKIT_INCLUDES ${PROJECT_SOURCE_DIR}/treerec)
-add_library(${TARGET_NAME} STATIC ${TABLE_SOURCES})
-target_include_directories(${TARGET_NAME} PRIVATE ${GSL_INCLUDES} ${KASTORE_INCLUDES})
-target_include_directories(${TARGET_NAME} PUBLIC ${KASTORE_INCLUDES} ${TSKIT_INCLUDES})
+add_library(${TARGET_NAME_TSKIT} STATIC ${TABLE_SOURCES})
+target_include_directories(${TARGET_NAME_TSKIT} PRIVATE ${GSL_INCLUDES} ${KASTORE_INCLUDES})
+target_include_directories(${TARGET_NAME_TSKIT} PUBLIC ${KASTORE_INCLUDES} ${TSKIT_INCLUDES})
 if(WIN32)
-    target_link_libraries(${TARGET_NAME} PUBLIC gnu)
+    target_link_libraries(${TARGET_NAME_TSKIT} PUBLIC gnu)
 endif()
 
 # SLIM
 if(PARALLEL)
-	set(TARGET_NAME slim_multi)
+	set(TARGET_NAME_SLIM slim_multi)
 else()
-	set(TARGET_NAME slim)
+	set(TARGET_NAME_SLIM slim)
 endif(PARALLEL)
 file(GLOB_RECURSE SLIM_SOURCES ${PROJECT_SOURCE_DIR}/core/*.cpp ${PROJECT_SOURCE_DIR}/eidos/*.cpp)
 
@@ -280,43 +288,43 @@ file(GLOB_RECURSE SLIM_SOURCES ${PROJECT_SOURCE_DIR}/core/*.cpp ${PROJECT_SOURCE
 configure_file("${PROJECT_SOURCE_DIR}/cmake/GitSHA1.cpp.in" "${CMAKE_CURRENT_BINARY_DIR}/GitSHA1.cpp" @ONLY)
 list(APPEND SLIM_SOURCES "${CMAKE_CURRENT_BINARY_DIR}/GitSHA1.cpp" ${PROJECT_SOURCE_DIR}/cmake/GitSHA1.h)
 
-add_executable(${TARGET_NAME} ${SLIM_SOURCES})
-target_include_directories(${TARGET_NAME} PRIVATE ${GSL_INCLUDES} "${PROJECT_SOURCE_DIR}/core" "${PROJECT_SOURCE_DIR}/eidos" PUBLIC "${Boost_INCLUDE_DIRS}")
-target_link_libraries(${TARGET_NAME} PUBLIC gsl eidos_zlib tables ascent::ascent)
+add_executable(${TARGET_NAME_SLIM} ${SLIM_SOURCES})
+target_include_directories(${TARGET_NAME_SLIM} PRIVATE ${GSL_INCLUDES} "${PROJECT_SOURCE_DIR}/core" "${PROJECT_SOURCE_DIR}/eidos" PUBLIC "${Boost_INCLUDE_DIRS}")
+target_link_libraries(${TARGET_NAME_SLIM} PUBLIC gsl eidos_zlib tables ascent::ascent)
 
 if(PARALLEL)
 	# linking in the OpenMP library is maybe automatic with gcc?
-	#target_link_libraries(${TARGET_NAME} PUBLIC omp)
+	#target_link_libraries(${TARGET_NAME_SLIM} PUBLIC omp)
 endif()
 if(WIN32)
     set_source_files_properties(${SLIM_SOURCES} PROPERTIES COMPILE_FLAGS "-include config.h")
     set_source_files_properties(${GNULIB_NAMESPACE_SOURCES} TARGET_DIRECTORY slim PROPERTIES COMPILE_FLAGS "-include config.h -DGNULIB_NAMESPACE=gnulib")
-    target_include_directories(${TARGET_NAME} BEFORE PUBLIC ${GNU_DIR})
-    target_link_libraries(${TARGET_NAME} PUBLIC gnu)
+    target_include_directories(${TARGET_NAME_SLIM} BEFORE PUBLIC ${GNU_DIR})
+    target_link_libraries(${TARGET_NAME_SLIM} PUBLIC gnu)
 endif()
 
 # EIDOS
 if(PARALLEL)
-	set(TARGET_NAME eidos_multi)
+	set(TARGET_NAME_EIDOS eidos_multi)
 else()
-	set(TARGET_NAME eidos)
+	set(TARGET_NAME_EIDOS eidos)
 endif(PARALLEL)
 
 file(GLOB_RECURSE EIDOS_SOURCES  ${PROJECT_SOURCE_DIR}/eidos/*.cpp  ${PROJECT_SOURCE_DIR}/eidostool/*.cpp)
-add_executable(${TARGET_NAME} ${EIDOS_SOURCES})
-target_include_directories(${TARGET_NAME} PRIVATE ${GSL_INCLUDES} "${PROJECT_SOURCE_DIR}/eidos" PUBLIC "${Boost_INCLUDE_DIRS}")
-target_link_libraries(${TARGET_NAME} PUBLIC gsl eidos_zlib tables ascent::ascent)
+add_executable(${TARGET_NAME_EIDOS} ${EIDOS_SOURCES})
+target_include_directories(${TARGET_NAME_EIDOS} PRIVATE ${GSL_INCLUDES} "${PROJECT_SOURCE_DIR}/eidos" PUBLIC "${Boost_INCLUDE_DIRS}")
+target_link_libraries(${TARGET_NAME_EIDOS} PUBLIC gsl eidos_zlib tables ascent::ascent)
 
 
 if(PARALLEL)
 	# linking in the OpenMP library is maybe automatic with gcc?
-	#target_link_libraries(${TARGET_NAME} PUBLIC omp)
+	#target_link_libraries(${TARGET_NAME_EIDOS} PUBLIC omp)
 endif()
 if(WIN32)
     set_source_files_properties(${EIDOS_SOURCES} PROPERTIES COMPILE_FLAGS "-include config.h")
     set_source_files_properties(${GNULIB_NAMESPACE_SOURCES} TARGET_DIRECTORY slim eidos PROPERTIES COMPILE_FLAGS "-include config.h -DGNULIB_NAMESPACE=gnulib")
-    target_include_directories(${TARGET_NAME} BEFORE PUBLIC ${GNU_DIR})
-    target_link_libraries(${TARGET_NAME} PUBLIC gnu)
+    target_include_directories(${TARGET_NAME_EIDOS} BEFORE PUBLIC ${GNU_DIR})
+    target_link_libraries(${TARGET_NAME_EIDOS} PUBLIC gnu)
 endif()
 
 if(PARALLEL)
@@ -327,41 +335,83 @@ endif(PARALLEL)
 
 # SLiMgui -- this can be enabled with the -DBUILD_SLIMGUI=ON option to cmake
 if(BUILD_SLIMGUI)
-cmake_minimum_required (VERSION 3.1.0 FATAL_ERROR)
-set(TARGET_NAME SLiMgui)
-find_package(OpenGL REQUIRED)
-find_package(Qt5 REQUIRED
-    Core
-    Gui
-    Widgets
-)
-if(WIN32)
-    set_source_files_properties("${CMAKE_CURRENT_BINARY_DIR}/${TARGET_NAME}_autogen/mocs_compilation.cpp" PROPERTIES COMPILE_FLAGS "-include config.h -DGNULIB_NAMESPACE=gnulib")
-endif()
-set(CMAKE_AUTOMOC ON)
-set(CMAKE_AUTORCC ON)
-set(CMAKE_AUTOUIC ON)
-list(REMOVE_ITEM SLIM_SOURCES ${PROJECT_SOURCE_DIR}/core/main.cpp)
-file(GLOB_RECURSE QTSLIM_SOURCES ${PROJECT_SOURCE_DIR}/QtSLiM/*.cpp ${PROJECT_SOURCE_DIR}/QtSLiM/*.qrc ${PROJECT_SOURCE_DIR}/eidos/*.cpp)
-add_executable(${TARGET_NAME} "${QTSLIM_SOURCES}" "${SLIM_SOURCES}")
-set_target_properties( ${TARGET_NAME} PROPERTIES LINKER_LANGUAGE CXX)
-target_compile_definitions( ${TARGET_NAME} PRIVATE EIDOSGUI=1 SLIMGUI=1)
-target_include_directories(${TARGET_NAME} PUBLIC ${GSL_INCLUDES} "${PROJECT_SOURCE_DIR}/QtSLiM" "${PROJECT_SOURCE_DIR}/eidos" "${PROJECT_SOURCE_DIR}/core" "${PROJECT_SOURCE_DIR}/treerec" "${PROJECT_SOURCE_DIR}/treerec/tskit/kastore")
-if(APPLE)
-	target_link_libraries( ${TARGET_NAME} PUBLIC Qt5::Widgets Qt5::Core Qt5::Gui OpenGL::GL gsl tables eidos_zlib )
-else()
-    if(WIN32)
-        set_source_files_properties(${QTSLIM_SOURCES} PROPERTIES COMPILE_FLAGS "-include config.h")
-        set_source_files_properties(${GNULIB_NAMESPACE_SOURCES} TARGET_DIRECTORY slim eidos SLiMgui PROPERTIES COMPILE_FLAGS "-include config.h -DGNULIB_NAMESPACE=gnulib")
-        target_include_directories(${TARGET_NAME} BEFORE PUBLIC ${GNU_DIR})
-        target_link_libraries(${TARGET_NAME} PUBLIC Qt5::Widgets Qt5::Core Qt5::Gui OpenGL::GL gsl tables eidos_zlib gnu )
-    else()
-	    target_link_libraries( ${TARGET_NAME} PUBLIC Qt5::Widgets Qt5::Core Qt5::Gui OpenGL::GL gsl tables eidos_zlib )
+  cmake_minimum_required (VERSION 3.1.0 FATAL_ERROR)
+  set(TARGET_NAME_SLIMGUI SLiMgui)
+  find_package(OpenGL REQUIRED)
 
-	    install(DIRECTORY data/ DESTINATION share)
+  # Default to Qt6 if available, fall back to Qt5; this defines QT_VERSION_MAJOR to be either 5 or 6
+  # This is complicated slightly by the modules needed differing between Qt5 and Qt6
+  # see https://doc.qt.io/qt-6/cmake-qt5-and-qt6-compatibility.html
+  # I found that find_package(QT NAMES Qt6 Qt5 ...) was behaving oddly, so I shifted to the below
+  find_package(Qt6 COMPONENTS Core Gui Widgets OpenGLWidgets)
+  if(Qt6_FOUND)
+    set(QT_VERSION_MAJOR 6)
+    message(STATUS "Found Qt6 (${Qt6_VERSION}) at ${QT6_INSTALL_PREFIX}")
+  else()
+    find_package(Qt5 COMPONENTS Core Gui Widgets)
+    if(Qt5_FOUND)
+      set(QT_VERSION_MAJOR 5)
+      message(STATUS "Could not find Qt6; if this is unexpected, you may wish to set Qt6_DIR and/or CMAKE_PREFIX_PATH")
+      message(STATUS "Found Qt5 (${Qt5_VERSION}) at ${Qt5_DIR}")
+      # note that on macOS, Qt5 has only the x86_64 architecture, so if you are on macOS-arm64 your build will fail
+      # you can supply -D CMAKE_OSX_ARCHITECTURES="x86_64" at the command line and it should build for x86_64
+    else()
+      message(FATAL_ERROR "Could not find Qt5 or Qt6; you may wish to set Qt6_DIR, Qt5_DIR, and/or CMAKE_PREFIX_PATH")
     endif()
-endif()
-install(TARGETS ${TARGET_NAME} DESTINATION bin)
+  endif()
+  
+  # a useful bit of debugging code that prints all defined variables
+  #get_cmake_property(_variableNames VARIABLES)
+  #list (SORT _variableNames)
+  #foreach (_variableName ${_variableNames})
+  #  message(STATUS "${_variableName}=${${_variableName}}")
+  #endforeach()
+
+  if(WIN32)
+    set_source_files_properties("${CMAKE_CURRENT_BINARY_DIR}/${TARGET_NAME_SLIMGUI}_autogen/mocs_compilation.cpp" PROPERTIES COMPILE_FLAGS "-include config.h -DGNULIB_NAMESPACE=gnulib")
+  endif()
+
+  set(CMAKE_AUTOMOC ON)
+  set(CMAKE_AUTORCC ON)
+  set(CMAKE_AUTOUIC ON)
+  list(REMOVE_ITEM SLIM_SOURCES ${PROJECT_SOURCE_DIR}/core/main.cpp)
+  file(GLOB_RECURSE QTSLIM_SOURCES ${PROJECT_SOURCE_DIR}/QtSLiM/*.cpp ${PROJECT_SOURCE_DIR}/QtSLiM/*.qrc ${PROJECT_SOURCE_DIR}/eidos/*.cpp)
+  add_executable(${TARGET_NAME_SLIMGUI} "${QTSLIM_SOURCES}" "${SLIM_SOURCES}")
+  set_target_properties( ${TARGET_NAME_SLIMGUI} PROPERTIES LINKER_LANGUAGE CXX)
+  target_compile_definitions( ${TARGET_NAME_SLIMGUI} PRIVATE EIDOSGUI=1 SLIMGUI=1)
+  target_include_directories(${TARGET_NAME_SLIMGUI} PUBLIC ${GSL_INCLUDES} "${PROJECT_SOURCE_DIR}/QtSLiM" "${PROJECT_SOURCE_DIR}/eidos" "${PROJECT_SOURCE_DIR}/core" "${PROJECT_SOURCE_DIR}/treerec" "${PROJECT_SOURCE_DIR}/treerec/tskit/kastore")
+  
+  # Qt dependencies, which depend on the Qt version used.  For Qt6, we also need C++17; the last -std flag supplied ought to take priority.
+  if(${QT_VERSION_MAJOR} EQUAL 5)
+    target_link_libraries( ${TARGET_NAME_SLIMGUI} PUBLIC Qt5::Widgets Qt5::Core Qt5::Gui )
+  else()
+    target_link_libraries( ${TARGET_NAME_SLIMGUI} PUBLIC Qt6::Widgets Qt6::Core Qt6::Gui Qt6::OpenGLWidgets )
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -std=c17")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++17")
+  endif()
+  
+  # Operating System-specific install stuff.
+  if(APPLE)
+    target_link_libraries( ${TARGET_NAME_SLIMGUI} PUBLIC OpenGL::GL gsl tables eidos_zlib )
+  else()
+    if(WIN32)
+      set_source_files_properties(${QTSLIM_SOURCES} PROPERTIES COMPILE_FLAGS "-include config.h")
+      set_source_files_properties(${GNULIB_NAMESPACE_SOURCES} TARGET_DIRECTORY slim eidos SLiMgui PROPERTIES COMPILE_FLAGS "-include config.h -DGNULIB_NAMESPACE=gnulib")
+      target_include_directories(${TARGET_NAME_SLIMGUI} BEFORE PUBLIC ${GNU_DIR})
+      target_link_libraries(${TARGET_NAME_SLIMGUI} PUBLIC OpenGL::GL gsl tables eidos_zlib gnu )
+    else()
+      target_link_libraries( ${TARGET_NAME_SLIMGUI} PUBLIC OpenGL::GL gsl tables eidos_zlib )
+
+      # Install icons and desktop files to the data root directory (usually /usr/local/share, or /usr/share).
+      if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.14")
+        install(DIRECTORY data/ TYPE DATA)
+      else()
+        message(WARNING "The CMake version is less than 3.14, so installation of icons, desktop files, mime types, etc. must occur manually.")
+      endif()
+    endif()
+  endif()
+
+  install(TARGETS ${TARGET_NAME_SLIMGUI} DESTINATION bin)
 endif(BUILD_SLIMGUI)
 
 
@@ -421,7 +471,22 @@ if(TIDY)
 	endif(BUILD_SLIMGUI)
 endif()
 
+# add testing so it can be called using make test
+enable_testing()
 
+# test SLiM
+add_test(
+  NAME testSLiM
+  COMMAND ${TARGET_NAME_SLIM} -testSLiM
+)
+# test Eidos from SLiM
+add_test(
+  NAME testEidosSLiM
+  COMMAND ${TARGET_NAME_SLIM} -testEidos
+)
 
-
-
+# test Eidos from Eidos
+add_test(
+  NAME testEidosEidos
+  COMMAND ${TARGET_NAME_EIDOS} -testEidos
+)

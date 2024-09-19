@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 1/4/15.
-//  Copyright (c) 2015-2023 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2015-2024 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -98,10 +98,10 @@ void SLiM_WarmUp(void)
 		SLiM_ConfigureContext();
 		
 		// Allocate global permanents
-		gStaticEidosValue_StringA = EidosValue_String_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String_singleton(gStr_A));
-		gStaticEidosValue_StringC = EidosValue_String_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String_singleton(gStr_C));
-		gStaticEidosValue_StringG = EidosValue_String_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String_singleton(gStr_G));
-		gStaticEidosValue_StringT = EidosValue_String_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String_singleton(gStr_T));
+		gStaticEidosValue_StringA = EidosValue_String_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String(gStr_A));
+		gStaticEidosValue_StringC = EidosValue_String_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String(gStr_C));
+		gStaticEidosValue_StringG = EidosValue_String_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String(gStr_G));
+		gStaticEidosValue_StringT = EidosValue_String_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String(gStr_T));
 		
 #if DO_MEMORY_CHECKS
 		// Check for a memory limit and prepare for memory-limit testing
@@ -241,7 +241,7 @@ Community &SLiM_GetCommunityFromInterpreter(EidosInterpreter &p_interpreter)
 
 slim_objectid_t SLiM_ExtractObjectIDFromEidosValue_is(EidosValue *p_value, int p_index, char p_prefix_char)
 {
-	return (p_value->Type() == EidosValueType::kValueInt) ? SLiMCastToObjectidTypeOrRaise(p_value->IntAtIndex(p_index, nullptr)) : SLiMEidosScript::ExtractIDFromStringWithPrefix(p_value->StringAtIndex(p_index, nullptr), p_prefix_char, nullptr);
+	return (p_value->Type() == EidosValueType::kValueInt) ? SLiMCastToObjectidTypeOrRaise(p_value->IntAtIndex_NOCAST(p_index, nullptr)) : SLiMEidosScript::ExtractIDFromStringWithPrefix(p_value->StringAtIndex_NOCAST(p_index, nullptr), p_prefix_char, nullptr);
 }
 
 MutationType *SLiM_ExtractMutationTypeFromEidosValue_io(EidosValue *p_value, int p_index, Community *p_community, Species *p_species, const char *p_method_name)
@@ -250,7 +250,7 @@ MutationType *SLiM_ExtractMutationTypeFromEidosValue_io(EidosValue *p_value, int
 	
 	if (p_value->Type() == EidosValueType::kValueInt)
 	{
-		slim_objectid_t mutation_type_id = SLiMCastToObjectidTypeOrRaise(p_value->IntAtIndex(p_index, nullptr));
+		slim_objectid_t mutation_type_id = SLiMCastToObjectidTypeOrRaise(p_value->IntAtIndex_NOCAST(p_index, nullptr));
 		
 		if (p_species)
 		{
@@ -280,9 +280,9 @@ MutationType *SLiM_ExtractMutationTypeFromEidosValue_io(EidosValue *p_value, int
 #if DEBUG
 		// Use dynamic_cast<> only in DEBUG since it is hella slow
 		// the class of the object here should be guaranteed by the caller anyway
-		found_muttype = dynamic_cast<MutationType *>(p_value->ObjectElementAtIndex(p_index, nullptr));
+		found_muttype = dynamic_cast<MutationType *>(p_value->ObjectElementAtIndex_NOCAST(p_index, nullptr));
 #else
-		found_muttype = (MutationType *)(p_value->ObjectElementAtIndex(p_index, nullptr));
+		found_muttype = (MutationType *)(p_value->ObjectElementAtIndex_NOCAST(p_index, nullptr));
 #endif
 		
 		if (!found_muttype)
@@ -301,7 +301,7 @@ GenomicElementType *SLiM_ExtractGenomicElementTypeFromEidosValue_io(EidosValue *
 	
 	if (p_value->Type() == EidosValueType::kValueInt)
 	{
-		slim_objectid_t getype_id = SLiMCastToObjectidTypeOrRaise(p_value->IntAtIndex(p_index, nullptr));
+		slim_objectid_t getype_id = SLiMCastToObjectidTypeOrRaise(p_value->IntAtIndex_NOCAST(p_index, nullptr));
 		
 		if (p_species)
 		{
@@ -331,9 +331,9 @@ GenomicElementType *SLiM_ExtractGenomicElementTypeFromEidosValue_io(EidosValue *
 #if DEBUG
 		// Use dynamic_cast<> only in DEBUG since it is hella slow
 		// the class of the object here should be guaranteed by the caller anyway
-		found_getype = dynamic_cast<GenomicElementType *>(p_value->ObjectElementAtIndex(p_index, nullptr));
+		found_getype = dynamic_cast<GenomicElementType *>(p_value->ObjectElementAtIndex_NOCAST(p_index, nullptr));
 #else
-		found_getype = (GenomicElementType *)(p_value->ObjectElementAtIndex(p_index, nullptr));
+		found_getype = (GenomicElementType *)(p_value->ObjectElementAtIndex_NOCAST(p_index, nullptr));
 #endif
 		
 		if (!found_getype)
@@ -352,7 +352,7 @@ Subpopulation *SLiM_ExtractSubpopulationFromEidosValue_io(EidosValue *p_value, i
 	
 	if (p_value->Type() == EidosValueType::kValueInt)
 	{
-		slim_objectid_t source_subpop_id = SLiMCastToObjectidTypeOrRaise(p_value->IntAtIndex(p_index, nullptr));
+		slim_objectid_t source_subpop_id = SLiMCastToObjectidTypeOrRaise(p_value->IntAtIndex_NOCAST(p_index, nullptr));
 		
 		if (p_species)
 		{
@@ -382,9 +382,9 @@ Subpopulation *SLiM_ExtractSubpopulationFromEidosValue_io(EidosValue *p_value, i
 #if DEBUG
 		// Use dynamic_cast<> only in DEBUG since it is hella slow
 		// the class of the object here should be guaranteed by the caller anyway
-		found_subpop = dynamic_cast<Subpopulation *>(p_value->ObjectElementAtIndex(p_index, nullptr));
+		found_subpop = dynamic_cast<Subpopulation *>(p_value->ObjectElementAtIndex_NOCAST(p_index, nullptr));
 #else
-		found_subpop = (Subpopulation *)(p_value->ObjectElementAtIndex(p_index, nullptr));
+		found_subpop = (Subpopulation *)(p_value->ObjectElementAtIndex_NOCAST(p_index, nullptr));
 #endif
 		
 		if (!found_subpop)
@@ -403,7 +403,7 @@ SLiMEidosBlock *SLiM_ExtractSLiMEidosBlockFromEidosValue_io(EidosValue *p_value,
 	
 	if (p_value->Type() == EidosValueType::kValueInt)
 	{
-		slim_objectid_t block_id = SLiMCastToObjectidTypeOrRaise(p_value->IntAtIndex(p_index, nullptr));
+		slim_objectid_t block_id = SLiMCastToObjectidTypeOrRaise(p_value->IntAtIndex_NOCAST(p_index, nullptr));
 		std::vector<SLiMEidosBlock*> &script_blocks = p_community->AllScriptBlocks();
 		
 		for (SLiMEidosBlock *temp_found_block : script_blocks)
@@ -421,9 +421,9 @@ SLiMEidosBlock *SLiM_ExtractSLiMEidosBlockFromEidosValue_io(EidosValue *p_value,
 #if DEBUG
 		// Use dynamic_cast<> only in DEBUG since it is hella slow
 		// the class of the object here should be guaranteed by the caller anyway
-		found_block = dynamic_cast<SLiMEidosBlock *>(p_value->ObjectElementAtIndex(p_index, nullptr));
+		found_block = dynamic_cast<SLiMEidosBlock *>(p_value->ObjectElementAtIndex_NOCAST(p_index, nullptr));
 #else
-		found_block = (SLiMEidosBlock *)(p_value->ObjectElementAtIndex(p_index, nullptr));
+		found_block = (SLiMEidosBlock *)(p_value->ObjectElementAtIndex_NOCAST(p_index, nullptr));
 #endif
 		
 		if (!found_block)
@@ -455,9 +455,9 @@ Species *SLiM_ExtractSpeciesFromEidosValue_No(EidosValue *p_value, int p_index, 
 #if DEBUG
 		// Use dynamic_cast<> only in DEBUG since it is hella slow
 		// the class of the object here should be guaranteed by the caller anyway
-		found_species = dynamic_cast<Species *>(p_value->ObjectElementAtIndex(p_index, nullptr));
+		found_species = dynamic_cast<Species *>(p_value->ObjectElementAtIndex_NOCAST(p_index, nullptr));
 #else
-		found_species = (Species *)(p_value->ObjectElementAtIndex(p_index, nullptr));
+		found_species = (Species *)(p_value->ObjectElementAtIndex_NOCAST(p_index, nullptr));
 #endif
 		
 		if (!found_species)
@@ -780,7 +780,7 @@ NucleotideArray::NucleotideArray(std::size_t p_length, const char *p_char_buffer
 	}
 }
 
-NucleotideArray::NucleotideArray(std::size_t p_length, const std::vector<std::string> &p_string_vector) : length_(p_length)
+NucleotideArray::NucleotideArray(std::size_t p_length, const std::string p_string_vector[]) : length_(p_length)
 {
 	buffer_ = (uint64_t *)malloc(((length_ + 31) / 32) * sizeof(uint64_t));
 	if (!buffer_)
@@ -852,7 +852,7 @@ EidosValue_SP NucleotideArray::NucleotidesAsIntegerVector(int64_t start, int64_t
 	else
 	{
 		// return a vector of integers, 3 0 3 0
-		EidosValue_Int_vector *int_result = (new (gEidosValuePool->AllocateChunk()) EidosValue_Int_vector())->resize_no_initialize((int)length);
+		EidosValue_Int *int_result = (new (gEidosValuePool->AllocateChunk()) EidosValue_Int())->resize_no_initialize((int)length);
 		
 		for (int value_index = 0; value_index < length; ++value_index)
 			int_result->set_int_no_check(NucleotideAtIndex(start + value_index), value_index);
@@ -874,7 +874,7 @@ EidosValue_SP NucleotideArray::NucleotidesAsCodonVector(int64_t start, int64_t e
 		int nuc3 = NucleotideAtIndex(start + 2);
 		int codon = nuc1 * 16 + nuc2 * 4 + nuc3;	// 0..63
 		
-		return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Int_singleton(codon));
+		return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Int(codon));
 	}
 	else
 	{
@@ -884,7 +884,7 @@ EidosValue_SP NucleotideArray::NucleotidesAsCodonVector(int64_t start, int64_t e
 		if (length % 3 != 0)
 			EIDOS_TERMINATION << "ERROR (NucleotideArray::NucleotidesAsCodonVector): to obtain codons, the requested sequence length must be a multiple of 3." << EidosTerminate();
 		
-		EidosValue_Int_vector *int_result = (new (gEidosValuePool->AllocateChunk()) EidosValue_Int_vector())->resize_no_initialize((int)length_3);
+		EidosValue_Int *int_result = (new (gEidosValuePool->AllocateChunk()) EidosValue_Int())->resize_no_initialize((int)length_3);
 		
 		for (int64_t value_index = 0; value_index < length_3; ++value_index)
 		{
@@ -921,7 +921,7 @@ EidosValue_SP NucleotideArray::NucleotidesAsStringVector(int64_t start, int64_t 
 	else
 	{
 		// return a vector of one-character strings, "T" "A" "T" "A"
-		EidosValue_String_vector *string_result = (new (gEidosValuePool->AllocateChunk()) EidosValue_String_vector())->Reserve((int)length);
+		EidosValue_String *string_result = (new (gEidosValuePool->AllocateChunk()) EidosValue_String())->Reserve((int)length);
 		
 		for (int value_index = 0; value_index < length; ++value_index)
 		{
@@ -961,8 +961,8 @@ EidosValue_SP NucleotideArray::NucleotidesAsStringSingleton(int64_t start, int64
 	else
 	{
 		// return a singleton string for the whole sequence, "TATA"; we munge the std::string inside the EidosValue to avoid memory copying, very naughty
-		EidosValue_String_singleton *string_result = (new (gEidosValuePool->AllocateChunk()) EidosValue_String_singleton(""));
-		std::string &nuc_string = string_result->StringValue_Mutable();
+		EidosValue_String *string_result = (new (gEidosValuePool->AllocateChunk()) EidosValue_String(""));
+		std::string &nuc_string = string_result->StringData_Mutable()[0];
 		
 		nuc_string.resize(length);	// create space for all the nucleotides we will generate
 		
@@ -1274,6 +1274,8 @@ const std::string &gStr_maxDistance = EidosRegisteredString("maxDistance", gID_m
 // mostly method names
 const std::string &gStr_ancestralNucleotides = EidosRegisteredString("ancestralNucleotides", gID_ancestralNucleotides);
 const std::string &gStr_nucleotides = EidosRegisteredString("nucleotides", gID_nucleotides);
+const std::string &gStr_genomicElementForPosition = EidosRegisteredString("genomicElementForPosition", gID_genomicElementForPosition);
+const std::string &gStr_hasGenomicElementForPosition = EidosRegisteredString("hasGenomicElementForPosition", gID_hasGenomicElementForPosition);
 const std::string &gStr_setAncestralNucleotides = EidosRegisteredString("setAncestralNucleotides", gID_setAncestralNucleotides);
 const std::string &gStr_setGeneConversion = EidosRegisteredString("setGeneConversion", gID_setGeneConversion);
 const std::string &gStr_setHotspotMap = EidosRegisteredString("setHotspotMap", gID_setHotspotMap);
@@ -1310,6 +1312,7 @@ const std::string &gStr_drawSelectionCoefficient = EidosRegisteredString("drawSe
 const std::string &gStr_setDistribution = EidosRegisteredString("setDistribution", gID_setDistribution);
 const std::string &gStr_addSubpop = EidosRegisteredString("addSubpop", gID_addSubpop);
 const std::string &gStr_addSubpopSplit = EidosRegisteredString("addSubpopSplit", gID_addSubpopSplit);
+const std::string &gStr_estimatedLastTick = EidosRegisteredString("estimatedLastTick", gID_estimatedLastTick);
 const std::string &gStr_deregisterScriptBlock = EidosRegisteredString("deregisterScriptBlock", gID_deregisterScriptBlock);
 const std::string &gStr_genomicElementTypesWithIDs = EidosRegisteredString("genomicElementTypesWithIDs", gID_genomicElementTypesWithIDs);
 const std::string &gStr_interactionTypesWithIDs = EidosRegisteredString("interactionTypesWithIDs", gID_interactionTypesWithIDs);
@@ -1317,6 +1320,7 @@ const std::string &gStr_mutationTypesWithIDs = EidosRegisteredString("mutationTy
 const std::string &gStr_scriptBlocksWithIDs = EidosRegisteredString("scriptBlocksWithIDs", gID_scriptBlocksWithIDs);
 const std::string &gStr_speciesWithIDs = EidosRegisteredString("speciesWithIDs", gID_speciesWithIDs);
 const std::string &gStr_subpopulationsWithIDs = EidosRegisteredString("subpopulationsWithIDs", gID_subpopulationsWithIDs);
+const std::string &gStr_subpopulationsWithNames = EidosRegisteredString("subpopulationsWithNames", gID_subpopulationsWithNames);
 const std::string &gStr_individualsWithPedigreeIDs = EidosRegisteredString("individualsWithPedigreeIDs", gID_individualsWithPedigreeIDs);
 const std::string &gStr_killIndividuals = EidosRegisteredString("killIndividuals", gID_killIndividuals);
 const std::string &gStr_mutationCounts = EidosRegisteredString("mutationCounts", gID_mutationCounts);
@@ -1351,7 +1355,9 @@ const std::string &gStr_treeSeqCoalesced = EidosRegisteredString("treeSeqCoalesc
 const std::string &gStr_treeSeqSimplify = EidosRegisteredString("treeSeqSimplify", gID_treeSeqSimplify);
 const std::string &gStr_treeSeqRememberIndividuals = EidosRegisteredString("treeSeqRememberIndividuals", gID_treeSeqRememberIndividuals);
 const std::string &gStr_treeSeqOutput = EidosRegisteredString("treeSeqOutput", gID_treeSeqOutput);
+const std::string &gStr__debug = EidosRegisteredString("_debug", gID__debug);
 const std::string &gStr_setMigrationRates = EidosRegisteredString("setMigrationRates", gID_setMigrationRates);
+const std::string &gStr_deviatePositions = EidosRegisteredString("deviatePositions", gID_deviatePositions);
 const std::string &gStr_pointDeviated = EidosRegisteredString("pointDeviated", gID_pointDeviated);
 const std::string &gStr_pointInBounds = EidosRegisteredString("pointInBounds", gID_pointInBounds);
 const std::string &gStr_pointReflected = EidosRegisteredString("pointReflected", gID_pointReflected);
@@ -1455,9 +1461,24 @@ const std::string &gStr_draw = EidosRegisteredString("draw", gID_draw);
 // SLiMgui instance name and methods
 const std::string &gStr_slimgui = EidosRegisteredString("slimgui", gID_slimgui);
 const std::string &gStr_pid = EidosRegisteredString("pid", gID_pid);
+const std::string &gStr_configureDisplay = EidosRegisteredString("configureDisplay", gID_configureDisplay);
+const std::string &gStr_createPlot = EidosRegisteredString("createPlot", gID_createPlot);
+const std::string &gStr_logFileData = EidosRegisteredString("logFileData", gID_logFileData);
 const std::string &gStr_openDocument = EidosRegisteredString("openDocument", gID_openDocument);
 const std::string &gStr_pauseExecution = EidosRegisteredString("pauseExecution", gID_pauseExecution);
-const std::string &gStr_configureDisplay = EidosRegisteredString("configureDisplay", gID_configureDisplay);
+const std::string &gStr_plotWithTitle = EidosRegisteredString("plotWithTitle", gID_plotWithTitle);
+
+// Plot methods and properties
+const std::string &gStr_abline = EidosRegisteredString("abline", gID_abline);
+const std::string &gStr_addLegend = EidosRegisteredString("addLegend", gID_addLegend);
+const std::string &gStr_axis = EidosRegisteredString("axis", gID_axis);
+const std::string &gStr_legendLineEntry = EidosRegisteredString("legendLineEntry", gID_legendLineEntry);
+const std::string &gStr_legendPointEntry = EidosRegisteredString("legendPointEntry", gID_legendPointEntry);
+const std::string &gStr_legendSwatchEntry = EidosRegisteredString("legendSwatchEntry", gID_legendSwatchEntry);
+const std::string &gStr_lines = EidosRegisteredString("lines", gID_lines);
+const std::string &gStr_points = EidosRegisteredString("points", gID_points);
+const std::string &gStr_text = EidosRegisteredString("text", gID_text);
+const std::string &gStr_title = EidosRegisteredString("title", gID_title);
 
 // mostly SLiM element types
 const std::string &gStr_Chromosome = EidosRegisteredString("Chromosome", gID_Chromosome);
@@ -1474,6 +1495,7 @@ const std::string &gStr_Subpopulation = EidosRegisteredString("Subpopulation", g
 //const std::string &gStr_Individual = EidosRegisteredString("Individual", gID_Individual);		// in Eidos; see EidosValue_Object::EidosValue_Object()
 const std::string &gStr_Substitution = EidosRegisteredString("Substitution", gID_Substitution);
 const std::string &gStr_InteractionType = EidosRegisteredString("InteractionType", gID_InteractionType);
+const std::string &gStr_Plot = EidosRegisteredString("Plot", gID_Plot);
 const std::string &gStr_SLiMgui = EidosRegisteredString("SLiMgui", gID_SLiMgui);
 
 // strings for LogFile

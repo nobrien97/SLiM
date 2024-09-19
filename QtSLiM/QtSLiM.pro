@@ -8,6 +8,9 @@ QT       += core gui opengl
 
 greaterThan(QT_MAJOR_VERSION, 4): QT += widgets
 
+# OpenGLWidget moved to openglwidgets in Qt6
+greaterThan(QT_MAJOR_VERSION, 5): QT += openglwidgets
+
 # Note that the target is SLiMgui now, but the old QtSLiM name lives on throughout the project
 TARGET = SLiMgui
 TEMPLATE = app
@@ -18,16 +21,20 @@ QMAKE_INFO_PLIST = QtSLiM_Info.plist
 ICON = QtSLiM_AppIcon.icns
 QMAKE_TARGET_BUNDLE_PREFIX = "org.messerlab"
 QMAKE_BUNDLE = "SLiMgui"		# This governs the location of our prefs, which we keep under org.messerlab.SLiMgui
-VERSION = 4.0.1
+VERSION = 4.3
 
 docIconFiles.files = $$PWD/QtSLiM_DocIcon.icns
 docIconFiles.path = Contents/Resources
 QMAKE_BUNDLE_DATA += docIconFiles
 
+# Uncomment this line for a production build, to build for both Intel and Apple Silicon.  This only works with Qt6;
+# Qt5 for macOS is built for Intel only.  Uncomment this for all components or you will get link errors.
+#QMAKE_APPLE_DEVICE_ARCHS = x86_64 arm64
+
 
 # Uncomment the lines below to enable ASAN (Address Sanitizer), for debugging of memory issues, in every
 # .pro file project-wide.  See https://clang.llvm.org/docs/AddressSanitizer.html for discussion of ASAN
-# You may also want to set ASAN_OPTIONS, in the Run Settings section of the Project tab in Qt Creator, to
+# Also set the ASAN_OPTIONS env. variable, in the Run Settings section of the Project tab in Qt Creator, to
 # strict_string_checks=1:detect_stack_use_after_return=1:check_initialization_order=1:strict_init_order=1
 # This also enables undefined behavior sanitizing, in conjunction with ASAN, because why not.
 #CONFIG += sanitizer sanitize_address sanitize_undefined
@@ -41,8 +48,10 @@ DEFINES += GIT_SHA1=$$GIT_HASH
 
 
 # Warn and error on usage of deprecated Qt APIs; see also -Wno-deprecated-declarations below
+# These flags are for development; we don't want production builds warning or erroring due to deprecation
 # DEFINES += QT_DEPRECATED_WARNINGS					# uncomment this to get warnings about deprecated APIs
-DEFINES += QT_DISABLE_DEPRECATED_BEFORE=0x050900    # disables all the APIs deprecated before Qt 5.9.0
+# DEFINES += QT_DISABLE_DEPRECATED_BEFORE=0x050F00    # disables all the APIs deprecated before Qt 5.15.0
+# DEFINES += QT_DISABLE_DEPRECATED_BEFORE=0x060500    # disables all the APIs deprecated before Qt 6.5.0
 
 
 # Bring in flag settings from the environment; see https://stackoverflow.com/a/17578151/2752221
@@ -56,9 +65,26 @@ QMAKE_CFLAGS += $$(CFLAGS)
 DEFINES += EIDOS_GUI
 DEFINES += SLIMGUI=1
 
-CONFIG += c++11
-CONFIG += c11
-QMAKE_CFLAGS += -std=c11
+
+# Uncomment this define to disable the use of OpenGL in SLiMgui completely.  This, plus removing the
+# link dependency on openglwidgets, should allow you to build SLiMgui without linking OpenGL at all.
+# I don't expect end users to need to do this; it is for testing purposes, to ensure than the code
+# path used when OpenGL is disabled in Preferences does not inadvertently make any OpenGL calls.
+#DEFINES += SLIM_NO_OPENGL
+
+
+greaterThan(QT_MAJOR_VERSION, 5) {
+	# For Qt6 we require C++17 (because Qt6 requires it), but don't use it ourselves
+	CONFIG += c++17
+	CONFIG += c17
+	QMAKE_CFLAGS += -std=c17
+} else {
+	# For Qt5 we require just C++11
+	CONFIG += c++11
+	CONFIG += c11
+	QMAKE_CFLAGS += -std=c11
+}
+
 QMAKE_CFLAGS_DEBUG += -g -Og -DDEBUG=1 -DSLIMPROFILING=0
 QMAKE_CFLAGS_RELEASE += -O3 -DSLIMPROFILING=1
 QMAKE_CXXFLAGS_DEBUG += -g -Og -DDEBUG=1 -DSLIMPROFILING=0
@@ -146,17 +172,26 @@ else:unix: PRE_TARGETDEPS += $$OUT_PWD/../eidos_zlib/libeidos_zlib.a
 
 SOURCES += \
     ../cmake/GitSHA1_qmake.cpp \
+    QtSLiMChromosomeWidget_GL.cpp \
+    QtSLiMChromosomeWidget_QT.cpp \
     QtSLiMDebugOutputWindow.cpp \
     QtSLiMGraphView_1DPopulationSFS.cpp \
     QtSLiMGraphView_1DSampleSFS.cpp \
     QtSLiMGraphView_2DPopulationSFS.cpp \
     QtSLiMGraphView_2DSampleSFS.cpp \
     QtSLiMGraphView_AgeDistribution.cpp \
+    QtSLiMGraphView_CustomPlot.cpp \
     QtSLiMGraphView_LifetimeReproduction.cpp \
     QtSLiMGraphView_MultispeciesPopSizeOverTime.cpp \
     QtSLiMGraphView_PopFitnessDist.cpp \
     QtSLiMGraphView_PopSizeOverTime.cpp \
     QtSLiMGraphView_SubpopFitnessDists.cpp \
+    QtSLiMHaplotypeManager_GL.cpp \
+    QtSLiMHaplotypeManager_QT.cpp \
+    QtSLiMIndividualsWidget_GL.cpp \
+    QtSLiMIndividualsWidget_QT.cpp \
+    QtSLiMOpenGL.cpp \
+    QtSLiM_Plot.cpp \
     main.cpp \
     QtSLiMWindow.cpp \
     QtSLiMAppDelegate.cpp \
@@ -196,11 +231,14 @@ HEADERS += \
     QtSLiMGraphView_2DPopulationSFS.h \
     QtSLiMGraphView_2DSampleSFS.h \
     QtSLiMGraphView_AgeDistribution.h \
+    QtSLiMGraphView_CustomPlot.h \
     QtSLiMGraphView_LifetimeReproduction.h \
     QtSLiMGraphView_MultispeciesPopSizeOverTime.h \
     QtSLiMGraphView_PopFitnessDist.h \
     QtSLiMGraphView_PopSizeOverTime.h \
     QtSLiMGraphView_SubpopFitnessDists.h \
+    QtSLiMOpenGL.h \
+    QtSLiMOpenGL_Emulation.h \
     QtSLiMWindow.h \
     QtSLiMAppDelegate.h \
     QtSLiMChromosomeWidget.h \
@@ -216,6 +254,7 @@ HEADERS += \
     QtSLiMScriptTextEdit.h \
     QtSLiMEidosConsole.h \
     QtSLiMConsoleTextEdit.h \
+    QtSLiM_Plot.h \
     QtSLiM_SLiMgui.h \
     QtSLiMTablesDrawer.h \
     QtSLiMFindPanel.h \

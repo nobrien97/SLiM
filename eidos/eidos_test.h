@@ -3,7 +3,7 @@
 //  Eidos
 //
 //  Created by Ben Haller on 4/7/15.
-//  Copyright (c) 2015-2023 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2015-2024 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -71,6 +71,7 @@ extern void EidosAssertScriptRaise(const std::string &p_script_string, const int
 
 
 // Test subfunction prototypes
+extern void _RunInternalFilesystemTests(void);
 extern void _RunLiteralsIdentifiersAndTokenizationTests(void);
 extern void _RunSymbolsAndVariablesTests(void);
 extern void _RunParsingTests(void);

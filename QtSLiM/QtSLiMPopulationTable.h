@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 7/30/2019.
-//  Copyright (c) 2019-2023 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2019-2024 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -42,7 +42,8 @@ public:
     virtual QVariant data(const QModelIndex &index, int role = Qt::DisplayRole) const override;
     virtual QVariant headerData(int section, Qt::Orientation p_orientation, int role = Qt::DisplayRole) const override;
     
-    void reloadTable(void);
+    bool needsUpdateForDisplaySubpops(std::vector<Subpopulation *> &newDisplayList);
+    void reloadTable(std::vector<Subpopulation *> &newDisplayList);
     
     Subpopulation *subpopAtIndex(int i) const { return displaySubpops[i]; }
     

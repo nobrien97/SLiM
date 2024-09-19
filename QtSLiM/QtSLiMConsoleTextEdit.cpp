@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 12/6/2019.
-//  Copyright (c) 2019-2023 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2019-2024 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -28,7 +28,8 @@
 #include <QAbstractItemView>
 #include <QDebug>
 
-#include "QtSLiMPreferences.h"
+#include <algorithm>
+
 #include "QtSLiMExtras.h"
 #include "eidos_globals.h"
 #include "slim_globals.h"
@@ -99,7 +100,7 @@ void QtSLiMConsoleTextEdit::showWelcome(void)
     QString welcomeMessage;
     welcomeMessage = welcomeMessage + "Eidos version " + EIDOS_VERSION_STRING + NEWLINE + NEWLINE;		// EIDOS VERSION
     welcomeMessage += "By Benjamin C. Haller (http://benhaller.com/)." + NEWLINE;
-    welcomeMessage += "Copyright (c) 2016–2023 P. Messer. All rights reserved." + NEWLINE + NEWLINE;
+    welcomeMessage += "Copyright (c) 2016–2024 P. Messer. All rights reserved." + NEWLINE + NEWLINE;
     welcomeMessage += "Eidos is free software with ABSOLUTELY NO WARRANTY." + NEWLINE;
     welcomeMessage += "Type license() for license and distribution details." + NEWLINE + NEWLINE;
     welcomeMessage += "Go to https://github.com/MesserLab/SLiM for source code," + NEWLINE;
@@ -658,7 +659,11 @@ void QtSLiMConsoleTextEdit::adjustSelectionAndReadOnly(void)
 void QtSLiMConsoleTextEdit::dragMoveEvent(QDragMoveEvent *p_event)
 {
     // Figure out where the drop would go
+#if (QT_VERSION < QT_VERSION_CHECK(6, 0, 0))
     QTextCursor dropCursor = cursorForPosition(p_event->pos());
+#else
+    QTextCursor dropCursor = cursorForPosition(p_event->position().toPoint());
+#endif
     
     //qDebug() << "dragMoveEvent: " << dropCursor.position();
     

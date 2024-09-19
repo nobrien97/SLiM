@@ -3,7 +3,7 @@
 //  SLiMgui
 //
 //  Created by Ben Haller on 1/19/19.
-//  Copyright (c) 2019-2023 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2019-2024 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -19,6 +19,8 @@
 
 
 #include "slim_gui.h"
+#include "log_file.h"
+#include "plot.h"
 #include "eidos_interpreter.h"
 #include "eidos_call_signature.h"
 #include "eidos_property_signature.h"
@@ -29,13 +31,13 @@
 
 
 #pragma mark -
-#pragma mark SLiMGUI
+#pragma mark SLiMgui
 #pragma mark -
 
 SLiMgui::SLiMgui(Community &p_community, SLiMWindowController *p_controller) :
 	community_(p_community),
 	controller_(p_controller),
-	self_symbol_(gID_slimgui, EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Object_singleton(this, gSLiM_SLiMgui_Class)))
+	self_symbol_(gID_slimgui, EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Object(this, gSLiM_SLiMgui_Class)))
 {
 }
 
@@ -69,7 +71,7 @@ EidosValue_SP SLiMgui::GetProperty(EidosGlobalStringID p_property_id)
 		// constants
 		case gID_pid:
 		{
-			return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Int_singleton(getpid()));
+			return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Int(getpid()));
 		}
 		
 		// variables
@@ -96,10 +98,49 @@ EidosValue_SP SLiMgui::ExecuteInstanceMethod(EidosGlobalStringID p_method_id, co
 {
 	switch (p_method_id)
 	{
+		case gID_createPlot:				return ExecuteMethod_createPlot(p_method_id, p_arguments, p_interpreter);
+		case gID_logFileData:				return ExecuteMethod_logFileData(p_method_id, p_arguments, p_interpreter);
 		case gID_openDocument:				return ExecuteMethod_openDocument(p_method_id, p_arguments, p_interpreter);
 		case gID_pauseExecution:			return ExecuteMethod_pauseExecution(p_method_id, p_arguments, p_interpreter);
+		case gID_plotWithTitle:				return ExecuteMethod_plotWithTitle(p_method_id, p_arguments, p_interpreter);
 		default:							return super::ExecuteInstanceMethod(p_method_id, p_arguments, p_interpreter);
 	}
+}
+
+//	*********************	– (No<Plot>$)createPlot(...)
+//
+EidosValue_SP SLiMgui::ExecuteMethod_createPlot(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter)
+{
+#pragma unused (p_method_id, p_arguments, p_interpreter)
+	static bool beenHere = false;
+	
+	if (!beenHere)
+	{
+		// Emit a warning that this API is unsupported in SLiMguiLegacy.  We warn, not error, so the user does not have to modify
+		// their script to run it in SLiMguiLegacy when it is designed to run under QtSLiM; they just won't get a plot window.
+		std::cerr << "WARNING (SLiMgui::ExecuteMethod_createPlot): createPlot() is not supported in SLiMguiLegacy, and does nothing." << std::endl;
+		beenHere = true;
+	}
+	
+	return gStaticEidosValueNULL;
+}
+
+//	*********************	– (Nfs)logFileData(o<LogFile>$ logFile, is$ column)
+//
+EidosValue_SP SLiMgui::ExecuteMethod_logFileData(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter)
+{
+#pragma unused (p_method_id, p_arguments, p_interpreter)
+	static bool beenHere = false;
+	
+	if (!beenHere)
+	{
+		// Emit a warning that this API is unsupported in SLiMguiLegacy.  We warn, not error, so the user does not have to modify
+		// their script to run it in SLiMguiLegacy when it is designed to run under QtSLiM; they just won't get data.
+		std::cerr << "WARNING (SLiMgui::ExecuteMethod_logFileData): logFileData() is not supported in SLiMguiLegacy, and does nothing." << std::endl;
+		beenHere = true;
+	}
+	
+	return gStaticEidosValueNULL;
 }
 
 //	*********************	– (void)openDocument(string$ path)
@@ -109,7 +150,7 @@ EidosValue_SP SLiMgui::ExecuteMethod_openDocument(EidosGlobalStringID p_method_i
 #pragma unused (p_method_id, p_arguments, p_interpreter)
 	
 	EidosValue_String *filePath_value = (EidosValue_String *)p_arguments[0].get();
-	std::string file_path = Eidos_ResolvedPath(Eidos_StripTrailingSlash(filePath_value->StringRefAtIndex(0, nullptr)));
+	std::string file_path = Eidos_ResolvedPath(Eidos_StripTrailingSlash(filePath_value->StringRefAtIndex_NOCAST(0, nullptr)));
 	NSString *filePath = [NSString stringWithUTF8String:file_path.c_str()];
 	
 	[controller_ eidos_openDocument:filePath];
@@ -126,6 +167,24 @@ EidosValue_SP SLiMgui::ExecuteMethod_pauseExecution(EidosGlobalStringID p_method
 	[controller_ eidos_pauseExecution];
 	
 	return gStaticEidosValueVOID;
+}
+
+//	*********************	– (No<Plot>$)plotWithTitle(...)
+//
+EidosValue_SP SLiMgui::ExecuteMethod_plotWithTitle(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter)
+{
+#pragma unused (p_method_id, p_arguments, p_interpreter)
+	static bool beenHere = false;
+	
+	if (!beenHere)
+	{
+		// Emit a warning that this API is unsupported in SLiMguiLegacy.  We warn, not error, so the user does not have to modify
+		// their script to run it in SLiMguiLegacy when it is designed to run under QtSLiM; they just won't get a plot window.
+		std::cerr << "WARNING (SLiMgui::ExecuteMethod_plotWithTitle): plotWithTitle() is not supported in SLiMguiLegacy, and does nothing." << std::endl;
+		beenHere = true;
+	}
+	
+	return gStaticEidosValueNULL;
 }
 
 
@@ -163,8 +222,20 @@ const std::vector<EidosMethodSignature_CSP> *SLiMgui_Class::Methods(void) const
 	{
 		methods = new std::vector<EidosMethodSignature_CSP>(*super::Methods());
 		
+		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_createPlot, kEidosValueMaskNULL | kEidosValueMaskObject | kEidosValueMaskSingleton, gSLiM_Plot_Class))->AddString_S("title")
+							  ->AddNumeric_ON("xrange", gStaticEidosValueNULL)->AddNumeric_ON("yrange", gStaticEidosValueNULL)
+							  ->AddString_OS("xlab", EidosValue_String_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String("x")))
+							  ->AddString_OS("ylab", EidosValue_String_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String("y")))
+							  ->AddNumeric_OSN("width", gStaticEidosValueNULL)->AddNumeric_OSN("height", gStaticEidosValueNULL)
+							  ->AddLogical_OS("horizontalGrid", gStaticEidosValue_LogicalF)->AddLogical_OS("verticalGrid", gStaticEidosValue_LogicalF)
+							  ->AddLogical_OS("fullBox", gStaticEidosValue_LogicalT)
+							  ->AddNumeric_OS("axisLabelSize", EidosValue_Int_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Int(15)))
+							  ->AddNumeric_OS("tickLabelSize", EidosValue_Int_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Int(10))));
+		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_logFileData, kEidosValueMaskNULL | kEidosValueMaskFloat | kEidosValueMaskString))
+							  ->AddObject_S("logFile", gSLiM_LogFile_Class)->AddIntString_S("column"));
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_openDocument, kEidosValueMaskVOID))->AddString_S(gEidosStr_filePath));
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_pauseExecution, kEidosValueMaskVOID)));
+		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_plotWithTitle, kEidosValueMaskNULL | kEidosValueMaskObject | kEidosValueMaskSingleton, gSLiM_Plot_Class))->AddString_S("title"));
 		
 		std::sort(methods->begin(), methods->end(), CompareEidosCallSignatures);
 	}

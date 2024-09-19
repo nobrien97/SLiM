@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 12/26/14.
-//  Copyright (c) 2014-2023 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2014-2024 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -383,8 +383,10 @@ public:
 	bool any_dominance_coeff_changed_ = false;
 	
 	// state about what symbols/names/identifiers have been used or are being used
-	std::unordered_set<slim_objectid_t> subpop_ids_;								// all subpop IDs ever used, even if no longer in use
-	std::unordered_set<std::string> subpop_names_;									// all subpop names ever used, except for subpop ID names ("p1", "p2", etc.)
+	// used_subpop_ids_ has every subpop id ever used, even if no longer in use, with the *last* name used for that subpop
+	// used_subpop_names_ has every name ever used EXCEPT standard p1, p2... names, even if the name got replaced by a new name later
+	std::unordered_map<slim_objectid_t, std::string> used_subpop_ids_;
+	std::unordered_set<std::string> used_subpop_names_;
 	
 #if (SLIMPROFILING == 1)
 	// PROFILING : Species keeps track of its memory usage profile info and mutation-related profile info
@@ -522,6 +524,7 @@ public:
 		auto id_iter = population_.subpops_.find(p_subpop_id);
 		return (id_iter == population_.subpops_.end()) ? nullptr : id_iter->second;
 	}
+	Subpopulation *SubpopulationWithName(const std::string &p_subpop_name);
 	inline MutationType *MutationTypeWithID(slim_objectid_t p_muttype_id) {
 		auto id_iter = mutation_types_.find(p_muttype_id);
 		return (id_iter == mutation_types_.end()) ? nullptr : id_iter->second;
@@ -611,6 +614,7 @@ public:
 	void __TallyMutationReferencesWithTreeSequence(std::unordered_map<slim_mutationid_t, ts_mut_info> &p_mutMap, std::unordered_map<tsk_id_t, Genome *> p_nodeToGenomeMap, tsk_treeseq_t *p_ts);
 	void __CreateMutationsFromTabulation(std::unordered_map<slim_mutationid_t, ts_mut_info> &p_mutInfoMap, std::unordered_map<slim_mutationid_t, MutationIndex> &p_mutIndexMap);
 	void __AddMutationsFromTreeSequenceToGenomes(std::unordered_map<slim_mutationid_t, MutationIndex> &p_mutIndexMap, std::unordered_map<tsk_id_t, Genome *> p_nodeToGenomeMap, tsk_treeseq_t *p_ts);
+	void __CheckNodePedigreeIDs(EidosInterpreter *p_interpreter);
 	void _InstantiateSLiMObjectsFromTables(EidosInterpreter *p_interpreter, slim_tick_t p_metadata_tick, slim_tick_t p_metadata_cycle, SLiMModelType p_file_model_type, int p_file_version, SUBPOP_REMAP_HASH &p_subpop_map);	// given tree-seq tables, makes individuals, genomes, and mutations
 	slim_tick_t _InitializePopulationFromTskitTextFile(const char *p_file, EidosInterpreter *p_interpreter, SUBPOP_REMAP_HASH &p_subpop_map);	// initialize the population from an tskit text file
 	slim_tick_t _InitializePopulationFromTskitBinaryFile(const char *p_file, EidosInterpreter *p_interpreter, SUBPOP_REMAP_HASH &p_subpop_remap);	// initialize the population from an tskit binary file
@@ -682,6 +686,7 @@ public:
 	double sharedMutFreq(std::vector<Genome*>& genomes, MutationIndex mut1, MutationIndex mut2, bool mut1Missing = false, bool mut2Missing = false);
 	bool isMultiAllelic(int pos, std::vector<Mutation*> muts);
 	static double AUC(const double &h, const double &a, const double &b);
+	EidosValue_SP ExecuteMethod__debug(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter);
 };
 
 class Species_Class : public EidosDictionaryUnretained_Class

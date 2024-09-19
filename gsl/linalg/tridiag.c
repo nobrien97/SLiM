@@ -94,7 +94,23 @@ solve_tridiag(
         }
 
       /* backsubstitution */
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wuninitialized"
+#if defined(__has_warning)
+#if __has_warning("-Wmaybe-uninitialized")
+#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
+#endif
+#endif
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wuninitialized"
+#if defined(__has_warning)
+#if __has_warning("-Wmaybe-uninitialized")
+#pragma clang diagnostic ignored "-Wmaybe-uninitialized"
+#endif
+#endif
       x[x_stride * (N - 1)] = c[N - 1];
+#pragma clang diagnostic pop
+#pragma GCC diagnostic pop
       if (N >= 2)
         {
           for (i = N - 2, j = 0; j <= N - 2; j++, i--)

@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 4/14/2022.
-//  Copyright (c) 2022-2023 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2022-2024 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -81,56 +81,6 @@ void SparseVector::ResizeToFitMaxNNZ(uint32_t max_nnz)
 		if (!columns_ || !values_)
 			EIDOS_TERMINATION << "ERROR (SparseVector::ResizeToFitMaxNNZ): allocation failed; you may need to raise the memory limit for SLiM." << EidosTerminate(nullptr);
 	}
-}
-
-sv_value_t SparseVector::Distance(uint32_t p_column) const
-{
-#if DEBUG
-	// should be done building the vector
-	if (!finished_)
-		EIDOS_TERMINATION << "ERROR (SparseVector::Distance): sparse vector is not finished being built." << EidosTerminate(nullptr);
-	if (value_type_ != SparseVectorDataType::kDistances)
-		EIDOS_TERMINATION << "ERROR (SparseVector::Distance): sparse vector is not specialized for distances." << EidosTerminate(nullptr);
-#endif
-	
-	// bounds-check
-	if (p_column >= ncols_)
-		EIDOS_TERMINATION << "ERROR (SparseVector::Distance): column out of range." << EidosTerminate(nullptr);
-	
-	// scan for the requested column
-	for (uint64_t index = 0; index < nnz_; ++index)
-	{
-		if (columns_[index] == p_column)
-			return values_[index];
-	}
-	
-	// no match found; return infinite distance
-	return INFINITY;
-}
-
-sv_value_t SparseVector::Strength(uint32_t p_column) const
-{
-#if DEBUG
-	// should be done building the vector
-	if (!finished_)
-		EIDOS_TERMINATION << "ERROR (SparseVector::Strength): sparse vector is not finished being built." << EidosTerminate(nullptr);
-	if (value_type_ != SparseVectorDataType::kStrengths)
-		EIDOS_TERMINATION << "ERROR (SparseVector::Strength): sparse vector is not specialized for strengths." << EidosTerminate(nullptr);
-#endif
-	
-	// bounds-check
-	if (p_column >= ncols_)
-		EIDOS_TERMINATION << "ERROR (SparseVector::Strength): column out of range." << EidosTerminate(nullptr);
-	
-	// scan for the requested column
-	for (uint64_t index = 0; index < nnz_; ++index)
-	{
-		if (columns_[index] == p_column)
-			return values_[index];
-	}
-	
-	// no match found; return zero interaction strength
-	return 0;
 }
 
 size_t SparseVector::MemoryUsage(void)

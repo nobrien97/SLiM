@@ -3,7 +3,7 @@
 //  SLiMgui
 //
 //  Created by Ben Haller on 1/20/15.
-//  Copyright (c) 2015-2023 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2015-2024 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -26,6 +26,8 @@
 #import "CocoaExtra.h"
 #import "EidosCocoaExtra.h"
 #import "eidos_beep.h"
+#import "slim_gui.h"
+#import "plot.h"
 #import <WebKit/WebKit.h>
 
 #include <stdio.h>
@@ -168,9 +170,9 @@ typedef enum SLiMLaunchAction
 				case 11:chapterName = @"Complex mating schemes using mateChoice() callbacks";				break;
 				case 12:chapterName = @"Direct child modifications using modifyChild() callbacks";			break;
 				case 13:chapterName = @"Phenotypes, fitness functions, quantitative traits, and QTLs";		break;
-				case 14:chapterName = @"Advanced models";													break;
-				case 15:chapterName = @"Continuous-space models and interactions";							break;
-				case 16:chapterName = @"Going beyond Wright-Fisher models: nonWF model recipes";			break;
+				case 14:chapterName = @"Advanced WF models";												break;
+				case 15:chapterName = @"Going beyond Wright-Fisher models: nonWF model recipes";			break;
+				case 16:chapterName = @"Continuous-space models, interactions, and spatial maps";			break;
 				case 17:chapterName = @"Tree-sequence recording: tracking population history";				break;
 				case 18:chapterName = @"Modeling explicit nucleotides";										break;
 				case 19:chapterName = @"Multispecies modeling";												break;
@@ -229,6 +231,9 @@ typedef enum SLiMLaunchAction
 	
 	Eidos_WarmUp();
 	SLiM_WarmUp();
+	
+	gSLiM_Plot_Class = new Plot_Class(gStr_Plot, gEidosDictionaryUnretained_Class);
+	gSLiM_Plot_Class->CacheDispatchTables();
 	
 	gSLiM_SLiMgui_Class = new SLiMgui_Class(gStr_SLiMgui, gEidosDictionaryUnretained_Class);
 	gSLiM_SLiMgui_Class->CacheDispatchTables();

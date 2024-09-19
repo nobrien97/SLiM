@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 11/24/2019.
-//  Copyright (c) 2019-2023 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2019-2024 Philipp Messer.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -39,7 +39,15 @@
 #include <QTextDocument>
 #include <QMenu>
 #include <QToolTip>
+#include <QClipboard>
+#include <QMimeData>
 #include <QDebug>
+
+#include <utility>
+#include <memory>
+#include <string>
+#include <algorithm>
+#include <vector>
 
 #include "QtSLiMPreferences.h"
 #include "QtSLiMEidosPrettyprinter.h"
@@ -534,7 +542,11 @@ void QtSLiMTextEdit::mousePressEvent(QMouseEvent *p_event)
         fudgeFactor = std::round(fm.horizontalAdvance(" ") / 2.0) + 1;    // added in Qt 5.11
 #endif
         
+#if (QT_VERSION < QT_VERSION_CHECK(6, 0, 0))
         QPoint localPos = p_event->localPos().toPoint();
+#else
+        QPoint localPos = p_event->position().toPoint();
+#endif
         QPoint fudgedPoint(std::max(0, localPos.x() - fudgeFactor), localPos.y());
         int characterPositionClicked = cursorForPosition(fudgedPoint).position();
         
@@ -644,6 +656,18 @@ void QtSLiMTextEdit::fixMouseCursor(void)
     }
 }
 
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+void QtSLiMTextEdit::enterEvent(QEnterEvent *p_event)
+{
+    // forward to super
+    QPlainTextEdit::enterEvent(p_event);
+    
+    // modifiersChanged() generally keeps our cursor correct, but we do it on enterEvent
+    // as well just as a fallback; for example, if the mouse is inside us on launch and
+    // the modifier is already down, enterEvent() will fix out initial cursor
+    fixMouseCursor();
+}
+#else
 void QtSLiMTextEdit::enterEvent(QEvent *p_event)
 {
     // forward to super
@@ -654,6 +678,7 @@ void QtSLiMTextEdit::enterEvent(QEvent *p_event)
     // the modifier is already down, enterEvent() will fix out initial cursor
     fixMouseCursor();
 }
+#endif
 
 void QtSLiMTextEdit::modifiersChanged(Qt::KeyboardModifiers __attribute__((unused)) newModifiers)
 {
@@ -1038,6 +1063,12 @@ void QtSLiMTextEdit::updateStatusFieldFromSelection(void)
         {
             statusBar->clearMessage();
         }
+        
+        // show the script block's declaration to the right of the Jump button
+        QtSLiMWindow *windowSLiMController = dynamic_cast<QtSLiMWindow *>(window());
+        
+        if (windowSLiMController)
+            windowSLiMController->setScriptBlockLabelTextFromSelection();
     }
 }
 
@@ -1530,7 +1561,7 @@ QStringList QtSLiMTextEdit::completionsForKeyPathEndingInTokenIndexOfTokenStream
 	const EidosClass *terminus = key_path_class;
 	
 	// First, a sorted list of globals
-	for (auto symbol_sig : *terminus->Properties())
+	for (const auto &symbol_sig : *terminus->Properties())
     {
         if (!symbol_sig->deprecated_)
             candidates << QString::fromStdString(symbol_sig->property_name_);
@@ -1539,7 +1570,7 @@ QStringList QtSLiMTextEdit::completionsForKeyPathEndingInTokenIndexOfTokenStream
 	candidates.sort();
 	
 	// Next, a sorted list of methods, with () appended
-	for (auto method_sig : *terminus->Methods())
+	for (const auto &method_sig : *terminus->Methods())
 	{
         if (!method_sig->deprecated_)
         {
@@ -1623,7 +1654,16 @@ int64_t QtSLiMTextEdit::scoreForCandidateAsCompletionOfString(QString candidate,
 		if (candidateMatchIndex == 0)
 			score += 100000;
 		else
-			score -= candidateMatchIndex;
+            score -= (candidateMatchIndex * 10);
+        
+        // penalize skipping over a capital letter in candidate to get to the match position; iS is not a great match for initializeTreeSequence() compared to initializeSex()
+        for (int skippedIndex = firstUnusedIndex; skippedIndex < candidateMatchIndex; ++skippedIndex)
+        {
+            QString skippedChar = base.mid(skippedIndex, 1);
+            
+            if (skippedChar == skippedChar.toUpper())
+                score -= 50;
+        }
 		
 		// move firstUnusedIndex to follow the matched range in candidate
 		firstUnusedIndex = candidateMatchIndex + 1;
@@ -1634,10 +1674,15 @@ int64_t QtSLiMTextEdit::scoreForCandidateAsCompletionOfString(QString candidate,
 			break;
 	}
 	while (true);
+    
+    // penalize the unused length of the completed string, all else being equal
+    score -= (candidate.length() - firstUnmatchedIndex);
 	
-	// We want argument-name matches to be at the top, always, when they are available, so bump their score
+	// we want argument-name matches to be at the top, always, when they are available, so bump their score
 	if (candidate.endsWith("="))
 		score += 1000000;
+    
+    //qDebug() << "Score for" << candidate << "given base" << base << "==" << score;
 	
 	return score;
 }
@@ -2573,7 +2618,7 @@ QStringList QtSLiMScriptTextEdit::linesForRoundedSelection(QTextCursor &p_cursor
     
     // separate the lines, remove a tab at the start of each, and rejoin them
     QString selectedString = p_cursor.selectedText();
-    QRegularExpression lineEndMatch("\\R", QRegularExpression::UseUnicodePropertiesOption);
+    static const QRegularExpression lineEndMatch("\\R", QRegularExpression::UseUnicodePropertiesOption);
     
 #if (QT_VERSION < QT_VERSION_CHECK(5, 14, 0))
     return selectedString.split(lineEndMatch, QString::KeepEmptyParts);     // deprecated in 5.14
@@ -2582,9 +2627,23 @@ QStringList QtSLiMScriptTextEdit::linesForRoundedSelection(QTextCursor &p_cursor
 #endif
 }
 
+void QtSLiMScriptTextEdit::copyAsHTML(void)
+{
+    if (isEnabled())
+    {
+        QString html = exportAsHtml();
+        QClipboard *clipboard = QGuiApplication::clipboard();
+        QMimeData *mimeData = new QMimeData;
+        
+        mimeData->setHtml(html);
+        mimeData->setText(html);
+        clipboard->setMimeData(mimeData);
+    }
+}
+
 void QtSLiMScriptTextEdit::shiftSelectionLeft(void)
 {
-     if (isEnabled() && !isReadOnly())
+    if (isEnabled() && !isReadOnly())
 	{
         QTextCursor &&edit_cursor = textCursor();
         bool movedBack;
@@ -2802,7 +2861,7 @@ void QtSLiMScriptTextEdit::toggleDebuggingForLine(int lineNumber)
         {
             QChar qch = blockText[firstNonWhitespace];
             
-            if ((qch != " ") && (qch != "\t"))
+            if ((qch != ' ') && (qch != '\t'))
                 break;
         }
         
@@ -3168,8 +3227,12 @@ void QtSLiMScriptTextEdit::lineNumberAreaMouseEvent(QMouseEvent *p_mouseEvent)
     // and return without doing anything.  Note that Qt::RightButton is set for control-clicks!
     if (p_mouseEvent->button() == Qt::RightButton)
         return;
-    
+        
+#if (QT_VERSION < QT_VERSION_CHECK(6, 0, 0))
     QPointF localPos = p_mouseEvent->localPos();
+#else
+    QPointF localPos = p_mouseEvent->position();
+#endif
     qreal localY = localPos.y();
     
     //qDebug() << "localY ==" << localY;
@@ -3256,6 +3319,77 @@ void QtSLiMScriptTextEdit::addScriptBlockColoring(int startPos, int endPos, Spec
     blockSpecies.emplace_back(species);
 }
 
+// this method courtesy of SO user Larswad, https://stackoverflow.com/a/15808889/2752221
+QString QtSLiMScriptTextEdit::exportAsHtml(void)
+{
+    // Create a new document from the entire document
+    QTextCursor cursor(document());
+    cursor.select(QTextCursor::Document);
+    QTextDocument *tempDocument = new QTextDocument;
+    QTextCursor tempCursor(tempDocument);
+    
+    tempCursor.insertFragment(cursor.selection());
+    tempCursor.select(QTextCursor::Document);
+    
+    // Set the default foreground for the inserted characters
+    QTextCharFormat textfmt = tempCursor.charFormat();
+    textfmt.setForeground(Qt::black);
+    tempCursor.setCharFormat(textfmt);
+    
+    // Apply the additional formats set by the syntax highlighter
+    QTextBlock start = document()->findBlock(cursor.selectionStart());
+    QTextBlock end = document()->findBlock(cursor.selectionEnd());
+    end = end.next();
+    const int selectionStart = cursor.selectionStart();
+    const int endOfDocument = tempDocument->characterCount() - 1;
+    for (QTextBlock current = start; current.isValid() and current not_eq end; current = current.next()) {
+        const QTextLayout* layout(current.layout());
+        
+        foreach (const QTextLayout::FormatRange &range, layout->formats()) {
+            const int formatStart = current.position() + range.start - selectionStart;
+            const int formatEnd = formatStart + range.length;
+            if(formatEnd <= 0 or formatStart >= endOfDocument)
+                continue;
+            tempCursor.setPosition(qMax(formatStart, 0));
+            tempCursor.setPosition(qMin(formatEnd, endOfDocument), QTextCursor::KeepAnchor);
+            tempCursor.setCharFormat(range.format);
+        }
+    }
+    
+    // Reset the user states since they are not interesting
+    for (QTextBlock block = tempDocument->begin(); block.isValid(); block = block.next())
+        block.setUserState(-1);
+    
+    // Make sure the text appears pre-formatted, and set the background we want
+    tempCursor.select(QTextCursor::Document);
+    QTextBlockFormat blockFormat = tempCursor.blockFormat();
+    blockFormat.setNonBreakableLines(true);
+    //blockFormat.setBackground(Qt::black);
+    tempCursor.setBlockFormat(blockFormat);
+    
+    // Select the same range with tempCursor as is selected in the original document
+    QTextCursor selectedRange = textCursor();
+    tempCursor.setPosition(selectedRange.anchor(), QTextCursor::MoveAnchor);
+    tempCursor.setPosition(selectedRange.position(), QTextCursor::KeepAnchor);
+    
+    // Retrieve the syntax highlighted and formatted html
+    QString html = tempCursor.selection().toHtml();
+    delete tempDocument;
+    
+    // There is a bug where the first line uses <p> instead of <pre>, because
+    // it is a fragment, I guess.  We can fix that with a regex.
+    QRegularExpression pToPreRegex("<p style=(.*)</p>");
+    pToPreRegex.setPatternOptions(QRegularExpression::CaseInsensitiveOption);
+    html.replace(pToPreRegex, "<pre style=\\1</pre>");
+    
+    // Change new paragraphs to new lines, so we get one paragraph of text
+    // This doesn't work, you always get a new paragraph for each line; <BR> doesn't work either.
+    //QRegularExpression preRegex("</pre>.?.?<pre style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\">");
+    //preRegex.setPatternOptions(QRegularExpression::DotMatchesEverythingOption | QRegularExpression::CaseInsensitiveOption);
+    //html.replace(preRegex, "\n");
+    
+    return html;
+}
 
 
 
