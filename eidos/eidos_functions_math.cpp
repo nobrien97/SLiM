@@ -833,6 +833,51 @@ EidosValue_SP Eidos_ExecuteFunction_log(const std::vector<EidosValue_SP> &p_argu
 	return result_SP;
 }
 
+//	(float)logit(numeric x)
+EidosValue_SP Eidos_ExecuteFunction_logit(const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter __attribute__((unused)) &p_interpreter)
+{
+	EidosValue_SP result_SP(nullptr);
+
+	auto logit = [](double p)
+	{
+		return log(p / (1 - p));
+	};
+
+	
+	EidosValue *x_value = p_arguments[0].get();
+	EidosValueType x_type = x_value->Type();
+	int x_count = x_value->Count();
+	
+	if (x_count == 1)
+	{
+		result_SP = EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float_singleton(logit(x_value->FloatAtIndex(0, nullptr))));
+	}
+	else if (x_type == EidosValueType::kValueInt)
+	{
+		EidosValue_Float_vector *float_result = (new (gEidosValuePool->AllocateChunk()) EidosValue_Float_vector())->resize_no_initialize(x_count);
+		result_SP = EidosValue_SP(float_result);
+		
+		for (int value_index = 0; value_index < x_count; ++value_index)
+		{
+			float_result->set_float_no_check(logit(x_value->FloatAtIndex(value_index, nullptr)), value_index);
+		}
+	}
+	else if (x_type == EidosValueType::kValueFloat)
+	{
+		const double *float_data = x_value->FloatVector()->data();
+		EidosValue_Float_vector *float_result = (new (gEidosValuePool->AllocateChunk()) EidosValue_Float_vector())->resize_no_initialize(x_count);
+		double *float_result_data = float_result->data();
+		result_SP = EidosValue_SP(float_result);
+		
+		for (int value_index = 0; value_index < x_count; ++value_index)
+			float_result_data[value_index] = logit(float_data[value_index]);
+	}
+	
+	result_SP->CopyDimensionsFromValue(x_value);
+	
+	return result_SP;
+}
+
 //	(float)log10(numeric x)
 EidosValue_SP Eidos_ExecuteFunction_log10(const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter __attribute__((unused)) &p_interpreter)
 {

@@ -43,7 +43,8 @@ typedef struct {
 typedef enum {
     kDisplayIndividuals = 0,
     kDisplaySpatialSeparate,
-    kDisplaySpatialUnified
+    kDisplaySpatialUnified,
+    kDisplayNone
 } PopulationViewDisplayMode;
 
 class QtSLiMIndividualsWidget : public QOpenGLWidget, protected QOpenGLFunctions

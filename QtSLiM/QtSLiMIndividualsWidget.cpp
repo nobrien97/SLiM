@@ -97,7 +97,7 @@ void QtSLiMIndividualsWidget::paintGL()
     // can simply call it before each update to pre-plan, making for a simpler design
     tileSubpopulations(selectedSubpopulations);
     
-	if ((selectedSubpopCount == 0) || !canDisplayAllIndividuals)
+	if ((selectedSubpopCount == 0) || !canDisplayAllIndividuals || preferredDisplayMode == PopulationViewDisplayMode::kDisplayNone)
 	{
 		// clear to a shade of gray
         painter.beginNativePainting();
@@ -1698,6 +1698,12 @@ void QtSLiMIndividualsWidget::runContextMenuAtPoint(QPoint globalPoint, Subpopul
     displayUnified->setData(2);
     displayUnified->setCheckable(true);
     displayUnified->setEnabled(!disableAll);
+
+    QAction *displayNone = contextMenu.addAction("Do not display individuals");
+    displayNone->setData(3);
+    displayNone->setCheckable(true);
+    displayNone->setEnabled(!disableAll);
+
     
     // Check the item corresponding to our current display preference, if any
     if (!disableAll)
@@ -1705,12 +1711,14 @@ void QtSLiMIndividualsWidget::runContextMenuAtPoint(QPoint globalPoint, Subpopul
         if (preferredDisplayMode == PopulationViewDisplayMode::kDisplayIndividuals)         displayNonSpatial->setChecked(true);
         if (preferredDisplayMode == PopulationViewDisplayMode::kDisplaySpatialSeparate)     displaySpatial->setChecked(true);
         if (preferredDisplayMode == PopulationViewDisplayMode::kDisplaySpatialUnified)      displayUnified->setChecked(true);
+        if (preferredDisplayMode == PopulationViewDisplayMode::kDisplayNone)                displayNone->setChecked(true);   
     }
     
     QActionGroup *displayGroup = new QActionGroup(this);    // On Linux this provides a radio-button-group appearance
     displayGroup->addAction(displayNonSpatial);
     displayGroup->addAction(displaySpatial);
     displayGroup->addAction(displayUnified);
+    displayGroup->addAction(displayNone);
     
     // Provide background options (colors, spatial maps for spatial subpops)
     if (subpopForEvent && !disableAll)
@@ -1754,7 +1762,7 @@ void QtSLiMIndividualsWidget::runContextMenuAtPoint(QPoint globalPoint, Subpopul
         backgroundGroup->addAction(grayAction);
         backgroundGroup->addAction(whiteAction);
         
-        if (preferredDisplayMode > 0)
+        if (preferredDisplayMode > 0 && preferredDisplayMode < 3)
         {
             // look for spatial maps to offer as choices; need to scan the defined maps for the ones we can use
             SpatialMapMap &spatial_maps = subpopForEvent->spatial_maps_;
@@ -1808,7 +1816,7 @@ void QtSLiMIndividualsWidget::runContextMenuAtPoint(QPoint globalPoint, Subpopul
     // Act upon the chosen action; we just do it right here instead of dealing with slots
     if (action)
     {
-        if ((action == displayNonSpatial) || (action == displaySpatial) || (action == displayUnified))
+        if ((action == displayNonSpatial) || (action == displaySpatial) || (action == displayUnified) || (action == displayNone))
         {
             // - (IBAction)setDisplayStyle:(id)sender
             PopulationViewDisplayMode newDisplayMode = (PopulationViewDisplayMode)action->data().toInt();
