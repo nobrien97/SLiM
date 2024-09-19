@@ -688,23 +688,23 @@ EidosValue_SP Eidos_ExecuteFunction_logit(const std::vector<EidosValue_SP> &p_ar
 	
 	if (x_count == 1)
 	{
-		result_SP = EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float_singleton(logit(x_value->FloatAtIndex(0, nullptr))));
+		result_SP = EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float(logit(x_value->FloatAtIndex_NOCAST(0, nullptr))));
 	}
 	else if (x_type == EidosValueType::kValueInt)
 	{
-		EidosValue_Float_vector *float_result = (new (gEidosValuePool->AllocateChunk()) EidosValue_Float_vector())->resize_no_initialize(x_count);
+		EidosValue_Float *float_result = (new (gEidosValuePool->AllocateChunk()) EidosValue_Float())->resize_no_initialize(x_count);
 		result_SP = EidosValue_SP(float_result);
 		
 		for (int value_index = 0; value_index < x_count; ++value_index)
 		{
-			float_result->set_float_no_check(logit(x_value->FloatAtIndex(value_index, nullptr)), value_index);
+			float_result->set_float_no_check(logit(x_value->FloatAtIndex_NOCAST(value_index, nullptr)), value_index);
 		}
 	}
 	else if (x_type == EidosValueType::kValueFloat)
 	{
-		const double *float_data = x_value->FloatVector()->data();
-		EidosValue_Float_vector *float_result = (new (gEidosValuePool->AllocateChunk()) EidosValue_Float_vector())->resize_no_initialize(x_count);
-		double *float_result_data = float_result->data();
+		const double *float_data = x_value->FloatData();
+		EidosValue_Float *float_result = (new (gEidosValuePool->AllocateChunk()) EidosValue_Float())->resize_no_initialize(x_count);
+		double *float_result_data = float_result->data_mutable();
 		result_SP = EidosValue_SP(float_result);
 		
 		for (int value_index = 0; value_index < x_count; ++value_index)

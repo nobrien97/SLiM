@@ -8395,8 +8395,8 @@ EidosValue_SP Subpopulation::ExecuteMethod_getQuantileODEPar(EidosGlobalStringID
 	// Get method arguments and setup output ptr
 	EidosValue_SP result_SP(nullptr);
 	EidosValue *probs_value = p_arguments[0].get();
-	std::string parType = p_arguments[1].get()->StringAtIndex(0, nullptr);
-	bool returnPars = p_arguments[2].get()->LogicalAtIndex(0, nullptr);
+	std::string parType = p_arguments[1].get()->StringAtIndex_NOCAST(0, nullptr);
+	bool returnPars = p_arguments[2].get()->LogicalAtIndex_NOCAST(0, nullptr);
 
 	int ind_count = parent_subpop_size_;
 	int probs_count = probs_value->Count();
@@ -8417,7 +8417,7 @@ EidosValue_SP Subpopulation::ExecuteMethod_getQuantileODEPar(EidosGlobalStringID
 	{
 		for (int probs_index = 0; probs_index < probs_count; ++probs_index)
 		{
-			double prob = probs_value->FloatAtIndex(probs_index, nullptr);
+			double prob = probs_value->FloatAtIndex_NOCAST(probs_index, nullptr);
 			
 			if ((prob < 0.0) || (prob > 1.0))
 				EIDOS_TERMINATION << "ERROR (Subpopulation::ExecuteMethod_getQuantileODEPar): function getQuantileODEPar() requires probabilities to be in [0, 1]." << EidosTerminate(nullptr);
@@ -8426,7 +8426,7 @@ EidosValue_SP Subpopulation::ExecuteMethod_getQuantileODEPar(EidosGlobalStringID
 		}
 	}
 	// Set the size of the vector according to if returnPars is set or not
-	EidosValue_Float_vector *float_result = (new (gEidosValuePool->AllocateChunk()) EidosValue_Float_vector())->resize_no_initialize(probs_count + ((int)returnPars * probs_count * 4));
+	EidosValue_Float *float_result = (new (gEidosValuePool->AllocateChunk()) EidosValue_Float())->resize_no_initialize(probs_count + ((int)returnPars * probs_count * 4));
 
 	result_SP = EidosValue_SP(float_result);
 	
