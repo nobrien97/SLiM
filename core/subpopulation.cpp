@@ -8435,20 +8435,23 @@ EidosValue_SP Subpopulation::ExecuteMethod_getQuantileODEPar(EidosGlobalStringID
 	// Lambda for sorting individuals by a ODEPar parameter
 	auto sortAUC = [&parType, &inds](int64_t i1, int64_t i2)
 	{
+		std::vector<double> i1_pars = inds[i1]->phenoPars.get()->getPars();
+		std::vector<double> i2_pars = inds[i2]->phenoPars.get()->getPars();
+
 		if (hashStr(parType) == hashStr("aZ"))
-			return ( inds[i1]->phenoPars.get()->aZ() < inds[i2]->phenoPars.get()->aZ() );
+			return ( i1_pars[1] < i2_pars[1] );
 
 		if (hashStr(parType) == hashStr("bZ"))
-			return ( inds[i1]->phenoPars.get()->bZ() < inds[i2]->phenoPars.get()->bZ() );
+			return ( i1_pars[2] < i2_pars[2] );
 
 		if (hashStr(parType) == hashStr("KZ"))
-			return ( inds[i1]->phenoPars.get()->KZ() < inds[i2]->phenoPars.get()->KZ() );
+			return ( i1_pars[3] < i2_pars[3] );
 
 		if (hashStr(parType) == hashStr("KXZ"))
-			return ( inds[i1]->phenoPars.get()->KXZ() < inds[i2]->phenoPars.get()->KXZ() );
+			return ( i1_pars[4] < i2_pars[4] );
 		
 		// Otherwise we assume we've got an AUC
-		return ( inds[i1]->phenoPars.get()->AUC() < inds[i2]->phenoPars.get()->AUC() );
+		return ( i1_pars[0] < i2_pars[0] );
 	};
 
 	
@@ -8491,7 +8494,7 @@ EidosValue_SP Subpopulation::ExecuteMethod_getQuantileODEPar(EidosGlobalStringID
 		int64_t lo = (int64_t)std::floor(index); 
 		
 		Individual* quantile = inds[order[lo]];
-		float_result->set_float_no_check(quantile->phenoPars.get()->AUC(), probs_index);
+		float_result->set_float_no_check(quantile->phenoPars.get()->getParValue(0), probs_index);
 	}
 	return result_SP;
 }

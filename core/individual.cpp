@@ -471,13 +471,20 @@ EidosValue_SP Individual::GetProperty(EidosGlobalStringID p_property_id)
 		}
 		case gID_ODEPars:
 		{
-			EidosValue_Float *vec = (new (gEidosValuePool->AllocateChunk()) EidosValue_Float())->resize_no_initialize(5);
+			if (phenoPars == nullptr)
+			{
+				EIDOS_TERMINATION << "ERROR (Individual::ODEPars): property ODEPars is not initialized. Run an ODEIntegrate() function to initialize." << EidosTerminate();
+			}
 			
-			vec->set_float_no_check(phenoPars.get()->AUC(), 0);
-			vec->set_float_no_check(phenoPars.get()->aZ(), 1);
-			vec->set_float_no_check(phenoPars.get()->bZ(), 2);
-			vec->set_float_no_check(phenoPars.get()->KZ(), 3);
-			vec->set_float_no_check(phenoPars.get()->KXZ(), 4);
+			int numPars = phenoPars.get()->numPars;
+			EidosValue_Float *vec = (new (gEidosValuePool->AllocateChunk()) EidosValue_Float())->resize_no_initialize(numPars);
+
+			std::vector<double> vals = phenoPars.get()->getPars(false);
+
+			for (int i = 0; i < numPars; ++i)
+			{
+				vec->set_float_no_check(vals[i], i);
+			}
 
 			return EidosValue_SP(vec);
 		}

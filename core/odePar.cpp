@@ -1,76 +1,99 @@
 #include "odePar.h"
 
-ODEPar::ODEPar(/* args */)
+bool ODEPar::Compare(const ODEPar rhs)
 {
-}
-
-ODEPar::~ODEPar()
-{
-}
-
-void ODEPar::setParValue(size_t i, double val)
-{
-    switch (i)
+    if (numPars != rhs.numPars)
     {
-    case 0:
-        _AUC = val;
-        break;
-    case 1:
-        _aZ = val;
-        break;
-    case 2:
-        _bZ = val;
-        break;
-    case 3:
-        _KZ = val;
-        break;
-    case 4:
-        _KXZ = val;
-    default:
-        break;
+        return false;
+    }
+    int sum = 0;
+    for (size_t i = 0; i < numPars; ++i)
+    {
+        sum += (_pars[i] == rhs._pars[i] ? 1 : 0);
+    }
+    return sum == numPars;
+}
+
+ODEPar::ODEPar(int pars) : numPars(pars), _pars(pars, 1.0) {}
+
+ODEPar::ODEPar(int numPar, std::vector<double> pars) : numPars(numPar)
+{
+    _pars.resize(pars.size());
+    for (size_t i = 0; i < numPars; ++i)
+    {
+        _pars[i] = pars[i];
     }
 
-    return;
 }
-
-void ODEPar::setParValue(std::vector<double> vals)
-{
-    if (vals.size() != 5)
-        return;
-    
-    for (int i = 0; i < 5; ++i)
-    {
-        setParValue(i, vals[i]);
-    }
-}
-
-void ODEPar::setParValue(double AUC, double aZ, double bZ, double KZ, double KXZ)
-{
-    _AUC = AUC;
-    _aZ = aZ;
-    _bZ = bZ;
-    _KZ = KZ;
-    _KXZ = KXZ;
-    return;
-}
-
-std::vector<double> ODEPar::getPars()
-{
-    return std::vector<double>({ _AUC, _aZ, _bZ, _KZ, _KXZ });
-} 
 
 // Get an ODEPar from a vector of ODEPars
 double ODEPar::getODEValFromVector(const ODEPar& target, const std::vector<std::unique_ptr<ODEPar>>& vec, bool incrementCount)
 {
     for (auto& ODE : vec)
     {
-        if (target == *ODE.get())
+        ODEPar source = *(ODE.get());
+        if (target == source)
         {
             if (incrementCount) 
                 ++*ODE;
 
-            return ODE->AUC();
+            return source._AUC;
         }
     }
     return 0;
 } 
+
+std::vector<double> ODEPar::getPars(bool returnAUC)
+{
+    int n = numPars;
+    int startIndex = 0;
+
+    // If we're returning the AUC, make the vector bigger
+    if (returnAUC)
+    {
+        n++;
+        startIndex++;
+    }
+    std::vector<double> result(n);
+
+    for (int i = startIndex; i < n; ++i)
+    {
+        result[i] = _pars[i];
+    }
+
+    // First entry is AUC
+    if (returnAUC)
+    {
+        result[0] = _AUC;
+    }
+
+    return result;
+}
+
+double ODEPar::getParValue(int i)
+{
+    return _pars[i];
+}
+
+void ODEPar::setParValue(int i, double val)
+{
+    _pars[i] = val;
+    return;
+}
+
+void ODEPar::setParValue(std::vector<double> vals, bool firstElementIsAUC)
+{
+    int startIndex = 0;
+
+    if (firstElementIsAUC)
+    {
+        startIndex++;
+        setAUC(vals[0]);
+    }    
+
+    for (int i = startIndex; i < numPars; ++i)
+    {
+        setParValue(i, vals[i]);
+    }
+    return;
+}

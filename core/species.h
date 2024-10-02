@@ -687,6 +687,8 @@ public:
 	double sharedMutFreq(std::vector<Genome*>& genomes, MutationIndex mut1, MutationIndex mut2, bool mut1Missing = false, bool mut2Missing = false);
 	bool isMultiAllelic(int pos, std::vector<Mutation*> muts);
 	static double AUC(const double &h, const double &a, const double &b);
+	static std::vector<double> GetSubstitutions(const std::vector<Substitution*>& subs, int n);
+	static std::vector<double> GetMutationValues(Individual* ind, std::vector<double>& subData);
 	EidosValue_SP ExecuteMethod__debug(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter);
 };
 

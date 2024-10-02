@@ -29,7 +29,8 @@
 #include "log_file.h"
 #include "boost/numeric/odeint.hpp"
 #include "matrixClass.h"
-#include "odePar.h"
+#include "NARPar.h"
+#include "PARPar.h"
 #include "ascent/Ascent.h"
 
 #include <iostream>
@@ -2268,12 +2269,63 @@ EidosValue_SP Species::ExecuteMethod_mutationsOfType(EidosGlobalStringID p_metho
 	}
 }
 
-	// Calculates area under the curve via the trapezoid method
-	#pragma omp declare simd
-	double Species::AUC(const double &h, const double &a, const double &b)
+// Calculates area under the curve via the trapezoid method
+#pragma omp declare simd
+double Species::AUC(const double &h, const double &a, const double &b)
+{
+	return ((a + b) * 0.5) * h;
+}
+
+// Get susbtitution values for each molecular component
+std::vector<double> Species::GetSubstitutions(const std::vector<Substitution*>& subs, int n)
+{
+	static int MUTTYPE_OFFSET = 3;
+	std::vector<double> subData(n, 0.0);
+
+	size_t subType = 0;
+	// Lambda to compare our current subType to the sub's type
+	// Note: the subType is offset by 3 because mutationType for aZ is m3
+	auto cond = [&subType](Substitution* const &sub)
 	{
-		return ((a + b) * 0.5) * h;
+		return ((size_t)(sub->mutation_type_ptr_->mutation_type_id_) == (subType + MUTTYPE_OFFSET));
+	};
+	// Lambda to get product of selection coefficients
+	auto subCoef = [](double i, Substitution* const &sub)
+	{
+		return i + (double)sub->selection_coeff_;
+	};
+	// Fill subData with the products of mutations with the same mutationType
+	for (; subType < n; ++subType)
+	{
+		std::vector<Substitution*> curSubs;
+		std::copy_if(subs.begin(), subs.end(), std::back_inserter(curSubs), cond);
+		// If there are substitutions here update the value
+		// Two chromosomes, so multiply std::accumulate result by 2
+		if (curSubs.size())
+			subData[subType] = 2 * (std::accumulate(curSubs.begin(), curSubs.end(), 0.0, subCoef));
 	}
+
+	return subData;
+}
+
+// Get mutation values for each molecular component
+std::vector<double> Species::GetMutationValues(Individual* ind, std::vector<double>& subData)
+{
+	static int MUTTYPE_OFFSET = 3;
+
+	std::vector<double> result(subData.size());
+
+	// Get the individual's mutation values - offset by 3 because mutation types start at m3
+	// Setting EV_data value offset by 1 because value 0 means setting AUC
+	// parameter = e^sumOfMutationsAndSubs
+	for (uint mutType = 0; mutType < subData.size(); ++mutType)
+	{
+		double indVals = ind->internalSumOfMutationsOfType(mutType + MUTTYPE_OFFSET);
+		indVals += subData[mutType];
+		result[mutType] = exp(indVals);
+	}
+	return result;
+}
 
 //	*********************	- (float)NARIntegrate(Object<Individual> individuals)
 // Extending this: Switch statement to choose certain ODEs? How do we combine multiple ODEs together?
@@ -2281,7 +2333,6 @@ EidosValue_SP Species::ExecuteMethod_mutationsOfType(EidosGlobalStringID p_metho
 EidosValue_SP Species::ExecuteMethod_NARIntegrate(EidosGlobalStringID p_method_ID, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter)
 {
 	// std::ostream &output_stream = p_interpreter.ExecutionOutputStream();
-
 	typedef std::vector<double> state_type;
 	EidosValue_SP result_SP(nullptr);
 	EidosValue_Object *individuals_value = (EidosValue_Object *)p_arguments[0].get();
@@ -2294,31 +2345,7 @@ EidosValue_SP Species::ExecuteMethod_NARIntegrate(EidosGlobalStringID p_method_I
 
 	// For each mutation type, get the relevant substitutions and calculate product of
 	// selection coefficients - we store that in subData
-	std::vector<Substitution*> &subs = population_.substitutions_;
-	std::vector<double> subData(4, 0.0);
-
-	size_t subType = 0;
-	// Lambda to compare our current subType to the sub's type
-	// Note: the subType is offset by 3 because mutationType for aZ is m3
-	auto cond = [&subType](Substitution* const &sub)
-	{
-		return ((size_t)(sub->mutation_type_ptr_->mutation_type_id_) == (subType + 3));
-	};
-	// Lambda to get product of selection coefficients
-	auto subCoef = [](double i, Substitution* const &sub)
-	{
-		return i + (double)sub->selection_coeff_;
-	};
-	// Fill subData with the products of mutations with the same mutationType
-	for (; subType < 4; ++subType)
-	{
-		std::vector<Substitution*> curSubs;
-		std::copy_if(subs.begin(), subs.end(), std::back_inserter(curSubs), cond);
-		// If there are substitutions here update the value
-		// Two chromosomes, so multiply std::accumulate result by 2
-		if (curSubs.size())
-			subData[subType] = 2 * (std::accumulate(curSubs.begin(), curSubs.end(), 0.0, subCoef));
-	}
+	std::vector<double> subData = GetSubstitutions(population_.substitutions_, 4);
 
 	// Iterate over individuals to get input parameter values, store in a series of vectors
 	const double Xstart = 1.0; 
@@ -2327,31 +2354,27 @@ EidosValue_SP Species::ExecuteMethod_NARIntegrate(EidosGlobalStringID p_method_I
 	const double nZ = 8.0;
 	int X = 0;
 
-	// Store saved combinations in the simulation's ongoing record vector of ODEPars
-	// NOTE: Now stored in SLiMSim::pastCombos
-	//std::vector<std::unique_ptr<ODEPar>> uniqueODEs;
-
 	// Now iterate over individuals to calculate phenotype
 	for (int ind_ex = 0; ind_ex < inds_count; ++ind_ex)
 	{
 		// First, iterate over mutations and calculate NAR parameters
 		// Set up storage of NAR parameters
-		ODEPar EV_data;
-		Individual *ind __attribute__((used)) = (Individual *)individuals_value->ObjectElementAtIndex_NOCAST(ind_ex, nullptr);
-		// Get the individual's mutation values - offset by 3 because mutation types start at m3
-		// Setting EV_data value offset by 1 because value 0 means setting AUC
-		// parameter = e^sumOfMutationsAndSubs
-		for (uint mutType = 0; mutType < 4; ++mutType)
+		NARPar EV_data;
+		Individual *ind = (Individual *)individuals_value->ObjectElementAtIndex_NOCAST(ind_ex, nullptr);
+
+		// If the phenoPars hasn't been initialised yet OR is a different type, reset
+		if (ind->phenoPars == nullptr || typeid(ind->phenoPars).name() != "NARPar")
 		{
-			double indVals = ind->internalSumOfMutationsOfType(mutType + 3);
-			indVals += subData[mutType];
-			EV_data.setParValue((mutType + 1), exp(indVals));
+			ind->phenoPars = std::make_unique<NARPar>();
 		}
+
+		std::vector<double> molComps = GetMutationValues(ind, subData);
+		EV_data.setParValue(molComps);
 
 		// Lambda to compare combination to ODEPar
 		auto compareODE = [&EV_data](const std::unique_ptr<ODEPar>& existing)
 		{
-			return EV_data == *existing.get();
+			return EV_data.Compare(*existing.get());
 		};
 		// If we match an existing entry in the list of past combos - otherwise we need to calculate the AUC
 		if (std::any_of(this->pastCombos.begin(), this->pastCombos.end(), compareODE))
@@ -2400,6 +2423,7 @@ EidosValue_SP Species::ExecuteMethod_NARIntegrate(EidosGlobalStringID p_method_I
 		// Check that z is > 0
 		z = (z >= 0) ? z : 0.0;
 		out.emplace_back(z);
+		EV_data.setAUC(z);
 
 		// First check if the pastcombos list is too long: if it is, it's more expensive to search for a 
 		// match than to just calculate again. So we'll limit the number of combos to some sane amount, 
@@ -2408,13 +2432,10 @@ EidosValue_SP Species::ExecuteMethod_NARIntegrate(EidosGlobalStringID p_method_I
 		if (pastCombos.size() < MAX_PAST_COMBOS)
 		{
 			// Add this to the list of existing solutions
-			this->pastCombos.emplace_back(std::make_unique<ODEPar>(z, EV_data.aZ(), EV_data.bZ(), EV_data.KZ(), EV_data.KXZ()));
-			// Update the individual's phenoPars values
-			ind->phenoPars.get()->setParValue(this->pastCombos.back().get()->getPars());
-		} else 
-		{
-			ind->phenoPars.get()->setParValue(z, EV_data.aZ(), EV_data.bZ(), EV_data.KZ(), EV_data.KXZ());
-		}
+			this->pastCombos.emplace_back(std::make_unique<NARPar>(EV_data));
+		} 
+		// Update the individual's phenoPars values
+		ind->phenoPars.get()->setParValue(EV_data.getPars());
 
 	}
 
@@ -2437,37 +2458,11 @@ EidosValue_SP Species::ExecuteMethod_PARIntegrate(EidosGlobalStringID p_method_i
 
 	// For each mutation type, get the relevant substitutions and calculate product of
 	// selection coefficients - we store that in subData
-	std::vector<Substitution*> &subs = population_.substitutions_;
-	std::vector<double> subData(4, 0.0);
-
-	size_t subType = 0;
-	// Lambda to compare our current subType to the sub's type
-	// Note: the subType is offset by 3 because mutationType for aZ is m3
-	auto cond = [&subType](Substitution* const &sub)
-	{
-		return ((size_t)(sub->mutation_type_ptr_->mutation_type_id_) == (subType + 3));
-	};
-	// Lambda to get product of selection coefficients
-	auto subCoef = [](double i, Substitution* const &sub)
-	{
-		return i + (double)sub->selection_coeff_;
-	};
-	// Fill subData with the products of mutations with the same mutationType
-	for (; subType < 4; ++subType)
-	{
-		std::vector<Substitution*> curSubs;
-		std::copy_if(subs.begin(), subs.end(), std::back_inserter(curSubs), cond);
-		// If there are substitutions here update the value
-		// Two chromosomes, so multiply std::accumulate result by 2
-		if (curSubs.size())
-			subData[subType] = 2 * (std::accumulate(curSubs.begin(), curSubs.end(), 0.0, subCoef));
-	}
-
+	std::vector<double> subData = GetSubstitutions(population_.substitutions_, 6);
+	
 	// Iterate over individuals to get input parameter values, store in a series of vectors
 	const double Xstart = 1.0; 
 	const double Xstop = 6.0;
-	const double nXZ = 8.0;
-	const double nZ = 8.0;
 	int X = 0;
 
 	// Store saved combinations in the simulation's ongoing record vector of ODEPars
@@ -2479,39 +2474,44 @@ EidosValue_SP Species::ExecuteMethod_PARIntegrate(EidosGlobalStringID p_method_i
 	{
 		// First, iterate over mutations and calculate NAR parameters
 		// Set up storage of NAR parameters
-		ODEPar EV_data;
-		Individual *ind __attribute__((used)) = (Individual *)individuals_value->ObjectElementAtIndex_NOCAST(ind_ex, nullptr);
+		PARPar EV_data;
+		Individual *ind = (Individual *)individuals_value->ObjectElementAtIndex_NOCAST(ind_ex, nullptr);
+
+		// If the phenoPars hasn't been initialised yet, do that
+		if (ind->phenoPars == nullptr || typeid(ind->phenoPars).name() != "PARPar")
+		{
+			ind->phenoPars = std::make_unique<PARPar>();
+		}
+
 		// Get the individual's mutation values - offset by 3 because mutation types start at m3
 		// Setting EV_data value offset by 1 because value 0 means setting AUC
 		// parameter = e^sumOfMutationsAndSubs
-		for (uint mutType = 0; mutType < 4; ++mutType)
-		{
-			double indVals = ind->internalSumOfMutationsOfType(mutType + 3);
-			indVals += subData[mutType];
-			EV_data.setParValue((mutType + 1), exp(indVals));
-		}
+		std::vector<double> molComps = GetMutationValues(ind, subData);
+		EV_data.setParValue(molComps);
 
 		// Lambda to compare combination to ODEPar
 		auto compareODE = [&EV_data](const std::unique_ptr<ODEPar>& existing)
 		{
-			return EV_data == *existing.get();
+			return EV_data.Compare(*existing.get());
 		};
 		// If we match an existing entry in the list of past combos - otherwise we need to calculate the AUC
 		if (std::any_of(this->pastCombos.begin(), this->pastCombos.end(), compareODE))
 		{
-			double curAUC = ODEPar::getODEValFromVector(EV_data, this->pastCombos, true);
+			double curAUC = PARPar::getODEValFromVector(EV_data, this->pastCombos, true);
 			out.emplace_back(curAUC);
-			EV_data.setParValue(0, curAUC);
-			ind->phenoPars.get()->setParValue(EV_data.getPars());
+
+			// Update phenopars for this individual
+			EV_data.setAUC(curAUC);
+			ind->phenoPars.get()->setParValue(EV_data.getPars(), true);
 			continue;
 		}
 	
 		// Lambdas for AUC and ODE system
 		// Declare/define a lambda which defines the ODE system - this is going to be very ugly
-		auto PAR = [&EV_data, &Xstart, &Xstop, &nXZ, &nZ, &X](const asc::state_t &val, asc::state_t &dxdt, double t)
+		auto PAR = [&EV_data, &Xstart, &Xstop, &X](const asc::state_t &val, asc::state_t &dxdt, double t)
 		{
-			// dZ <- bZ * X^nXZ/(KXZ^nXZ + X^nXZ) * (Z^nZ/(Kz^nZ+Z^nZ)) - aZ*Z
-			dxdt[0] = EV_data.bZ() * pow(X, nXZ) / (pow(EV_data.KXZ(), nXZ) + pow(X, nXZ)) * (pow(val[0], nZ)/(pow(EV_data.KZ(), nZ) + pow(val[0], nZ))) - EV_data.aZ() * val[0];
+			// dZ <- base * X + bZ * (X^n/(KXZ^n + X^n)) * ((Z^n)/((KZ^n)+(Z^n))) - aZ*Z
+			dxdt[0] = EV_data.base() * X + EV_data.bZ() * pow(X, EV_data.n()) / (pow(EV_data.KXZ(), EV_data.n()) + pow(X, EV_data.n())) * (pow(val[0], EV_data.n())/(pow(EV_data.KZ(), EV_data.n()) + pow(val[0], EV_data.n()))) - EV_data.aZ() * val[0];
 		};
 
 		// Set up the initial state
@@ -2543,6 +2543,7 @@ EidosValue_SP Species::ExecuteMethod_PARIntegrate(EidosGlobalStringID p_method_i
 		// Check that z is > 0
 		z = (z >= 0) ? z : 0.0;
 		out.emplace_back(z);
+		EV_data.setAUC(z);
 
 		// First check if the pastcombos list is too long: if it is, it's more expensive to search for a 
 		// match than to just calculate again. So we'll limit the number of combos to some sane amount, 
@@ -2551,14 +2552,11 @@ EidosValue_SP Species::ExecuteMethod_PARIntegrate(EidosGlobalStringID p_method_i
 		if (pastCombos.size() < MAX_PAST_COMBOS)
 		{
 			// Add this to the list of existing solutions
-			this->pastCombos.emplace_back(std::make_unique<ODEPar>(z, EV_data.aZ(), EV_data.bZ(), EV_data.KZ(), EV_data.KXZ()));
-			// Update the individual's phenoPars values
-			ind->phenoPars.get()->setParValue(this->pastCombos.back().get()->getPars());
-		} else 
-		{
-			ind->phenoPars.get()->setParValue(z, EV_data.aZ(), EV_data.bZ(), EV_data.KZ(), EV_data.KXZ());
-		}
+			this->pastCombos.emplace_back(std::make_unique<PARPar>(EV_data));
+		} 
 
+		// Update the individual's phenoPars values
+		ind->phenoPars.get()->setParValue(EV_data.getPars(), true);
 	}
 
 	// Initialise an Eidos vector to return our calculations
