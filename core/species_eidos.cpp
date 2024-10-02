@@ -2365,6 +2365,7 @@ EidosValue_SP Species::ExecuteMethod_NARIntegrate(EidosGlobalStringID p_method_I
 		// If the phenoPars hasn't been initialised yet OR is a different type, reset
 		if (ind->phenoPars == nullptr || typeid(ind->phenoPars).name() != "NARPar")
 		{
+			//ind->InitializeODEPars(EV_data);
 			ind->phenoPars = std::make_unique<NARPar>();
 		}
 
@@ -2382,7 +2383,7 @@ EidosValue_SP Species::ExecuteMethod_NARIntegrate(EidosGlobalStringID p_method_I
 			double curAUC = ODEPar::getODEValFromVector(EV_data, this->pastCombos, true);
 			out.emplace_back(curAUC);
 			EV_data.setParValue(0, curAUC);
-			ind->phenoPars.get()->setParValue(EV_data.getPars());
+			ind->phenoPars.get()->setParValue(EV_data.getPars(), true);
 			continue;
 		}
 	
@@ -2435,7 +2436,7 @@ EidosValue_SP Species::ExecuteMethod_NARIntegrate(EidosGlobalStringID p_method_I
 			this->pastCombos.emplace_back(std::make_unique<NARPar>(EV_data));
 		} 
 		// Update the individual's phenoPars values
-		ind->phenoPars.get()->setParValue(EV_data.getPars());
+		ind->phenoPars.get()->setParValue(EV_data.getPars(), true);
 
 	}
 
@@ -2480,6 +2481,7 @@ EidosValue_SP Species::ExecuteMethod_PARIntegrate(EidosGlobalStringID p_method_i
 		// If the phenoPars hasn't been initialised yet, do that
 		if (ind->phenoPars == nullptr || typeid(ind->phenoPars).name() != "PARPar")
 		{
+			//ind->InitializeODEPars(EV_data);
 			ind->phenoPars = std::make_unique<PARPar>();
 		}
 
