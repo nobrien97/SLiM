@@ -10,7 +10,9 @@ public:
     PARPar(double AUC, std::vector<double> pars);
     PARPar();
 
-    const int numPars = 6;
+    std::vector<double> SolveODE() override;
+
+    const static int numPars = 7;
  
     const double& AUC() const { return _AUC; }
     const double& aZ() const { return _pars[0]; }
@@ -19,6 +21,7 @@ public:
     const double& KXZ() const { return _pars[3]; }
     const double& base() const { return _pars[4]; }
     const double& n() const { return _pars[5]; }
+    const double& XMult() const { return _pars[6]; }
 
     double& AUC() { return _AUC; }
     double& aZ() { return _pars[0]; }
@@ -27,5 +30,6 @@ public:
     double& KXZ() { return _pars[3]; }
     double& base() { return _pars[4]; }
     double& n() { return _pars[5]; }
+    double& XMult() { return _pars[6]; }
 
 };

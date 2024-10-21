@@ -1,5 +1,6 @@
 #include <vector>
 #include <memory>
+#include "ascent/Ascent.h"
 #pragma once
 class ODEPar
 {
@@ -11,6 +12,14 @@ public:
     ODEPar(int pars);
     ODEPar(int numPar, std::vector<double> pars);
     virtual ~ODEPar() = default;
+
+    enum motif_enum {
+		NAR,
+		PAR,
+		FFLC1,
+		FFLI1,
+		FFBH
+	};
 
     void operator ++ (){  
         count++;  
@@ -31,7 +40,15 @@ public:
         return sum == numPars;
     }
 
+    static std::unique_ptr<ODEPar> MakeODEPtr(motif_enum motifType);
+
+    static ODEPar* MakeODEPar
+
     bool Compare(const ODEPar rhs); 
+
+    virtual std::vector<double> SolveODE();
+
+    static double AUC(const double &h, const double &a, const double &b);
 
     const size_t numPars = 0;
     unsigned int count = 1; // Count the number of instances in the population that this exists: needs to be reset to 1 every generation! 

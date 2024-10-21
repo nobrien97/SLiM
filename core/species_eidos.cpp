@@ -31,6 +31,9 @@
 #include "matrixClass.h"
 #include "NARPar.h"
 #include "PARPar.h"
+#include "FFLC1Par.h"
+#include "FFLI1Par.h"
+#include "FFBHPar.h"
 #include "ascent/Ascent.h"
 
 #include <iostream>
@@ -2386,45 +2389,10 @@ EidosValue_SP Species::ExecuteMethod_NARIntegrate(EidosGlobalStringID p_method_I
 			ind->phenoPars.get()->setParValue(EV_data.getPars(), true);
 			continue;
 		}
-	
-		// Lambdas for AUC and ODE system
-		// Declare/define a lambda which defines the ODE system - this is going to be very ugly
-		auto NAR = [&EV_data, &Xstart, &Xstop, &nXZ, &nZ, &X](const asc::state_t &val, asc::state_t &dxdt, double t)
-		{
-			// dZ <- bZ * X^nXZ/(KXZ^nXZ + X^nXZ) * (KZ^nZ/(Kz^nZ+Z^nZ)) - aZ*Z
-			dxdt[0] = EV_data.bZ() * pow(X, nXZ) / (pow(EV_data.KXZ(), nXZ) + pow(X, nXZ)) * (pow(EV_data.KZ(), nZ)/(pow(EV_data.KZ(), nZ) + pow(val[0], nZ))) - EV_data.aZ() * val[0];
-		};
 
-		// Set up the initial state
-		asc::state_t state = { 0.0 };
-		double t = 0.0;
-		double dt = 0.1;
-		double t_end = 10.0;
-
-		asc::RK4 integrator;
-		asc::Recorder recorder;
-
-		while (t < t_end)
-		{
-			// Add a small epsilon to get around t floating point inaccuracy
-			X = ((t >= Xstart - 1e-5) && (t <= Xstop + 1e-5));
-			recorder({t, (asc::value_t)X, state[0]});
-			integrator(NAR, state, t, dt);
-		}
-
-		// Calculate AUC
-		double z = 0;
-
-		#pragma omp simd reduction(+:z)
-		for (uint i = 0; i < recorder.history.size()-1; ++i)
-		{
-			z += Species::AUC(0.1, (double)recorder.history[i][2], (double)recorder.history[i + 1][2]);
-		}
-		
-		// Check that z is > 0
-		z = (z >= 0) ? z : 0.0;
-		out.emplace_back(z);
-		EV_data.setAUC(z);
+		// Calculate ODE
+		std::vector<double> solution = EV_data.SolveODE();
+		out.emplace_back(solution[0]);
 
 		// First check if the pastcombos list is too long: if it is, it's more expensive to search for a 
 		// match than to just calculate again. So we'll limit the number of combos to some sane amount, 
@@ -2508,44 +2476,136 @@ EidosValue_SP Species::ExecuteMethod_PARIntegrate(EidosGlobalStringID p_method_i
 			continue;
 		}
 	
-		// Lambdas for AUC and ODE system
-		// Declare/define a lambda which defines the ODE system - this is going to be very ugly
-		auto PAR = [&EV_data, &Xstart, &Xstop, &X](const asc::state_t &val, asc::state_t &dxdt, double t)
+		// Calculate ODE
+		std::vector<double> solution = EV_data.SolveODE();
+		out.emplace_back(solution[0]);
+
+		// First check if the pastcombos list is too long: if it is, it's more expensive to search for a 
+		// match than to just calculate again. So we'll limit the number of combos to some sane amount, 
+		// which hopefully should reduce the cost of searching in a highly variable environment while 
+		// still having some benefit for intermediate-variance populations
+		if (pastCombos.size() < MAX_PAST_COMBOS)
 		{
-			// dZ <- base * X + bZ * (X^n/(KXZ^n + X^n)) * ((Z^n)/((KZ^n)+(Z^n))) - aZ*Z
-			dxdt[0] = EV_data.base() * X + EV_data.bZ() * pow(X, EV_data.n()) / (pow(EV_data.KXZ(), EV_data.n()) + pow(X, EV_data.n())) * (pow(val[0], EV_data.n())/(pow(EV_data.KZ(), EV_data.n()) + pow(val[0], EV_data.n()))) - EV_data.aZ() * val[0];
+			// Add this to the list of existing solutions
+			this->pastCombos.emplace_back(std::make_unique<PARPar>(EV_data));
+		} 
+
+		// Update the individual's phenoPars values
+		ind->phenoPars.get()->setParValue(EV_data.getPars(), true);
+	}
+
+	// Initialise an Eidos vector to return our calculations
+	return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float{out});
+}
+
+//	*********************	– (float)ODEIntegrate(Object<Individual> individuals, string$ motif)
+EidosValue_SP Species::ExecuteMethod_ODEIntegrate(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter)
+{
+	// types
+	typedef std::vector<double> state_type;
+
+	// for switching between motifs
+	auto hashMotifString = [](std::string const& motifString)
+	{
+		if (motifString == "NAR") return motif_type::NAR;
+		if (motifString == "PAR") return motif_type::PAR;
+		if (motifString == "FFLC1") return motif_type::FFLC1;
+		if (motifString == "FFLI1") return motif_type::FFLI1;
+		if (motifString == "FFBH") return motif_type::FFBH;
+	};
+
+	EidosValue_SP result_SP(nullptr);
+	EidosValue_Object *individuals_value = (EidosValue_Object *)p_arguments[0].get();
+	EidosValue_String *motif_value = (EidosValue_String *)p_arguments[1].get();
+	std::string motif = motif_value->StringAtIndex_NOCAST(0, nullptr);
+
+	// Choose correct motif
+	int mutTypeCount;
+	ODEPar ODE;
+
+	// Set the correct number of mut types and define the correct ODEPar derived class
+	switch (hashMotifString(motif))
+	{
+	case motif_type::NAR:
+		mutTypeCount = NARPar::numPars;
+		break;
+	case motif_type::PAR:
+		mutTypeCount = PARPar::numPars;
+		break;
+	case motif_type::FFLC1:
+		mutTypeCount = FFLC1Par::numPars;
+		break;
+	case motif_type::FFLI1:
+		mutTypeCount = FFLI1Par::numPars;
+		break;
+	case motif_type::FFBH:
+		mutTypeCount = FFBHPar::numPars;
+		break;
+	default:
+		break;
+	}
+	
+	// Iterate over all individuals, calculating their NAR AUC from their parameter set:
+	// First need to actually get the individuals and reserve some space for each individual's result
+	int inds_count = p_arguments[0].get()->Count();
+	std::vector<double> out;
+	out.reserve(size_t(inds_count));
+
+	// For each mutation type, get the relevant substitutions and calculate product of
+	// selection coefficients - we store that in subData
+	std::vector<double> subData = GetSubstitutions(population_.substitutions_, mutTypeCount);
+	
+	// Iterate over individuals to get input parameter values, store in a series of vectors
+	const double Xstart = 1.0; 
+	const double Xstop = 6.0;
+	int X = 0;
+
+
+	// Store saved combinations in the simulation's ongoing record vector of ODEPars
+	// NOTE: Now stored in SLiMSim::pastCombos
+	//std::vector<std::unique_ptr<ODEPar>> uniqueODEs;
+
+	// Now iterate over individuals to calculate phenotype
+	for (int ind_ex = 0; ind_ex < inds_count; ++ind_ex)
+	{
+		// First, iterate over mutations and calculate NAR parameters
+		// Set up storage of NAR parameters
+		ODEPar EV_data;
+		Individual *ind = (Individual *)individuals_value->ObjectElementAtIndex_NOCAST(ind_ex, nullptr);
+
+		// If the phenoPars hasn't been initialised yet, do that
+		if (ind->phenoPars == nullptr)
+		{
+			//ind->InitializeODEPars(EV_data);
+			ind->phenoPars = ODEPar::MakeODEPtr(hashMotifString(motif));
+		}
+
+		// Get the individual's mutation values - offset by 3 because mutation types start at m3
+		// Setting EV_data value offset by 1 because value 0 means setting AUC
+		// parameter = e^sumOfMutationsAndSubs
+		std::vector<double> molComps = GetMutationValues(ind, subData);
+		EV_data.setParValue(molComps);
+
+		// Lambda to compare combination to ODEPar
+		auto compareODE = [&EV_data](const std::unique_ptr<ODEPar>& existing)
+		{
+			return EV_data.Compare(*existing.get());
 		};
-
-		// Set up the initial state
-		asc::state_t state = { 0.0 };
-		double t = 0.0;
-		double dt = 0.1;
-		double t_end = 10.0;
-
-		asc::RK4 integrator;
-		asc::Recorder recorder;
-
-		while (t < t_end)
+		// If we match an existing entry in the list of past combos - otherwise we need to calculate the AUC
+		if (std::any_of(this->pastCombos.begin(), this->pastCombos.end(), compareODE))
 		{
-			// Add a small epsilon to get around t floating point inaccuracy
-			X = ((t >= Xstart - 1e-5) && (t <= Xstop + 1e-5));
-			recorder({t, (asc::value_t)X, state[0]});
-			integrator(PAR, state, t, dt);
-		}
+			double curAUC = ODEPar::getODEValFromVector(EV_data, this->pastCombos, true);
+			out.emplace_back(curAUC);
 
-		// Calculate AUC
-		double z = 0;
-
-		#pragma omp simd reduction(+:z)
-		for (uint i = 0; i < recorder.history.size()-1; ++i)
-		{
-			z += Species::AUC(0.1, (double)recorder.history[i][2], (double)recorder.history[i + 1][2]);
+			// Update phenopars for this individual
+			EV_data.setAUC(curAUC);
+			ind->phenoPars.get()->setParValue(EV_data.getPars(), true);
+			continue;
 		}
-		
-		// Check that z is > 0
-		z = (z >= 0) ? z : 0.0;
-		out.emplace_back(z);
-		EV_data.setAUC(z);
+	
+		// Calculate ODE
+		std::vector<double> solution = EV_data.SolveODE();
+		out.emplace_back(solution[0]);
 
 		// First check if the pastcombos list is too long: if it is, it's more expensive to search for a 
 		// match than to just calculate again. So we'll limit the number of combos to some sane amount, 

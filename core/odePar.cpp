@@ -1,4 +1,37 @@
 #include "odePar.h"
+#include "NARPar.h"
+#include "PARPar.h"
+#include "FFLC1Par.h"
+#include "FFLI1Par.h"
+#include "FFBHPar.h"
+
+
+std::unique_ptr<ODEPar> ODEPar::MakeODEPtr(motif_enum motifType)
+{
+        {
+        switch (motifType)
+        {
+            case NAR:
+                return std::make_unique<NARPar>();
+                break;
+            case PAR:
+                return std::make_unique<PARPar>();
+                break;
+            case FFLC1:
+                return std::make_unique<FFLC1Par>();
+                break;
+            case FFLI1:
+                return std::make_unique<FFLI1Par>();
+                break;
+            case FFBH:
+                return std::make_unique<FFBHPar>();
+                break;
+            default:
+                return nullptr;
+                break;
+        }
+    }
+}
 
 bool ODEPar::Compare(const ODEPar rhs)
 {
@@ -96,4 +129,11 @@ void ODEPar::setParValue(std::vector<double> vals, bool firstElementIsAUC)
         setParValue(i, vals[i]);
     }
     return;
+}
+
+// Calculates area under the curve via the trapezoid method
+#pragma omp declare simd
+double ODEPar::AUC(const double &h, const double &a, const double &b)
+{
+	return ((a + b) * 0.5) * h;
 }
