@@ -1293,6 +1293,7 @@ const std::string &gStr_relatedness = EidosRegisteredString("relatedness", gID_r
 const std::string &gStr_sharedParentCount = EidosRegisteredString("sharedParentCount", gID_sharedParentCount);
 const std::string &gStr_NARIntegrate = EidosRegisteredString("NARIntegrate", gID_NARIntegrate);
 const std::string &gStr_PARIntegrate = EidosRegisteredString("PARIntegrate", gID_PARIntegrate);
+const std::string &gStr_ODEIntegrate = EidosRegisteredString("ODEIntegrate", gID_ODEIntegrate);
 const std::string &gStr_calcLD = EidosRegisteredString("calcLD", gID_calcLD);
 const std::string &gStr_calcLDBetweenSitePairs = EidosRegisteredString("calcLDBetweenSitePairs", gID_calcLDBetweenSitePairs);
 const std::string &gStr_sharedMutFreqs = EidosRegisteredString("sharedMutFreqs", gID_sharedMutFreqs);
