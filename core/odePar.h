@@ -11,14 +11,15 @@ public:
     ODEPar() {};
     ODEPar(int pars);
     ODEPar(int numPar, std::vector<double> pars);
-    virtual ~ODEPar() = default;
+    ~ODEPar() = default;
 
     enum motif_enum {
 		NAR,
 		PAR,
 		FFLC1,
 		FFLI1,
-		FFBH
+		FFBH,
+        none
 	};
 
     void operator ++ (){  
@@ -41,8 +42,9 @@ public:
     }
 
     static std::unique_ptr<ODEPar> MakeODEPtr(motif_enum motifType);
+    static std::unique_ptr<ODEPar> MakeODEPtr(motif_enum motifType, const ODEPar &initialODEPar);
 
-    static ODEPar* MakeODEPar
+    //static ODEPar* MakeODEPar
 
     bool Compare(const ODEPar rhs); 
 

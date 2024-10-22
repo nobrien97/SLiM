@@ -33,6 +33,37 @@ std::unique_ptr<ODEPar> ODEPar::MakeODEPtr(motif_enum motifType)
     }
 }
 
+std::unique_ptr<ODEPar> ODEPar::MakeODEPtr(motif_enum motifType, const ODEPar &initialODEPar)
+{
+    switch (motifType)
+    {
+        case NAR:
+            return std::make_unique<NARPar>(initialODEPar._AUC, initialODEPar._pars);
+            break;
+        case PAR:
+            return std::make_unique<PARPar>(initialODEPar._AUC, initialODEPar._pars);
+            break;
+        case FFLC1:
+            return std::make_unique<FFLC1Par>(initialODEPar._AUC, initialODEPar._pars);
+            break;
+        case FFLI1:
+            return std::make_unique<FFLI1Par>(initialODEPar._AUC, initialODEPar._pars);
+            break;
+        case FFBH:
+            return std::make_unique<FFBHPar>(initialODEPar._AUC, initialODEPar._pars);
+            break;
+        default:
+            return nullptr;
+            break;
+    }
+}
+
+// No-op default implementation: return an empty vector
+std::vector<double> ODEPar::SolveODE()
+{
+    return std::vector<double>(0);
+}
+
 bool ODEPar::Compare(const ODEPar rhs)
 {
     if (numPars != rhs.numPars)
