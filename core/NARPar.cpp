@@ -21,7 +21,7 @@ std::vector<double> NARPar::SolveODE()
 
 	// Lambdas for AUC and ODE system
 	// Declare/define a lambda which defines the ODE system - this is going to be very ugly
-	auto NAR = [this, &Xstart, &Xstop, &X](const asc::state_t &val, asc::state_t &dxdt, double t)
+	auto NARDerivative = [this, &Xstart, &Xstop, &X](const asc::state_t &val, asc::state_t &dxdt, double t)
 	{
 		// dZ <- base * X + bZ * (X^n/(KXZ^n + X^n)) * ((KZ^n)/((KZ^n)+(Z^n))) - aZ*Z
 		dxdt[0] = base() * X + bZ() * pow(X, n()) / (pow(KXZ(), n()) + pow(X, n())) * (pow(KZ(), n())/(pow(KZ(), n()) + pow(val[0], n()))) - aZ() * val[0];
@@ -29,9 +29,9 @@ std::vector<double> NARPar::SolveODE()
 
 	// Set up the initial state
 	asc::state_t state = { 0.0 };
-	static double t = 0.0;
-	static double dt = 0.1;
-	static double t_end = 10.0;
+	double t = 0.0;
+	double dt = 0.1;
+	double t_end = 10.0;
 	asc::RK4 integrator;
 	asc::Recorder recorder;
 
@@ -40,7 +40,7 @@ std::vector<double> NARPar::SolveODE()
 		// Add a small epsilon to get around t floating point inaccuracy
 		X = ((t >= Xstart - 1e-5) && (t <= Xstop + 1e-5));
 		recorder({t, (asc::value_t)X, state[0]});
-		integrator(NAR, state, t, dt);
+		integrator(NARDerivative, state, t, dt);
 	}
 	// Calculate AUC
 	double z = 0;

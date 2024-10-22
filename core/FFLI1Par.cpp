@@ -20,10 +20,9 @@ std::vector<double> FFLI1Par::SolveODE()
 
     // Starting X and Y
 	int X = 0;
-    double Y = 0;
 
     // FFL I1 system
-	auto FFLI1 = [this, &Xstart, &Xstop, &X](const asc::state_t &curState, asc::state_t &nextState, double t)
+	auto FFLI1Derivative = [this, &Xstart, &Xstop, &X](const asc::state_t &curState, asc::state_t &nextState, double t)
 	{
         // X <- XMult * (t > Xstart && t <= Xstop)
         // dY <- base * X + bY * X^Hilln/(KY^Hilln + X^Hilln) - aY*Y
@@ -37,9 +36,9 @@ std::vector<double> FFLI1Par::SolveODE()
 
 	// Set up the initial state
 	asc::state_t state = { 0.0, 0.0 };
-	static double t = 0.0;
-	static double dt = 0.1;
-	static double t_end = 10.0;
+	double t = 0.0;
+	double dt = 0.1;
+	double t_end = 10.0;
 	asc::RK4 integrator;
 	asc::Recorder recorder;
 
@@ -48,7 +47,7 @@ std::vector<double> FFLI1Par::SolveODE()
 		// Add a small epsilon to get around t floating point inaccuracy
 		X = ((t >= Xstart - 1e-5) && (t <= Xstop + 1e-5));
 		recorder({t, (asc::value_t)X, state[0], state[1]});
-		integrator(FFLI1, state, t, dt);
+		integrator(FFLI1Derivative, state, t, dt);
 	}
 	// Calculate AUC
 	double z = 0;

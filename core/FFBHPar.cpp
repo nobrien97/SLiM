@@ -19,12 +19,11 @@ std::vector<double> FFBHPar::SolveODE()
 	const double Xstart = 1.0; 
 	const double Xstop = 6.0;
 
-    // Starting X and Y
+    // Starting X
 	int X = 0;
-    double Y = 0;
 
     // FFBH system
-	auto FFBH = [this, &Xstart, &Xstop, &X](const asc::state_t &curState, asc::state_t &nextState, double t)
+	auto FFBHDerivative = [this, &Xstart, &Xstop, &X](const asc::state_t &curState, asc::state_t &nextState, double t)
 	{
         // # Manually set X
         //     X <- XMult * (t > Xstart && t <= Xstop)
@@ -54,9 +53,9 @@ std::vector<double> FFBHPar::SolveODE()
 
 	// Set up the initial state
 	asc::state_t state = { 0.0, 0.0, 0.0 };
-	static double t = 0.0;
-	static double dt = 0.1;
-	static double t_end = 10.0;
+	double t = 0.0;
+	double dt = 0.1;
+	double t_end = 10.0;
 	asc::RK4 integrator;
 	asc::Recorder recorder;
 
@@ -65,7 +64,7 @@ std::vector<double> FFBHPar::SolveODE()
 		// Add a small epsilon to get around t floating point inaccuracy
 		X = ((t >= Xstart - 1e-5) && (t <= Xstop + 1e-5));
 		recorder({t, (asc::value_t)X, state[0], state[1], state[2]});
-		integrator(FFBH, state, t, dt);
+		integrator(FFBHDerivative, state, t, dt);
 	}
 	// Calculate AUC
 	double z = 0;
