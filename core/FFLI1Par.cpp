@@ -7,7 +7,11 @@ FFLI1Par::FFLI1Par(double AUC, std::vector<double> pars) : ODEPar(numPars, pars)
     _pars[6] = 0.01; // constitutive promoter
 }
 
-FFLI1Par::FFLI1Par() : ODEPar(numPars) {}
+FFLI1Par::FFLI1Par() : ODEPar(numPars) 
+{
+	_pars.resize(numPars, 1.0);
+    _pars[6] = 0.01; // constitutive promoter
+}
 
 std::vector<double> FFLI1Par::SolveODE()
 {

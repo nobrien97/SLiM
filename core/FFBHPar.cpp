@@ -7,7 +7,12 @@ FFBHPar::FFBHPar(double AUC, std::vector<double> pars) : ODEPar(numPars, pars)
     _pars[9] = 0.0; // set baseline to 0 to start
 }
 
-FFBHPar::FFBHPar() : ODEPar(numPars) {}
+FFBHPar::FFBHPar() : ODEPar(numPars) 
+{
+    _pars.resize(numPars, 1.0);
+    _pars[9] = 0.0; // set baseline to 0 to start
+
+}
 
 
 std::vector<double> FFBHPar::SolveODE()

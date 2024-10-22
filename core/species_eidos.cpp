@@ -2567,7 +2567,7 @@ EidosValue_SP Species::ExecuteMethod_ODEIntegrate(EidosGlobalStringID p_method_i
 		Individual *ind = (Individual *)individuals_value->ObjectElementAtIndex_NOCAST(ind_ex, nullptr);
 
 		// If the phenoPars hasn't been initialised yet, do that
-		if (ind->phenoPars == nullptr)
+		if (ind->phenoPars == nullptr || typeid(ind->phenoPars).name() != motif + "Par") 
 		{
 			//ind->InitializeODEPars(EV_data);
 			ind->phenoPars = ODEPar::MakeODEPtr(hashMotifString(motif));

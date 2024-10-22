@@ -1,13 +1,17 @@
 #include "NARPar.h"
 
-NARPar::NARPar(double AUC, std::vector<double> pars) : ODEPar(6, pars)
+NARPar::NARPar(double AUC, std::vector<double> pars) : ODEPar(numPars, pars)
 {
     _AUC = AUC;
     _pars.resize(numPars, 1.0);
     _pars[5] = 0.0; // set baseline to 0 to start
 }
 
-NARPar::NARPar() : ODEPar(6) {}
+NARPar::NARPar() : ODEPar(numPars) 
+{
+	_pars.resize(numPars, 1.0);
+    _pars[5] = 0.0; // set baseline to 0 to start
+}
 
 std::vector<double> NARPar::SolveODE()
 {

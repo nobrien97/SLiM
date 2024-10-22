@@ -1,13 +1,17 @@
 #include "PARPar.h"
 
-PARPar::PARPar(double AUC, std::vector<double> pars) : ODEPar(7, pars)
+PARPar::PARPar(double AUC, std::vector<double> pars) : ODEPar(numPars, pars)
 {
     _AUC = AUC;
     _pars.resize(numPars, 1.0);
     _pars[5] = 0.01; // starting baseline expression
 }
 
-PARPar::PARPar() : ODEPar(7) {}
+PARPar::PARPar() : ODEPar(numPars) 
+{
+	_pars.resize(numPars, 1.0);
+    _pars[5] = 0.01; // set baseline to 0 to start
+}
 
 std::vector<double> PARPar::SolveODE()
 {

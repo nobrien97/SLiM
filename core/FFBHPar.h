@@ -23,8 +23,8 @@ public:
     const double& aZ() const { return _pars[5]; }
     const double& bZ() const { return _pars[6]; }
     const double& KXZ() const { return _pars[7]; }
-    const double& n() const { return _pars[8]; }
-    const double& base() const { return _pars[9]; }
+    const double& base() const { return _pars[8]; }
+    const double& n() const { return _pars[9]; }
     const double& XMult() const { return _pars[10]; }
 
     double& AUC() { return _AUC; }
@@ -36,8 +36,8 @@ public:
     double& aZ() { return _pars[5]; }
     double& bZ() { return _pars[6]; }
     double& KXZ() { return _pars[7]; }
-    double& n() { return _pars[8]; }
-    double& base() { return _pars[9]; }
+    double& base() { return _pars[8]; }
+    double& n() { return _pars[9]; }
     double& XMult() { return _pars[10]; }
 
 };
