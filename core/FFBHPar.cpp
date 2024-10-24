@@ -43,11 +43,14 @@ std::vector<double> FFBHPar::SolveODE()
         //     dY <- base * X + bY * X^Hilln/( KY^Hilln + X^Hilln ) - aY*Y
         //     dZ <- base * X + bZ *  ((X * Y)^Hilln)/( (KXZ^Hilln + X^Hilln) * (KY^Hilln + Y^Hilln) ) - aZ*Z
         
+        double Xnew = X * XMult();
+        Xnew += curState[0];
+
         // Hill function/feedback component of X
         nextState[0] = ( pow(curState[2], n()) / (pow(KZX(), n()) + pow(curState[2], n())) ) - aX() * curState[0];
         
         // Update X with the Hill function X component
-        double Xnew = X * XMult() + nextState[0];
+        Xnew += nextState[0];
 
         // Y
 		nextState[1] = base() * Xnew + bY() * pow(Xnew, n()) / ( pow(KY(), n()) + pow(Xnew, n()) ) - aY() * curState[1];
