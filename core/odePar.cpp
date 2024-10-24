@@ -115,14 +115,13 @@ std::vector<double> ODEPar::getPars(bool returnAUC)
     // If we're returning the AUC, make the vector bigger
     if (returnAUC)
     {
-        n++;
-        startIndex++;
+        startIndex = 1;
     }
-    std::vector<double> result(n);
+    std::vector<double> result(n + startIndex);
 
-    for (int i = startIndex; i < n; ++i)
+    for (int i = 0; i < n; ++i)
     {
-        result[i] = _pars[i];
+        result[i + startIndex] = _pars[i];
     }
 
     // First entry is AUC
