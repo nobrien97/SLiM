@@ -27,8 +27,9 @@ std::vector<double> PARPar::SolveODE()
 	// Declare/define a lambda which defines the ODE system - this is going to be very ugly
 	auto PARDerivative = [this, &Xstart, &Xstop, &X](const asc::state_t &val, asc::state_t &dxdt, double t)
 	{
+		double Xnew = X * XMult();
 		// dZ <- base * X + bZ * (X^n/(KXZ^n + X^n)) * ((Z^n)/((KZ^n)+(Z^n))) - aZ*Z
-		dxdt[0] = base() * X + bZ() * pow(X, n()) / (pow(KXZ(), n()) + pow(X, n())) * (pow(val[0], n())/(pow(KZ(), n()) + pow(val[0], n()))) - aZ() * val[0];
+		dxdt[0] = base() * Xnew + bZ() * pow(Xnew, n()) / (pow(KXZ(), n()) + pow(Xnew, n())) * (pow(val[0], n())/(pow(KZ(), n()) + pow(val[0], n()))) - aZ() * val[0];
 	};
 
 	// Set up the initial state
