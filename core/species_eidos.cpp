@@ -2283,7 +2283,7 @@ double Species::AUC(const double &h, const double &a, const double &b)
 // Get susbtitution values for each molecular component
 std::vector<double> Species::GetSubstitutions(const std::vector<Substitution*>& subs, int n)
 {
-	static int MUTTYPE_OFFSET = 3;
+	static int MUTTYPE_OFFSET = 3; // Offset by number of non-ODEPar mutation types (m1, m2)
 	std::vector<double> subData(n, 0.0);
 
 	size_t subType = 0;
@@ -2315,11 +2315,11 @@ std::vector<double> Species::GetSubstitutions(const std::vector<Substitution*>& 
 // Get mutation values for each molecular component
 std::vector<double> Species::GetMutationValues(Individual* ind, std::vector<double>& subData)
 {
-	static int MUTTYPE_OFFSET = 3;
+	static int MUTTYPE_OFFSET = 3; // Offset by number of non-ODEPar mutation types (m1, m2)
 
 	std::vector<double> result(subData.size());
 
-	// Get the individual's mutation values - offset by 3 because mutation types start at m3
+	// Get the individual's mutation values - offset by 2 because mutation types start at m3
 	// Setting EV_data value offset by 1 because value 0 means setting AUC
 	// parameter = e^sumOfMutationsAndSubs
 	for (uint mutType = 0; mutType < subData.size(); ++mutType)
@@ -2591,14 +2591,18 @@ EidosValue_SP Species::ExecuteMethod_ODEIntegrate(EidosGlobalStringID p_method_i
 			out.emplace_back(curAUC);
 
 			// Update phenopars for this individual
-			TempODEptr->setAUC(curAUC);
-			ind->phenoPars.get()->setParValue(TempODEptr->getPars(), true);
+			ind->phenoPars.get()->setParValue(TempODEptr->getPars(false), false);
+			ind->phenoPars.get()->setAUC(curAUC);
 			continue;
 		}
 	
 		// Calculate ODE
 		std::vector<double> solution = TempODEptr->SolveODE();
 		out.emplace_back(solution[0]);
+
+		// Update the individual's phenoPars values
+		ind->phenoPars.get()->setParValue(TempODEptr->getPars(false), false);
+		ind->phenoPars.get()->setAUC(solution[0]);
 
 		// First check if the pastcombos list is too long: if it is, it's more expensive to search for a 
 		// match than to just calculate again. So we'll limit the number of combos to some sane amount, 
@@ -2607,11 +2611,9 @@ EidosValue_SP Species::ExecuteMethod_ODEIntegrate(EidosGlobalStringID p_method_i
 		if (pastCombos.size() < MAX_PAST_COMBOS)
 		{
 			// Add this to the list of existing solutions
-			this->pastCombos.emplace_back(ODEPar::MakeODEPtr(hashMotifString(motif), *TempODEptr));
+			this->pastCombos.emplace_back(ODEPar::MakeODEPtr(hashMotifString(motif), *ind->phenoPars.get()));
 		} 
 
-		// Update the individual's phenoPars values
-		ind->phenoPars.get()->setParValue(TempODEptr->getPars(), true);
 	}
 
 	// Initialise an Eidos vector to return our calculations
