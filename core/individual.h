@@ -274,6 +274,14 @@ public:
 	
 	double internalSumOfMutationsOfType(const slim_objectid_t &mutType);
 
+	template <typename T> void InitializeODEPars(T pars)
+	{
+		static_assert(std::is_base_of<ODEPar, T>::value, "T not derived from ODEPar");
+		phenoPars = std::make_unique<T>();
+		return;
+	}
+
+
 	//
 	// Eidos support
 	//

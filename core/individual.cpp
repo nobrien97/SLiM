@@ -471,13 +471,20 @@ EidosValue_SP Individual::GetProperty(EidosGlobalStringID p_property_id)
 		}
 		case gID_ODEPars:
 		{
-			EidosValue_Float_vector *vec = (new (gEidosValuePool->AllocateChunk()) EidosValue_Float_vector())->resize_no_initialize(5);
+			if (phenoPars == nullptr)
+			{
+				EIDOS_TERMINATION << "ERROR (Individual::ODEPars): property ODEPars is not initialized. Run an ODEIntegrate() function to initialize." << EidosTerminate();
+			}
 			
-			vec->set_float_no_check(phenoPars.get()->AUC(), 0);
-			vec->set_float_no_check(phenoPars.get()->aZ(), 1);
-			vec->set_float_no_check(phenoPars.get()->bZ(), 2);
-			vec->set_float_no_check(phenoPars.get()->KZ(), 3);
-			vec->set_float_no_check(phenoPars.get()->KXZ(), 4);
+			int numPars = phenoPars.get()->numPars;
+			EidosValue_Float *vec = (new (gEidosValuePool->AllocateChunk()) EidosValue_Float())->resize_no_initialize(numPars);
+
+			std::vector<double> vals = phenoPars.get()->getPars(false);
+
+			for (int i = 0; i < numPars; ++i)
+			{
+				vec->set_float_no_check(vals[i], i);
+			}
 
 			return EidosValue_SP(vec);
 		}
@@ -741,11 +748,11 @@ EidosValue_SP Individual::GetProperty(EidosGlobalStringID p_property_id)
 		{
 			double phenotype_value = phenotype_value_;
 
-			return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float_singleton(phenotype_value));
+			return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float(phenotype_value));
 		}
 		case gID_phenotype4:
 		{
-			EidosValue_Float_vector *vec = (new (gEidosValuePool->AllocateChunk()) EidosValue_Float_vector())->resize_no_initialize(4);
+			EidosValue_Float *vec = (new (gEidosValuePool->AllocateChunk()) EidosValue_Float())->resize_no_initialize(4);
 			for (size_t i = 0; i < phenotype4_value_.size(); ++i)
 			{
 				vec->set_float_no_check(phenotype4_value_[i], i);
@@ -997,7 +1004,7 @@ EidosValue *Individual::GetProperty_Accelerated_tagL4(EidosObject **p_values, si
 
 EidosValue *Individual::GetProperty_Accelerated_phenotype(EidosObject **p_values, size_t p_values_size)
 {
-	EidosValue_Float_vector *float_result = (new (gEidosValuePool->AllocateChunk()) EidosValue_Float_vector())->resize_no_initialize(p_values_size);
+	EidosValue_Float *float_result = (new (gEidosValuePool->AllocateChunk()) EidosValue_Float())->resize_no_initialize(p_values_size);
 	
 	for (size_t value_index = 0; value_index < p_values_size; ++value_index)
 	{
@@ -1290,7 +1297,7 @@ void Individual::SetProperty(EidosGlobalStringID p_property_id, const EidosValue
 		}
 		case gID_phenotype:
 		{
-			phenotype_value_ = p_value.FloatAtIndex(0, nullptr);
+			phenotype_value_ = p_value.FloatAtIndex_NOCAST(0, nullptr);
 			s_any_individual_tag_set_ = true;
 			return;
 		}
@@ -1298,7 +1305,7 @@ void Individual::SetProperty(EidosGlobalStringID p_property_id, const EidosValue
 		{
 			for (size_t i = 0; i < phenotype4_value_.size(); ++i)
 			{
-				phenotype4_value_[i] = p_value.FloatAtIndex(i, nullptr);
+				phenotype4_value_[i] = p_value.FloatAtIndex_NOCAST(i, nullptr);
 			}
 			return;
 		}
@@ -1390,14 +1397,14 @@ void Individual::SetProperty_Accelerated_phenotype(EidosObject **p_values, size_
 	// SLiMCastToUsertagTypeOrRaise() is a no-op at present
 	if (p_source_size == 1)
 	{
-		double source_value = p_source.FloatAtIndex(0, nullptr);
+		double source_value = p_source.FloatAtIndex_NOCAST(0, nullptr);
 		
 		for (size_t value_index = 0; value_index < p_values_size; ++value_index)
 			((Individual *)(p_values[value_index]))->phenotype_value_ = source_value;
 	}
 	else
 	{
-		const double *source_data = p_source.FloatVector()->data();
+		const double *source_data = p_source.FloatData();
 		
 		for (size_t value_index = 0; value_index < p_values_size; ++value_index)
 			((Individual *)(p_values[value_index]))->phenotype_value_ = source_data[value_index];

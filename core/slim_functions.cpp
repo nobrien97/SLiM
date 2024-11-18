@@ -2035,7 +2035,7 @@ EidosValue_SP SLiM_ExecuteFunction_calcHeterozygosityAtPosition(const std::vecto
 	// Get all positions in a vector
 	for (int i = 0; i < nPos; ++i)
 	{
-		positions.push_back(SLiMCastToPositionTypeOrRaise(positions_value->IntAtIndex(i, nullptr)));
+		positions.push_back(SLiMCastToPositionTypeOrRaise(positions_value->IntAtIndex_NOCAST(i, nullptr)));
 	}
 
 	// Keep track of the number of heterozygous/homozygous individuals for each position
@@ -2045,7 +2045,7 @@ EidosValue_SP SLiM_ExecuteFunction_calcHeterozygosityAtPosition(const std::vecto
 	// Iterate over individuals
 	for (int i = 0; i < nInds; ++i)
 	{
-		Individual *ind __attribute__((used)) = (Individual *)individuals_value->ObjectElementAtIndex(i, nullptr);
+		Individual *ind __attribute__((used)) = (Individual *)individuals_value->ObjectElementAtIndex_NOCAST(i, nullptr);
 		std::vector<Genome*> genomes = {ind->genome1_, ind->genome2_};
 		// Iterate over positions
 		for (int j = 0; j < nPos; ++j)
@@ -2094,7 +2094,7 @@ EidosValue_SP SLiM_ExecuteFunction_calcHeterozygosityAtPosition(const std::vecto
 		out[j] = (double)(hetCounts[j])/(double)(nInds);
 	}
 
-	return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float_vector{out});
+	return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float{out});
 
 }
 

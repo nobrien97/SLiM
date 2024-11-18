@@ -8395,8 +8395,8 @@ EidosValue_SP Subpopulation::ExecuteMethod_getQuantileODEPar(EidosGlobalStringID
 	// Get method arguments and setup output ptr
 	EidosValue_SP result_SP(nullptr);
 	EidosValue *probs_value = p_arguments[0].get();
-	std::string parType = p_arguments[1].get()->StringAtIndex(0, nullptr);
-	bool returnPars = p_arguments[2].get()->LogicalAtIndex(0, nullptr);
+	std::string parType = p_arguments[1].get()->StringAtIndex_NOCAST(0, nullptr);
+	bool returnPars = p_arguments[2].get()->LogicalAtIndex_NOCAST(0, nullptr);
 
 	int ind_count = parent_subpop_size_;
 	int probs_count = probs_value->Count();
@@ -8417,7 +8417,7 @@ EidosValue_SP Subpopulation::ExecuteMethod_getQuantileODEPar(EidosGlobalStringID
 	{
 		for (int probs_index = 0; probs_index < probs_count; ++probs_index)
 		{
-			double prob = probs_value->FloatAtIndex(probs_index, nullptr);
+			double prob = probs_value->FloatAtIndex_NOCAST(probs_index, nullptr);
 			
 			if ((prob < 0.0) || (prob > 1.0))
 				EIDOS_TERMINATION << "ERROR (Subpopulation::ExecuteMethod_getQuantileODEPar): function getQuantileODEPar() requires probabilities to be in [0, 1]." << EidosTerminate(nullptr);
@@ -8426,7 +8426,7 @@ EidosValue_SP Subpopulation::ExecuteMethod_getQuantileODEPar(EidosGlobalStringID
 		}
 	}
 	// Set the size of the vector according to if returnPars is set or not
-	EidosValue_Float_vector *float_result = (new (gEidosValuePool->AllocateChunk()) EidosValue_Float_vector())->resize_no_initialize(probs_count + ((int)returnPars * probs_count * 4));
+	EidosValue_Float *float_result = (new (gEidosValuePool->AllocateChunk()) EidosValue_Float())->resize_no_initialize(probs_count + ((int)returnPars * probs_count * 4));
 
 	result_SP = EidosValue_SP(float_result);
 	
@@ -8435,20 +8435,23 @@ EidosValue_SP Subpopulation::ExecuteMethod_getQuantileODEPar(EidosGlobalStringID
 	// Lambda for sorting individuals by a ODEPar parameter
 	auto sortAUC = [&parType, &inds](int64_t i1, int64_t i2)
 	{
+		std::vector<double> i1_pars = inds[i1]->phenoPars.get()->getPars();
+		std::vector<double> i2_pars = inds[i2]->phenoPars.get()->getPars();
+
 		if (hashStr(parType) == hashStr("aZ"))
-			return ( inds[i1]->phenoPars.get()->aZ() < inds[i2]->phenoPars.get()->aZ() );
+			return ( i1_pars[1] < i2_pars[1] );
 
 		if (hashStr(parType) == hashStr("bZ"))
-			return ( inds[i1]->phenoPars.get()->bZ() < inds[i2]->phenoPars.get()->bZ() );
+			return ( i1_pars[2] < i2_pars[2] );
 
 		if (hashStr(parType) == hashStr("KZ"))
-			return ( inds[i1]->phenoPars.get()->KZ() < inds[i2]->phenoPars.get()->KZ() );
+			return ( i1_pars[3] < i2_pars[3] );
 
 		if (hashStr(parType) == hashStr("KXZ"))
-			return ( inds[i1]->phenoPars.get()->KXZ() < inds[i2]->phenoPars.get()->KXZ() );
+			return ( i1_pars[4] < i2_pars[4] );
 		
 		// Otherwise we assume we've got an AUC
-		return ( inds[i1]->phenoPars.get()->AUC() < inds[i2]->phenoPars.get()->AUC() );
+		return ( i1_pars[0] < i2_pars[0] );
 	};
 
 	
@@ -8491,7 +8494,7 @@ EidosValue_SP Subpopulation::ExecuteMethod_getQuantileODEPar(EidosGlobalStringID
 		int64_t lo = (int64_t)std::floor(index); 
 		
 		Individual* quantile = inds[order[lo]];
-		float_result->set_float_no_check(quantile->phenoPars.get()->AUC(), probs_index);
+		float_result->set_float_no_check(quantile->phenoPars.get()->getParValue(0), probs_index);
 	}
 	return result_SP;
 }

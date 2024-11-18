@@ -29,7 +29,11 @@
 #include "log_file.h"
 #include "boost/numeric/odeint.hpp"
 #include "matrixClass.h"
-#include "odePar.h"
+#include "NARPar.h"
+#include "PARPar.h"
+#include "FFLC1Par.h"
+#include "FFLI1Par.h"
+#include "FFBHPar.h"
 #include "ascent/Ascent.h"
 
 #include <iostream>
@@ -1691,6 +1695,8 @@ EidosValue_SP Species::ExecuteInstanceMethod(EidosGlobalStringID p_method_id, co
 		case gID_mutationCounts:					return ExecuteMethod_mutationFreqsCounts(p_method_id, p_arguments, p_interpreter);
 		case gID_mutationsOfType:					return ExecuteMethod_mutationsOfType(p_method_id, p_arguments, p_interpreter);
 		case gID_NARIntegrate:						return ExecuteMethod_NARIntegrate(p_method_id, p_arguments, p_interpreter);
+		case gID_PARIntegrate:						return ExecuteMethod_PARIntegrate(p_method_id, p_arguments, p_interpreter);
+		case gID_ODEIntegrate:						return ExecuteMethod_ODEIntegrate(p_method_id, p_arguments, p_interpreter);
 		case gID_calcLD:							return ExecuteMethod_calcLD(p_method_id, p_arguments, p_interpreter);
 		case gID_calcLDBetweenSitePairs:			return ExecuteMethod_calcLDBetweenSitePairs(p_method_id, p_arguments, p_interpreter);
 		case gID_sharedMutFreqs:					return ExecuteMethod_sharedMutFreqs(p_method_id, p_arguments, p_interpreter);
@@ -2267,12 +2273,63 @@ EidosValue_SP Species::ExecuteMethod_mutationsOfType(EidosGlobalStringID p_metho
 	}
 }
 
-	// Calculates area under the curve via the trapezoid method
-	#pragma omp declare simd
-	double Species::AUC(const double &h, const double &a, const double &b)
+// Calculates area under the curve via the trapezoid method
+#pragma omp declare simd
+double Species::AUC(const double &h, const double &a, const double &b)
+{
+	return ((a + b) * 0.5) * h;
+}
+
+// Get susbtitution values for each molecular component
+std::vector<double> Species::GetSubstitutions(const std::vector<Substitution*>& subs, int n)
+{
+	static int MUTTYPE_OFFSET = 3; // Offset by number of non-ODEPar mutation types (m1, m2)
+	std::vector<double> subData(n, 0.0);
+
+	size_t subType = 0;
+	// Lambda to compare our current subType to the sub's type
+	// Note: the subType is offset by 3 because mutationType for aZ is m3
+	auto cond = [&subType](Substitution* const &sub)
 	{
-		return ((a + b) * 0.5) * h;
+		return ((size_t)(sub->mutation_type_ptr_->mutation_type_id_) == (subType + MUTTYPE_OFFSET));
+	};
+	// Lambda to get product of selection coefficients
+	auto subCoef = [](double i, Substitution* const &sub)
+	{
+		return i + (double)sub->selection_coeff_;
+	};
+	// Fill subData with the products of mutations with the same mutationType
+	for (; subType < n; ++subType)
+	{
+		std::vector<Substitution*> curSubs;
+		std::copy_if(subs.begin(), subs.end(), std::back_inserter(curSubs), cond);
+		// If there are substitutions here update the value
+		// Two chromosomes, so multiply std::accumulate result by 2
+		if (curSubs.size())
+			subData[subType] = 2 * (std::accumulate(curSubs.begin(), curSubs.end(), 0.0, subCoef));
 	}
+
+	return subData;
+}
+
+// Get mutation values for each molecular component
+std::vector<double> Species::GetMutationValues(Individual* ind, std::vector<double>& subData)
+{
+	static int MUTTYPE_OFFSET = 3; // Offset by number of non-ODEPar mutation types (m1, m2)
+
+	std::vector<double> result(subData.size());
+
+	// Get the individual's mutation values - offset by 2 because mutation types start at m3
+	// Setting EV_data value offset by 1 because value 0 means setting AUC
+	// parameter = e^sumOfMutationsAndSubs
+	for (uint mutType = 0; mutType < subData.size(); ++mutType)
+	{
+		double indVals = ind->internalSumOfMutationsOfType(mutType + MUTTYPE_OFFSET);
+		indVals += subData[mutType];
+		result[mutType] = exp(indVals);
+	}
+	return result;
+}
 
 //	*********************	- (float)NARIntegrate(Object<Individual> individuals)
 // Extending this: Switch statement to choose certain ODEs? How do we combine multiple ODEs together?
@@ -2280,7 +2337,6 @@ EidosValue_SP Species::ExecuteMethod_mutationsOfType(EidosGlobalStringID p_metho
 EidosValue_SP Species::ExecuteMethod_NARIntegrate(EidosGlobalStringID p_method_ID, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter)
 {
 	// std::ostream &output_stream = p_interpreter.ExecutionOutputStream();
-
 	typedef std::vector<double> state_type;
 	EidosValue_SP result_SP(nullptr);
 	EidosValue_Object *individuals_value = (EidosValue_Object *)p_arguments[0].get();
@@ -2293,37 +2349,83 @@ EidosValue_SP Species::ExecuteMethod_NARIntegrate(EidosGlobalStringID p_method_I
 
 	// For each mutation type, get the relevant substitutions and calculate product of
 	// selection coefficients - we store that in subData
-	std::vector<Substitution*> &subs = population_.substitutions_;
-	std::vector<double> subData(4, 0.0);
+	std::vector<double> subData = GetSubstitutions(population_.substitutions_, 4);
 
-	size_t subType = 0;
-	// Lambda to compare our current subType to the sub's type
-	// Note: the subType is offset by 3 because mutationType for aZ is m3
-	auto cond = [&subType](Substitution* const &sub)
+	// Now iterate over individuals to calculate phenotype
+	for (int ind_ex = 0; ind_ex < inds_count; ++ind_ex)
 	{
-		return ((size_t)(sub->mutation_type_ptr_->mutation_type_id_) == (subType + 3));
-	};
-	// Lambda to get product of selection coefficients
-	auto subCoef = [](double i, Substitution* const &sub)
-	{
-		return i + (double)sub->selection_coeff_;
-	};
-	// Fill subData with the products of mutations with the same mutationType
-	for (; subType < 4; ++subType)
-	{
-		std::vector<Substitution*> curSubs;
-		std::copy_if(subs.begin(), subs.end(), std::back_inserter(curSubs), cond);
-		// If there are substitutions here update the value
-		// Two chromosomes, so multiply std::accumulate result by 2
-		if (curSubs.size())
-			subData[subType] = 2 * (std::accumulate(curSubs.begin(), curSubs.end(), 0.0, subCoef));
+		// First, iterate over mutations and calculate NAR parameters
+		// Set up storage of NAR parameters
+		NARPar EV_data;
+		Individual *ind = (Individual *)individuals_value->ObjectElementAtIndex_NOCAST(ind_ex, nullptr);
+
+		// If the phenoPars hasn't been initialised yet OR is a different type, reset
+		if (ind->phenoPars == nullptr || typeid(ind->phenoPars).name() != "NARPar")
+		{
+			//ind->InitializeODEPars(EV_data);
+			ind->phenoPars = std::make_unique<NARPar>();
+		}
+
+		std::vector<double> molComps = GetMutationValues(ind, subData);
+		EV_data.setParValue(molComps);
+
+		// Lambda to compare combination to ODEPar
+		auto compareODE = [&EV_data](const std::unique_ptr<ODEPar>& existing)
+		{
+			return EV_data.Compare(*existing.get());
+		};
+		// If we match an existing entry in the list of past combos - otherwise we need to calculate the AUC
+		if (std::any_of(this->pastCombos.begin(), this->pastCombos.end(), compareODE))
+		{
+			double curAUC = ODEPar::getODEValFromVector(EV_data, this->pastCombos, true);
+			out.emplace_back(curAUC);
+			EV_data.setParValue(0, curAUC);
+			ind->phenoPars.get()->setParValue(EV_data.getPars(), true);
+			continue;
+		}
+
+		// Calculate ODE
+		std::vector<double> solution = EV_data.SolveODE();
+		out.emplace_back(solution[0]);
+
+		// First check if the pastcombos list is too long: if it is, it's more expensive to search for a 
+		// match than to just calculate again. So we'll limit the number of combos to some sane amount, 
+		// which hopefully should reduce the cost of searching in a highly variable environment while 
+		// still having some benefit for intermediate-variance populations
+		if (pastCombos.size() < MAX_PAST_COMBOS)
+		{
+			// Add this to the list of existing solutions
+			this->pastCombos.emplace_back(std::make_unique<NARPar>(EV_data));
+		} 
+		// Update the individual's phenoPars values
+		ind->phenoPars.get()->setParValue(EV_data.getPars(), true);
+
 	}
 
+	// Initialise an Eidos vector to return our calculations
+	return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float{out});
+}
+
+//	*********************	- (float)PARIntegrate(Object<Individual> individuals)
+EidosValue_SP Species::ExecuteMethod_PARIntegrate(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter)
+{
+	typedef std::vector<double> state_type;
+	EidosValue_SP result_SP(nullptr);
+	EidosValue_Object *individuals_value = (EidosValue_Object *)p_arguments[0].get();
+	
+	// Iterate over all individuals, calculating their NAR AUC from their parameter set:
+	// First need to actually get the individuals and reserve some space for each individual's result
+	int inds_count = p_arguments[0].get()->Count();
+	std::vector<double> out;
+	out.reserve(size_t(inds_count));
+
+	// For each mutation type, get the relevant substitutions and calculate product of
+	// selection coefficients - we store that in subData
+	std::vector<double> subData = GetSubstitutions(population_.substitutions_, 6);
+	
 	// Iterate over individuals to get input parameter values, store in a series of vectors
 	const double Xstart = 1.0; 
 	const double Xstop = 6.0;
-	const double nXZ = 8.0;
-	const double nZ = 8.0;
 	int X = 0;
 
 	// Store saved combinations in the simulation's ongoing record vector of ODEPars
@@ -2335,70 +2437,42 @@ EidosValue_SP Species::ExecuteMethod_NARIntegrate(EidosGlobalStringID p_method_I
 	{
 		// First, iterate over mutations and calculate NAR parameters
 		// Set up storage of NAR parameters
-		ODEPar EV_data;
-		Individual *ind __attribute__((used)) = (Individual *)individuals_value->ObjectElementAtIndex(ind_ex, nullptr);
+		PARPar EV_data;
+		Individual *ind = (Individual *)individuals_value->ObjectElementAtIndex_NOCAST(ind_ex, nullptr);
+
+		// If the phenoPars hasn't been initialised yet, do that
+		if (ind->phenoPars == nullptr || typeid(ind->phenoPars).name() != "PARPar")
+		{
+			//ind->InitializeODEPars(EV_data);
+			ind->phenoPars = std::make_unique<PARPar>();
+		}
+
 		// Get the individual's mutation values - offset by 3 because mutation types start at m3
 		// Setting EV_data value offset by 1 because value 0 means setting AUC
 		// parameter = e^sumOfMutationsAndSubs
-		for (uint mutType = 0; mutType < 4; ++mutType)
-		{
-			double indVals = ind->internalSumOfMutationsOfType(mutType + 3);
-			indVals += subData[mutType];
-			EV_data.setParValue((mutType + 1), exp(indVals));
-		}
+		std::vector<double> molComps = GetMutationValues(ind, subData);
+		EV_data.setParValue(molComps);
 
 		// Lambda to compare combination to ODEPar
 		auto compareODE = [&EV_data](const std::unique_ptr<ODEPar>& existing)
 		{
-			return EV_data == *existing.get();
+			return EV_data.Compare(*existing.get());
 		};
 		// If we match an existing entry in the list of past combos - otherwise we need to calculate the AUC
 		if (std::any_of(this->pastCombos.begin(), this->pastCombos.end(), compareODE))
 		{
-			double curAUC = ODEPar::getODEValFromVector(EV_data, this->pastCombos, true);
+			double curAUC = PARPar::getODEValFromVector(EV_data, this->pastCombos, true);
 			out.emplace_back(curAUC);
-			EV_data.setParValue(0, curAUC);
-			ind->phenoPars.get()->setParValue(EV_data.getPars());
+
+			// Update phenopars for this individual
+			EV_data.setAUC(curAUC);
+			ind->phenoPars.get()->setParValue(EV_data.getPars(), true);
 			continue;
 		}
 	
-		// Lambdas for AUC and ODE system
-		// Declare/define a lambda which defines the ODE system - this is going to be very ugly
-		auto NAR = [&EV_data, &Xstart, &Xstop, &nXZ, &nZ, &X](const asc::state_t &val, asc::state_t &dxdt, double t)
-		{
-			// dZ <- bZ * X^nXZ/(KXZ^nXZ + X^nXZ) * (KZ^nZ/(Kz^nZ+Z^nZ)) - aZ*Z
-			dxdt[0] = EV_data.bZ() * pow(X, nXZ) / (pow(EV_data.KXZ(), nXZ) + pow(X, nXZ)) * (pow(EV_data.KZ(), nZ)/(pow(EV_data.KZ(), nZ) + pow(val[0], nZ))) - EV_data.aZ() * val[0];
-		};
-
-		// Set up the initial state
-		asc::state_t state = { 0.0 };
-		double t = 0.0;
-		double dt = 0.1;
-		double t_end = 10.0;
-
-		asc::RK4 integrator;
-		asc::Recorder recorder;
-
-		while (t < t_end)
-		{
-			// Add a small epsilon to get around t floating point inaccuracy
-			X = ((t >= Xstart - 1e-5) && (t <= Xstop + 1e-5));
-			recorder({t, (asc::value_t)X, state[0]});
-			integrator(NAR, state, t, dt);
-		}
-
-		// Calculate AUC
-		double z = 0;
-
-		#pragma omp simd reduction(+:z)
-		for (uint i = 0; i < recorder.history.size()-1; ++i)
-		{
-			z += Species::AUC(0.1, (double)recorder.history[i][2], (double)recorder.history[i + 1][2]);
-		}
-		
-		// Check that z is > 0
-		z = (z >= 0) ? z : 0.0;
-		out.emplace_back(z);
+		// Calculate ODE
+		std::vector<double> solution = EV_data.SolveODE();
+		out.emplace_back(solution[0]);
 
 		// First check if the pastcombos list is too long: if it is, it's more expensive to search for a 
 		// match than to just calculate again. So we'll limit the number of combos to some sane amount, 
@@ -2407,18 +2481,143 @@ EidosValue_SP Species::ExecuteMethod_NARIntegrate(EidosGlobalStringID p_method_I
 		if (pastCombos.size() < MAX_PAST_COMBOS)
 		{
 			// Add this to the list of existing solutions
-			this->pastCombos.emplace_back(std::make_unique<ODEPar>(z, EV_data.aZ(), EV_data.bZ(), EV_data.KZ(), EV_data.KXZ()));
-			// Update the individual's phenoPars values
-			ind->phenoPars.get()->setParValue(this->pastCombos.back().get()->getPars());
-		} else 
+			this->pastCombos.emplace_back(std::make_unique<PARPar>(EV_data));
+		} 
+
+		// Update the individual's phenoPars values
+		ind->phenoPars.get()->setParValue(EV_data.getPars(), true);
+	}
+
+	// Initialise an Eidos vector to return our calculations
+	return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float{out});
+}
+
+//	*********************	– (float)ODEIntegrate(Object<Individual> individuals, string$ motif)
+EidosValue_SP Species::ExecuteMethod_ODEIntegrate(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter)
+{
+	// types
+	typedef std::vector<double> state_type;
+
+	// for switching between motifs
+	auto hashMotifString = [](std::string const& motifString)
+	{
+		if (motifString == "NAR") return ODEPar::motif_enum::NAR;
+		if (motifString == "PAR") return ODEPar::motif_enum::PAR;
+		if (motifString == "FFLC1") return ODEPar::motif_enum::FFLC1;
+		if (motifString == "FFLI1") return ODEPar::motif_enum::FFLI1;
+		if (motifString == "FFBH") return ODEPar::motif_enum::FFBH;
+
+		// Error type
+		return ODEPar::motif_enum::none;
+	};
+
+	EidosValue_SP result_SP(nullptr);
+	EidosValue_Object *individuals_value = (EidosValue_Object *)p_arguments[0].get();
+	EidosValue_String *motif_value = (EidosValue_String *)p_arguments[1].get();
+	std::string motif = motif_value->StringAtIndex_NOCAST(0, nullptr);
+
+	// Choose correct motif
+	int mutTypeCount;
+
+	// Set the correct number of mut types and define the correct ODEPar derived class
+	switch (hashMotifString(motif))
+	{
+	case ODEPar::motif_enum::NAR:
+		mutTypeCount = NARPar::numPars;
+		break;
+	case ODEPar::motif_enum::PAR:
+		mutTypeCount = PARPar::numPars;
+		break;
+	case ODEPar::motif_enum::FFLC1:
+		mutTypeCount = FFLC1Par::numPars;
+		break;
+	case ODEPar::motif_enum::FFLI1:
+		mutTypeCount = FFLI1Par::numPars;
+		break;
+	case ODEPar::motif_enum::FFBH:
+		mutTypeCount = FFBHPar::numPars;
+		break;
+	default:
+		EIDOS_TERMINATION << "ERROR (Species::ExecuteMethod_ODEIntegrate): " << EidosStringRegistry::StringForGlobalStringID(p_method_id) << "() requires a valid ODE type (PAR, NAR, FFLC1, FFLI1, or FFBH)." << EidosTerminate();
+		break;
+	}
+	
+	// Iterate over all individuals, calculating their NAR AUC from their parameter set:
+	// First need to actually get the individuals and reserve some space for each individual's result
+	int inds_count = p_arguments[0].get()->Count();
+	std::vector<double> out;
+	out.reserve(size_t(inds_count));
+
+	// For each mutation type, get the relevant substitutions and calculate product of
+	// selection coefficients - we store that in subData
+	std::vector<double> subData = GetSubstitutions(population_.substitutions_, mutTypeCount);
+	
+	// Iterate over individuals to get input parameter values, store in a series of vectors
+
+	// Store saved combinations in the simulation's ongoing record vector of ODEPars
+	// NOTE: Now stored in SLiMSim::pastCombos
+	//std::vector<std::unique_ptr<ODEPar>> uniqueODEs;
+
+	// Now iterate over individuals to calculate phenotype
+	for (int ind_ex = 0; ind_ex < inds_count; ++ind_ex)
+	{
+		// First, iterate over mutations and calculate NAR parameters
+		// Set up storage of NAR parameters
+		std::unique_ptr<ODEPar> TempODEptr = ODEPar::MakeODEPtr(hashMotifString(motif));
+		Individual *ind = (Individual *)individuals_value->ObjectElementAtIndex_NOCAST(ind_ex, nullptr);
+
+		// If the phenoPars hasn't been initialised yet, do that
+		if (ind->phenoPars == nullptr || typeid(ind->phenoPars).name() != motif + "Par") 
 		{
-			ind->phenoPars.get()->setParValue(z, EV_data.aZ(), EV_data.bZ(), EV_data.KZ(), EV_data.KXZ());
+			//ind->InitializeODEPars(EV_data);
+			ind->phenoPars = ODEPar::MakeODEPtr(hashMotifString(motif));
 		}
+
+		// Get the individual's mutation values - offset by 3 because mutation types start at m3
+		// Setting EV_data value offset by 1 because value 0 means setting AUC
+		// parameter = e^sumOfMutationsAndSubs
+		std::vector<double> molComps = GetMutationValues(ind, subData);
+		TempODEptr->setParValue(molComps);
+
+		// Lambda to compare combination to ODEPar
+		auto compareODE = [&TempODEptr](const std::unique_ptr<ODEPar>& existing)
+		{
+			return TempODEptr->Compare(*existing);
+		};
+		// If we match an existing entry in the list of past combos - otherwise we need to calculate the AUC
+		if (std::any_of(this->pastCombos.begin(), this->pastCombos.end(), compareODE))
+		{
+			double curAUC = ODEPar::getODEValFromVector(*TempODEptr, this->pastCombos, true);
+			out.emplace_back(curAUC);
+
+			// Update phenopars for this individual
+			ind->phenoPars.get()->setParValue(TempODEptr->getPars(false), false);
+			ind->phenoPars.get()->setAUC(curAUC);
+			continue;
+		}
+	
+		// Calculate ODE
+		std::vector<double> solution = TempODEptr->SolveODE();
+		out.emplace_back(solution[0]);
+
+		// Update the individual's phenoPars values
+		ind->phenoPars.get()->setParValue(TempODEptr->getPars(false), false);
+		ind->phenoPars.get()->setAUC(solution[0]);
+
+		// First check if the pastcombos list is too long: if it is, it's more expensive to search for a 
+		// match than to just calculate again. So we'll limit the number of combos to some sane amount, 
+		// which hopefully should reduce the cost of searching in a highly variable environment while 
+		// still having some benefit for intermediate-variance populations
+		if (pastCombos.size() < MAX_PAST_COMBOS)
+		{
+			// Add this to the list of existing solutions
+			this->pastCombos.emplace_back(ODEPar::MakeODEPtr(hashMotifString(motif), *ind->phenoPars.get()));
+		} 
 
 	}
 
 	// Initialise an Eidos vector to return our calculations
-	return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float_vector{out});
+	return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float{out});
 }
 
 //	*********************	– (float)calcLD(Nio<Subpopulation>$ subpop, string$ statistic = "D'")
@@ -2435,7 +2634,7 @@ EidosValue_SP Species::ExecuteMethod_calcLD(EidosGlobalStringID p_method_id, con
 
 	// Do we want to calculate R^2 or D'?
 	EidosValue* statistic_ev = (EidosValue*)p_arguments[1].get();
-	std::string statistic = statistic_ev->StringAtIndex(0, nullptr);
+	std::string statistic = statistic_ev->StringAtIndex_NOCAST(0, nullptr);
 
 	if (statistic != Species::StatisticR2 && statistic != Species::StatisticD && statistic != Species::StatisticDPrime)
 	{
@@ -2599,7 +2798,7 @@ EidosValue_SP Species::ExecuteMethod_calcLD(EidosGlobalStringID p_method_id, con
 		}
 	
 	}	
-	return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float_vector{corTable->getVec()});
+	return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float{corTable->getVec()});
 
 }
 
@@ -2622,13 +2821,13 @@ EidosValue_SP Species::ExecuteMethod_calcLDBetweenSitePairs(EidosGlobalStringID 
 
 	// Do we want to calculate R^2, D, or D'?
 	EidosValue* statistic_ev = (EidosValue*)p_arguments[3].get();
-	std::string statistic = statistic_ev->StringAtIndex(0, nullptr);
+	std::string statistic = statistic_ev->StringAtIndex_NOCAST(0, nullptr);
 
 	// Only track LD between loci with derived alleles at similar frequencies 
-	bool byFreq = ((EidosValue*)p_arguments[4].get())->LogicalAtIndex(0, nullptr);
+	bool byFreq = ((EidosValue*)p_arguments[4].get())->LogicalAtIndex_NOCAST(0, nullptr);
 
 	// the minor allele frequency threshold - alleles with lower frequencies are excluded from analysis
-	double MAFthreshold = ((EidosValue*)p_arguments[5].get())->FloatAtIndex(0, nullptr);
+	double MAFthreshold = ((EidosValue*)p_arguments[5].get())->FloatAtIndex_NOCAST(0, nullptr);
 
 	if (pos1_ev->Count() != pos2_ev->Count())
 	{
@@ -2652,8 +2851,8 @@ EidosValue_SP Species::ExecuteMethod_calcLDBetweenSitePairs(EidosGlobalStringID 
 	std::vector<int> pos(pos1_ev->Count() * 2); // maximum size is twice the number of positions (if both vectors unique)
 	for (int i = 0; i < pos1_ev->Count(); ++i)
 	{
-		pos.emplace_back(pos1_ev->IntAtIndex(i, nullptr));
-		pos.emplace_back(pos2_ev->IntAtIndex(i, nullptr));
+		pos.emplace_back(pos1_ev->IntAtIndex_NOCAST(i, nullptr));
+		pos.emplace_back(pos2_ev->IntAtIndex_NOCAST(i, nullptr));
 	}
 	
 	// Remove the duplicates
@@ -2758,8 +2957,8 @@ EidosValue_SP Species::ExecuteMethod_calcLDBetweenSitePairs(EidosGlobalStringID 
 	{			
 		// Get our MAF frequencies for locus A and B 
 		int adj_index = byFreq ? ((double)i) / n * n / 2.0 : i; // If we're byFreq we need to adjust the mutation index
-		int a = pos1_ev->IntAtIndex(adj_index, nullptr);
-		int b = pos2_ev->IntAtIndex(adj_index, nullptr);
+		int a = pos1_ev->IntAtIndex_NOCAST(adj_index, nullptr);
+		int b = pos2_ev->IntAtIndex_NOCAST(adj_index, nullptr);
 
 		bool mutExistsA = std::get<1>(mutFreqMAFs[a]) > -1;
 		bool mutExistsB = std::get<1>(mutFreqMAFs[b]) > -1;
@@ -2869,7 +3068,7 @@ EidosValue_SP Species::ExecuteMethod_calcLDBetweenSitePairs(EidosGlobalStringID 
 			[](const auto& val) { return val < -10.0; }),
 						 result.end());
 	
-	return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float_vector{result});
+	return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float{result});
 
 }
 
@@ -2886,7 +3085,7 @@ EidosValue_SP Species::ExecuteMethod_sharedMutFreqs(EidosGlobalStringID p_method
 	EidosValue* pos2_ev = (EidosValue*)p_arguments[2].get();
 
 	EidosValue* MAF_ev = (EidosValue*)p_arguments[3].get();
-	double MAFThreshold = MAF_ev->FloatAtIndex(0, nullptr);
+	double MAFThreshold = MAF_ev->FloatAtIndex_NOCAST(0, nullptr);
 
 	if (pos1_ev->Count() != pos2_ev->Count())
 	{
@@ -2905,8 +3104,8 @@ EidosValue_SP Species::ExecuteMethod_sharedMutFreqs(EidosGlobalStringID p_method
 	std::vector<int> pos(pos1_ev->Count() * 2); // maximum size is twice the number of positions (if both vectors unique)
 	for (int i = 0; i < pos1_ev->Count(); ++i)
 	{
-		pos.emplace_back(pos1_ev->IntAtIndex(i, nullptr));
-		pos.emplace_back(pos2_ev->IntAtIndex(i, nullptr));
+		pos.emplace_back(pos1_ev->IntAtIndex_NOCAST(i, nullptr));
+		pos.emplace_back(pos2_ev->IntAtIndex_NOCAST(i, nullptr));
 	}
 	
 	// Remove the duplicates
@@ -3011,8 +3210,8 @@ EidosValue_SP Species::ExecuteMethod_sharedMutFreqs(EidosGlobalStringID p_method
 	{			
 		// Get our MAF frequencies for locus A and B 
 		int adj_index = ((double)i) / n * n / 7.0; // double cast to int always floors
-		int a = pos1_ev->IntAtIndex(adj_index, nullptr);
-		int b = pos2_ev->IntAtIndex(adj_index, nullptr);
+		int a = pos1_ev->IntAtIndex_NOCAST(adj_index, nullptr);
+		int b = pos2_ev->IntAtIndex_NOCAST(adj_index, nullptr);
 
 		Mutation* mutA = std::get<1>(mutFreqMAFs[a]);
 		Mutation* mutB = std::get<1>(mutFreqMAFs[b]);
@@ -3072,7 +3271,7 @@ EidosValue_SP Species::ExecuteMethod_sharedMutFreqs(EidosGlobalStringID p_method
 			[](const auto& val) { return val < -99.0; }),
 						 result.end());
 
-	return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float_vector{result});
+	return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float{result});
 
 }
 
@@ -3088,7 +3287,7 @@ EidosValue_SP Species::ExecuteMethod_getHaplos(EidosGlobalStringID p_method_id, 
 
 	for (int i = 0; i < posSize; ++i)
 	{
-		pos.emplace_back(pos_value->IntAtIndex(i, nullptr));
+		pos.emplace_back(pos_value->IntAtIndex_NOCAST(i, nullptr));
 	}
 
 	int genomesSize = genomes_value->Count();
@@ -3129,7 +3328,7 @@ EidosValue_SP Species::ExecuteMethod_getHaplos(EidosGlobalStringID p_method_id, 
 	// Iterate over genomes and positions
 	for (int i = 0; i < genomesSize; ++i)
 	{
-		Genome *genome __attribute__((used)) = (Genome *)genomes_value->ObjectElementAtIndex(i, nullptr);
+		Genome *genome __attribute__((used)) = (Genome *)genomes_value->ObjectElementAtIndex_NOCAST(i, nullptr);
 		// New vector for this genome's mutations
 		std::vector<Mutation*> genMuts;
 		std::copy_if(allMuts.begin(), allMuts.end(), std::back_inserter(genMuts),
@@ -3157,7 +3356,7 @@ EidosValue_SP Species::ExecuteMethod_getHaplos(EidosGlobalStringID p_method_id, 
 		}
 	}
 
-	return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Int_vector{result->getVec()});
+	return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Int{result->getVec()});
 }
 
 			
@@ -4372,9 +4571,11 @@ const std::vector<EidosMethodSignature_CSP> *Species_Class::Methods(void) const
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_mutationFrequencies, kEidosValueMaskFloat))->AddIntObject_N("subpops", gSLiM_Subpopulation_Class)->AddObject_ON("mutations", gSLiM_Mutation_Class, gStaticEidosValueNULL));
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_mutationsOfType, kEidosValueMaskObject, gSLiM_Mutation_Class))->AddIntObject_S("mutType", gSLiM_MutationType_Class));
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_NARIntegrate, kEidosValueMaskFloat))->AddIntObject_N("individuals", gSLiM_Individual_Class));
-		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_calcLD, kEidosValueMaskFloat))->AddIntObject_S("subpop", gSLiM_Subpopulation_Class)->AddString_OS("statistic", EidosValue_String_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String_singleton("r2"))));
-		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_calcLDBetweenSitePairs, kEidosValueMaskFloat))->AddIntObject_S("subpop", gSLiM_Subpopulation_Class)->AddInt("pos1")->AddInt("pos2")->AddString_OS("statistic", EidosValue_String_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String_singleton("r2")))->AddLogical_OS("byFreq", gStaticEidosValue_LogicalF)->AddFloat_OS("threshold", EidosValue_Float_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float_singleton(0.05))));
-		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_sharedMutFreqs, kEidosValueMaskFloat))->AddIntObject_S("subpop", gSLiM_Subpopulation_Class)->AddInt("pos1")->AddInt("pos2")->AddFloat_OS("threshold", EidosValue_Float_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float_singleton(0.05))));
+		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_PARIntegrate, kEidosValueMaskFloat))->AddIntObject_N("individuals", gSLiM_Individual_Class));
+		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_ODEIntegrate, kEidosValueMaskFloat))->AddIntObject_N("individuals", gSLiM_Individual_Class)->AddString_OS("ODE", EidosValue_String_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String("NAR"))));
+		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_calcLD, kEidosValueMaskFloat))->AddIntObject_S("subpop", gSLiM_Subpopulation_Class)->AddString_OS("statistic", EidosValue_String_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String("r2"))));
+		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_calcLDBetweenSitePairs, kEidosValueMaskFloat))->AddIntObject_S("subpop", gSLiM_Subpopulation_Class)->AddInt("pos1")->AddInt("pos2")->AddString_OS("statistic", EidosValue_String_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String("r2")))->AddLogical_OS("byFreq", gStaticEidosValue_LogicalF)->AddFloat_OS("threshold", EidosValue_Float_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float(0.05))));
+		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_sharedMutFreqs, kEidosValueMaskFloat))->AddIntObject_S("subpop", gSLiM_Subpopulation_Class)->AddInt("pos1")->AddInt("pos2")->AddFloat_OS("threshold", EidosValue_Float_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float(0.05))));
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_getHaplos, kEidosValueMaskInt))->AddObject("genomes", gSLiM_Genome_Class)->AddInt("pos"));
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_outputFixedMutations, kEidosValueMaskVOID))->AddString_OSN(gEidosStr_filePath, gStaticEidosValueNULL)->AddLogical_OS("append", gStaticEidosValue_LogicalF));
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_outputFull, kEidosValueMaskVOID))->AddString_OSN(gEidosStr_filePath, gStaticEidosValueNULL)->AddLogical_OS("binary", gStaticEidosValue_LogicalF)->AddLogical_OS("append", gStaticEidosValue_LogicalF)->AddLogical_OS("spatialPositions", gStaticEidosValue_LogicalT)->AddLogical_OS("ages", gStaticEidosValue_LogicalT)->AddLogical_OS("ancestralNucleotides", gStaticEidosValue_LogicalT)->AddLogical_OS("pedigreeIDs", gStaticEidosValue_LogicalF));
