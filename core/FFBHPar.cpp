@@ -4,13 +4,14 @@ FFBHPar::FFBHPar(double AUC, std::vector<double> pars) : ODEPar(numPars, pars)
 {
     _AUC = AUC;
     _pars.resize(numPars, 1.0);
-    _pars[9] = 0.0; // set baseline to 0 to start
+    setParValue(pars, false);
+    //_pars[8] = 0.0; // set baseline to 0 to start
 }
 
 FFBHPar::FFBHPar() : ODEPar(numPars) 
 {
     _pars.resize(numPars, 1.0);
-    _pars[9] = 0.0; // set baseline to 0 to start
+    _pars[8] = 0.0; // set baseline to 0 to start
 
 }
 
@@ -46,6 +47,8 @@ std::vector<double> FFBHPar::SolveODE()
         double Xnew = X * XMult();
         Xnew += curState[0];
 
+        double baseline = std::max(base() - 1.0, 0.0); // Adjust baseline so it is relative to the default value, 0 (instead of 1)
+
         // Hill function/feedback component of X
         nextState[0] = ( pow(curState[2], n()) / (pow(KZX(), n()) + pow(curState[2], n())) ) - aX() * curState[0];
         
@@ -53,10 +56,10 @@ std::vector<double> FFBHPar::SolveODE()
         Xnew += nextState[0];
 
         // Y
-		nextState[1] = base() * Xnew + bY() * pow(Xnew, n()) / ( pow(KY(), n()) + pow(Xnew, n()) ) - aY() * curState[1];
+		nextState[1] = baseline * Xnew + bY() * pow(Xnew, n()) / ( pow(KY(), n()) + pow(Xnew, n()) ) - aY() * curState[1];
 		
         // Z
-        nextState[2] = base() * Xnew + bZ() * pow(Xnew * curState[1], n()) / ( ( pow(KXZ(), n()) + pow(Xnew, n()) ) * ( pow(KY(), n()) + pow(curState[1], n()) ) ) - aZ() * curState[2];    
+        nextState[2] = baseline * Xnew + bZ() * pow(Xnew * curState[1], n()) / ( ( pow(KXZ(), n()) + pow(Xnew, n()) ) * ( pow(KY(), n()) + pow(curState[1], n()) ) ) - aZ() * curState[2];    
     };
 
 	// Set up the initial state

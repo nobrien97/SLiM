@@ -4,13 +4,14 @@ PARPar::PARPar(double AUC, std::vector<double> pars) : ODEPar(numPars, pars)
 {
     _AUC = AUC;
     _pars.resize(numPars, 1.0);
-    _pars[5] = 0.01; // starting baseline expression
+	setParValue(pars, false);
+    //_pars[4] = 0.01; // starting baseline expression
 }
 
 PARPar::PARPar() : ODEPar(numPars) 
 {
 	_pars.resize(numPars, 1.0);
-    _pars[5] = 0.01; // set baseline to 0 to start
+    _pars[4] = 0.01; // set baseline to 0 to start
 }
 
 std::vector<double> PARPar::SolveODE()
@@ -28,8 +29,9 @@ std::vector<double> PARPar::SolveODE()
 	auto PARDerivative = [this, &Xstart, &Xstop, &X](const asc::state_t &val, asc::state_t &dxdt, double t)
 	{
 		double Xnew = X * XMult();
+		double baseline = std::max(base() - 0.99, 0.0); // Adjust baseline so it is relative to the default value, 0.01 (instead of 1)
 		// dZ <- base * X + bZ * (X^n/(KXZ^n + X^n)) * ((Z^n)/((KZ^n)+(Z^n))) - aZ*Z
-		dxdt[0] = base() * Xnew + bZ() * pow(Xnew, n()) / (pow(KXZ(), n()) + pow(Xnew, n())) * (pow(val[0], n())/(pow(KZ(), n()) + pow(val[0], n()))) - aZ() * val[0];
+		dxdt[0] = baseline * Xnew + bZ() * pow(Xnew, n()) / (pow(KXZ(), n()) + pow(Xnew, n())) * (pow(val[0], n())/(pow(KZ(), n()) + pow(val[0], n()))) - aZ() * val[0];
 	};
 
 	// Set up the initial state

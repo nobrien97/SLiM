@@ -53,7 +53,7 @@ public:
     static double AUC(const double &h, const double &a, const double &b);
 
     const size_t numPars = 0;
-    unsigned int count = 1; // Count the number of instances in the population that this exists: needs to be reset to 1 every generation! 
+    uint count = 1; // Count the number of instances in the population that this exists: needs to be reset to 1 every generation! 
     
     // Set a given value
     void setParValue(int i, double val);

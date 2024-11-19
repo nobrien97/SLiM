@@ -2545,8 +2545,7 @@ EidosValue_SP Species::ExecuteMethod_ODEIntegrate(EidosGlobalStringID p_method_i
 	// Iterate over all individuals, calculating their NAR AUC from their parameter set:
 	// First need to actually get the individuals and reserve some space for each individual's result
 	int inds_count = p_arguments[0].get()->Count();
-	std::vector<double> out;
-	out.reserve(size_t(inds_count));
+	std::vector<double> out(inds_count);
 
 	// For each mutation type, get the relevant substitutions and calculate product of
 	// selection coefficients - we store that in subData
@@ -2588,7 +2587,8 @@ EidosValue_SP Species::ExecuteMethod_ODEIntegrate(EidosGlobalStringID p_method_i
 		if (std::any_of(this->pastCombos.begin(), this->pastCombos.end(), compareODE))
 		{
 			double curAUC = ODEPar::getODEValFromVector(*TempODEptr, this->pastCombos, true);
-			out.emplace_back(curAUC);
+			out[ind_ex] = curAUC;
+
 
 			// Update phenopars for this individual
 			ind->phenoPars.get()->setParValue(TempODEptr->getPars(false), false);
@@ -2598,7 +2598,7 @@ EidosValue_SP Species::ExecuteMethod_ODEIntegrate(EidosGlobalStringID p_method_i
 	
 		// Calculate ODE
 		std::vector<double> solution = TempODEptr->SolveODE();
-		out.emplace_back(solution[0]);
+		out[ind_ex] = solution[0];
 
 		// Update the individual's phenoPars values
 		ind->phenoPars.get()->setParValue(TempODEptr->getPars(false), false);

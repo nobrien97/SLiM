@@ -4,7 +4,8 @@ FFLI1Par::FFLI1Par(double AUC, std::vector<double> pars) : ODEPar(numPars, pars)
 {
     _AUC = AUC;
     _pars.resize(numPars, 1.0);
-    _pars[6] = 0.01; // constitutive promoter
+	setParValue(pars, false);
+    //_pars[6] = 0.01; // constitutive promoter
 }
 
 FFLI1Par::FFLI1Par() : ODEPar(numPars) 
@@ -33,9 +34,10 @@ std::vector<double> FFLI1Par::SolveODE()
         // dZ <- base * X + bZ * ((X * KY)^Hilln)/( (KXZ^Hilln + X^Hilln) * (KY^Hilln + Y^Hilln) ) - aZ*Z
         
         double Xnew = X * XMult();
+		double baseline = std::max(base() - 0.99, 0.0); // Adjust baseline so it is relative to the default value, 0.01 (instead of 1)
 
-		nextState[0] = base() * Xnew + bY() * pow(Xnew, n()) / (pow(KY(), n()) + pow(Xnew, n())) - aY() * curState[0];
-		nextState[1] = base() * Xnew + bZ() * pow(Xnew * KY(), n()) / ( (pow(KXZ(), n()) + pow(Xnew, n())) * (pow(KY(), n()) + pow(curState[0], n())) ) - aZ() * curState[1];    
+		nextState[0] = baseline * Xnew + bY() * pow(Xnew, n()) / (pow(KY(), n()) + pow(Xnew, n())) - aY() * curState[0];
+		nextState[1] = baseline * Xnew + bZ() * pow(Xnew * KY(), n()) / ( (pow(KXZ(), n()) + pow(Xnew, n())) * (pow(KY(), n()) + pow(curState[0], n())) ) - aZ() * curState[1];    
     };
 
 	// Set up the initial state
