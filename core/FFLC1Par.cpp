@@ -1,6 +1,6 @@
 #include "FFLC1Par.h"
 
-FFLC1Par::FFLC1Par(double AUC, std::vector<double> pars) : ODEPar(numPars, pars)
+FFLC1Par::FFLC1Par(double AUC, std::vector<double> pars) : ODEPar(numPars, AUC, pars)
 {
     _AUC = AUC;
     _pars.resize(numPars, 1.0);

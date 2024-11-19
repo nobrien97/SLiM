@@ -5,12 +5,12 @@
 class ODEPar
 {
 protected:
-    double _AUC = 1.0; // default value when all parameters are 1
+    double _AUC = 0.69; // default value when all parameters are 1
     std::vector<double> _pars;
 public:
     ODEPar() {};
     ODEPar(int pars);
-    ODEPar(int numPar, std::vector<double> pars);
+    ODEPar(int numPar, double AUC, std::vector<double> pars);
     ~ODEPar() = default;
 
     enum motif_enum {

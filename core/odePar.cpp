@@ -80,13 +80,14 @@ bool ODEPar::Compare(const ODEPar rhs)
 
 ODEPar::ODEPar(int pars) : numPars(pars), _pars(pars, 1.0) {}
 
-ODEPar::ODEPar(int numPar, std::vector<double> pars) : numPars(numPar)
+ODEPar::ODEPar(int numPar, double AUC, std::vector<double> pars) : numPars(numPar)
 {
     _pars.resize(pars.size());
     for (size_t i = 0; i < numPars; ++i)
     {
         _pars[i] = pars[i];
     }
+    _AUC = AUC;
 
 }
 

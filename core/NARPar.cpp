@@ -1,6 +1,6 @@
 #include "NARPar.h"
 
-NARPar::NARPar(double AUC, std::vector<double> pars) : ODEPar(numPars, pars)
+NARPar::NARPar(double AUC, std::vector<double> pars) : ODEPar(numPars, AUC, pars)
 {
     _AUC = AUC;
     _pars.resize(numPars, 1.0);

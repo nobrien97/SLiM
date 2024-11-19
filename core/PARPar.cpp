@@ -1,6 +1,6 @@
 #include "PARPar.h"
 
-PARPar::PARPar(double AUC, std::vector<double> pars) : ODEPar(numPars, pars)
+PARPar::PARPar(double AUC, std::vector<double> pars) : ODEPar(numPars, AUC, pars)
 {
     _AUC = AUC;
     _pars.resize(numPars, 1.0);

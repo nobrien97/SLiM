@@ -1,6 +1,6 @@
 #include "FFBHPar.h"
 
-FFBHPar::FFBHPar(double AUC, std::vector<double> pars) : ODEPar(numPars, pars)
+FFBHPar::FFBHPar(double AUC, std::vector<double> pars) : ODEPar(numPars, AUC, pars)
 {
     _AUC = AUC;
     _pars.resize(numPars, 1.0);

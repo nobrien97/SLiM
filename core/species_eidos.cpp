@@ -2589,7 +2589,6 @@ EidosValue_SP Species::ExecuteMethod_ODEIntegrate(EidosGlobalStringID p_method_i
 			double curAUC = ODEPar::getODEValFromVector(*TempODEptr, this->pastCombos, true);
 			out[ind_ex] = curAUC;
 
-
 			// Update phenopars for this individual
 			ind->phenoPars.get()->setParValue(TempODEptr->getPars(false), false);
 			ind->phenoPars.get()->setAUC(curAUC);
