@@ -52,6 +52,18 @@ public:
 
     static double AUC(const double &h, const double &a, const double &b);
 
+    static std::vector<double> SteadyState(const asc::Recorder &solution, const double& startTime, const int &solutionIndex = 0, const bool &reverseOrder = false);
+
+    static double DelayTime(const asc::Recorder &solution, const double &startTime, const int &solutionIndex);
+
+    static std::vector<double> MaxExpression(const asc::Recorder &solution, const int &solutionIndex);
+
+    static double TimeAboveThreshold(const asc::Recorder &solution, const double &threshold, const int &solutionIndex);
+
+    static inline double Interpolate(double x1, double y1, double x2, double y2, double y_target) {
+        return x1 + (y_target - y1) * (x2 - x1) / (y2 - y1);
+    };
+
     const size_t numPars = 0;
     uint count = 1; // Count the number of instances in the population that this exists: needs to be reset to 1 every generation! 
     
