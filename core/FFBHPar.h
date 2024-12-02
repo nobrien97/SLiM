@@ -12,7 +12,7 @@ public:
 
     std::vector<double> SolveODE() override;
 
-    const static int numPars = 11;
+    const static int numPars = 16;
 
     const double& AUC() const { return _AUC; }
     const double& aX() const { return _pars[0]; }

@@ -35,8 +35,8 @@ std::vector<double> FFLC1Par::SolveODE()
         
         double Xnew = X * XMult();
 		double baseline = std::max(base() - 0.99, 0.0); // Adjust baseline so it is relative to the default value, 0.01 (instead of 1)
-		nextState[0] = baseline * Xnew + bY() * pow(Xnew, n()) / (pow(KY(), n()) + pow(Xnew, n())) - aY() * curState[0];
-		nextState[1] = baseline * Xnew + bZ() * pow(Xnew * curState[0], n()) / ( (pow(KXZ(), n()) + pow(Xnew, n())) * (pow(KY(), n()) + pow(curState[0], n())) ) - aZ() * curState[1];    
+		nextState[0] = bY() * pow(Xnew, n()) / (pow(KY(), n()) + pow(Xnew, n())) - aY() * curState[0];
+		nextState[1] = baseline + bZ() * pow(Xnew * curState[0], n()) / ( (pow(KXZ(), n()) + pow(Xnew, n())) * (pow(KY(), n()) + pow(curState[0], n())) ) - aZ() * curState[1];    
     };
 
 	// Set up the initial state

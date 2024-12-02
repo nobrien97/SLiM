@@ -56,10 +56,10 @@ std::vector<double> FFBHPar::SolveODE()
         Xnew += nextState[0];
 
         // Y
-		nextState[1] = baseline * Xnew + bY() * pow(Xnew, n()) / ( pow(KY(), n()) + pow(Xnew, n()) ) - aY() * curState[1];
+		nextState[1] = bY() * pow(Xnew, n()) / ( pow(KY(), n()) + pow(Xnew, n()) ) - aY() * curState[1];
 		
         // Z
-        nextState[2] = baseline * Xnew + bZ() * pow(Xnew * curState[1], n()) / ( ( pow(KXZ(), n()) + pow(Xnew, n()) ) * ( pow(KY(), n()) + pow(curState[1], n()) ) ) - aZ() * curState[2];    
+        nextState[2] = baseline + bZ() * pow(Xnew * curState[1], n()) / ( ( pow(KXZ(), n()) + pow(Xnew, n()) ) * ( pow(KY(), n()) + pow(curState[1], n()) ) ) - aZ() * curState[2];    
     };
 
 	// Set up the initial state

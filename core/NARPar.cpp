@@ -32,7 +32,7 @@ std::vector<double> NARPar::SolveODE()
 		double Xnew = X * XMult();
 		double baseline = std::max(base() - 1.0, 0.0); // Adjust baseline so it is relative to the default value, 0 (instead of 1)
 		// dZ <- base * X + bZ * (X^n/(KXZ^n + X^n)) * ((KZ^n)/((KZ^n)+(Z^n))) - aZ*Z
-		dxdt[0] = baseline * Xnew + bZ() * pow(Xnew, n()) / (pow(KXZ(), n()) + pow(Xnew, n())) * (pow(KZ(), n())/(pow(KZ(), n()) + pow(val[0], n()))) - aZ() * val[0];
+		dxdt[0] = baseline + bZ() * pow(Xnew, n()) / (pow(KXZ(), n()) + pow(Xnew, n())) * (pow(KZ(), n())/(pow(KZ(), n()) + pow(val[0], n()))) - aZ() * val[0];
 	};
 
 	// Set up the initial state
