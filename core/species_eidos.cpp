@@ -2377,7 +2377,7 @@ EidosValue_SP Species::ExecuteMethod_NARIntegrate(EidosGlobalStringID p_method_I
 		// If we match an existing entry in the list of past combos - otherwise we need to calculate the AUC
 		if (std::any_of(this->pastCombos.begin(), this->pastCombos.end(), compareODE))
 		{
-			double curAUC = ODEPar::getODEValFromVector(EV_data, this->pastCombos, true);
+			double curAUC = ODEPar::getODEValFromVector(EV_data, this->pastCombos, true)[0];
 			out.emplace_back(curAUC);
 			EV_data.setParValue(0, curAUC);
 			ind->phenoPars.get()->setParValue(EV_data.getPars(), true);
@@ -2461,7 +2461,7 @@ EidosValue_SP Species::ExecuteMethod_PARIntegrate(EidosGlobalStringID p_method_i
 		// If we match an existing entry in the list of past combos - otherwise we need to calculate the AUC
 		if (std::any_of(this->pastCombos.begin(), this->pastCombos.end(), compareODE))
 		{
-			double curAUC = PARPar::getODEValFromVector(EV_data, this->pastCombos, true);
+			double curAUC = PARPar::getODEValFromVector(EV_data, this->pastCombos, true)[0];
 			out.emplace_back(curAUC);
 
 			// Update phenopars for this individual
@@ -2518,24 +2518,31 @@ EidosValue_SP Species::ExecuteMethod_ODEIntegrate(EidosGlobalStringID p_method_i
 
 	// Choose correct motif
 	int mutTypeCount;
+	int traitCount;
+
 
 	// Set the correct number of mut types and define the correct ODEPar derived class
 	switch (hashMotifString(motif))
 	{
 	case ODEPar::motif_enum::NAR:
 		mutTypeCount = NARPar::numPars;
+		traitCount = NARPar::numTraits;
 		break;
 	case ODEPar::motif_enum::PAR:
 		mutTypeCount = PARPar::numPars;
+		traitCount = PARPar::numTraits;
 		break;
 	case ODEPar::motif_enum::FFLC1:
 		mutTypeCount = FFLC1Par::numPars;
+		traitCount = FFLC1Par::numTraits;
 		break;
 	case ODEPar::motif_enum::FFLI1:
 		mutTypeCount = FFLI1Par::numPars;
+		traitCount = FFLI1Par::numTraits;
 		break;
 	case ODEPar::motif_enum::FFBH:
 		mutTypeCount = FFBHPar::numPars;
+		traitCount = FFBHPar::numTraits;
 		break;
 	default:
 		EIDOS_TERMINATION << "ERROR (Species::ExecuteMethod_ODEIntegrate): " << EidosStringRegistry::StringForGlobalStringID(p_method_id) << "() requires a valid ODE type (PAR, NAR, FFLC1, FFLI1, or FFBH)." << EidosTerminate();
@@ -2544,8 +2551,9 @@ EidosValue_SP Species::ExecuteMethod_ODEIntegrate(EidosGlobalStringID p_method_i
 	
 	// Iterate over all individuals, calculating their NAR AUC from their parameter set:
 	// First need to actually get the individuals and reserve some space for each individual's result
+	// Result size depends on the ODE type, different traits measured
 	int inds_count = p_arguments[0].get()->Count();
-	std::vector<double> out(inds_count);
+	std::vector<double> out(inds_count * traitCount);
 
 	// For each mutation type, get the relevant substitutions and calculate product of
 	// selection coefficients - we store that in subData
@@ -2572,6 +2580,9 @@ EidosValue_SP Species::ExecuteMethod_ODEIntegrate(EidosGlobalStringID p_method_i
 			ind->phenoPars = ODEPar::MakeODEPtr(hashMotifString(motif));
 		}
 
+		// Calculate offset for the output vector
+		int offset = ind_ex * traitCount;
+
 		// Get the individual's mutation values - offset by 3 because mutation types start at m3
 		// Setting EV_data value offset by 1 because value 0 means setting AUC
 		// parameter = e^sumOfMutationsAndSubs
@@ -2586,22 +2597,33 @@ EidosValue_SP Species::ExecuteMethod_ODEIntegrate(EidosGlobalStringID p_method_i
 		// If we match an existing entry in the list of past combos - otherwise we need to calculate the AUC
 		if (std::any_of(this->pastCombos.begin(), this->pastCombos.end(), compareODE))
 		{
-			double curAUC = ODEPar::getODEValFromVector(*TempODEptr, this->pastCombos, true);
-			out[ind_ex] = curAUC;
+			std::vector<double> curTraits = ODEPar::getODEValFromVector(*TempODEptr, this->pastCombos, true);
+
+			// Fill outputs
+			for (int j = 0; j < traitCount; ++j)
+			{
+				out[offset + j] = curTraits[j];
+			}
+
 
 			// Update phenopars for this individual
 			ind->phenoPars.get()->setParValue(TempODEptr->getPars(false), false);
-			ind->phenoPars.get()->setAUC(curAUC);
+			ind->phenoPars.get()->SetTraits(curTraits);
 			continue;
 		}
 	
 		// Calculate ODE
 		std::vector<double> solution = TempODEptr->SolveODE();
-		out[ind_ex] = solution[0];
+
+		// Fill outputs
+		for (int j = 0; j < traitCount; ++j)
+		{
+			out[offset + j] = solution[j];
+		}
 
 		// Update the individual's phenoPars values
 		ind->phenoPars.get()->setParValue(TempODEptr->getPars(false), false);
-		ind->phenoPars.get()->setAUC(solution[0]);
+		ind->phenoPars.get()->SetTraits(solution);
 
 		// First check if the pastcombos list is too long: if it is, it's more expensive to search for a 
 		// match than to just calculate again. So we'll limit the number of combos to some sane amount, 
