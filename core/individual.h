@@ -316,6 +316,7 @@ public:
 	static EidosValue *GetProperty_Accelerated_reproductiveOutput(EidosObject **p_values, size_t p_values_size);
 	static EidosValue *GetProperty_Accelerated_tagF(EidosObject **p_values, size_t p_values_size);
 	static EidosValue *GetProperty_Accelerated_phenotype(EidosObject **p_values, size_t p_values_size);
+	static EidosValue *GetProperty_Accelerated_phenotype4(EidosObject **p_values, size_t p_values_size);
 	static EidosValue *GetProperty_Accelerated_migrant(EidosObject **p_values, size_t p_values_size);
 	static EidosValue *GetProperty_Accelerated_fitnessScaling(EidosObject **p_values, size_t p_values_size);
 	static EidosValue *GetProperty_Accelerated_x(EidosObject **p_values, size_t p_values_size);
@@ -337,6 +338,8 @@ public:
 	static bool _SetFitnessScaling_1(double source_value, EidosObject **p_values, size_t p_values_size);
 	static bool _SetFitnessScaling_N(const double *source_data, EidosObject **p_values, size_t p_values_size);
 	static void SetProperty_Accelerated_phenotype(EidosObject **p_values, size_t p_values_size, const EidosValue &p_source, size_t p_source_size);
+	static void SetProperty_Accelerated_phenotype4(EidosObject **p_values, size_t p_values_size, const EidosValue &p_source, size_t p_source_size);
+
 	static void SetProperty_Accelerated_fitnessScaling(EidosObject **p_values, size_t p_values_size, const EidosValue &p_source, size_t p_source_size);
 	static void SetProperty_Accelerated_x(EidosObject **p_values, size_t p_values_size, const EidosValue &p_source, size_t p_source_size);
 	static void SetProperty_Accelerated_y(EidosObject **p_values, size_t p_values_size, const EidosValue &p_source, size_t p_source_size);

@@ -1017,6 +1017,26 @@ EidosValue *Individual::GetProperty_Accelerated_phenotype(EidosObject **p_values
 	return float_result;
 }
 
+EidosValue *Individual::GetProperty_Accelerated_phenotype4(EidosObject **p_values, size_t p_values_size)
+{
+	EidosValue_Float *float_result = (new (gEidosValuePool->AllocateChunk()) EidosValue_Float())->resize_no_initialize(p_values_size * 4);
+	
+	for (size_t ind_index = 0; ind_index < p_values_size; ++ind_index)
+	{
+		Individual *value = (Individual *)(p_values[ind_index]);
+		std::vector<double> phenotype_value = value->phenotype4_value_;
+		
+		int offset = p_values_size * 4;
+		for (size_t pheno_index = 0; pheno_index < 4; ++pheno_index)
+		{
+			float_result->set_float_no_check(phenotype_value[pheno_index], offset + pheno_index);
+		}
+	}
+	
+	return float_result;
+}
+
+
 EidosValue *Individual::GetProperty_Accelerated_migrant(EidosObject **p_values, size_t p_values_size)
 {
 	EidosValue_Logical *logical_result = (new (gEidosValuePool->AllocateChunk()) EidosValue_Logical())->resize_no_initialize(p_values_size);
@@ -1408,6 +1428,31 @@ void Individual::SetProperty_Accelerated_phenotype(EidosObject **p_values, size_
 		
 		for (size_t value_index = 0; value_index < p_values_size; ++value_index)
 			((Individual *)(p_values[value_index]))->phenotype_value_ = source_data[value_index];
+	}
+}
+
+void Individual::SetProperty_Accelerated_phenotype4(EidosObject **p_values, size_t p_values_size, const EidosValue &p_source, size_t p_source_size)
+{
+	s_any_individual_tag_set_ = true;
+
+	if (p_source_size != p_values_size * 4)
+	{
+		EIDOS_TERMINATION << "ERROR (Individual::SetProperty_Accelerated_phenotype4): Insufficient entries to set phenotypes." << EidosTerminate();
+
+	}
+	
+	// SLiMCastToUsertagTypeOrRaise() is a no-op at present
+	const double *source_data = p_source.FloatData();
+		
+	for (size_t ind_index = 0; ind_index < p_values_size; ++ind_index)
+	{
+		Individual* ind = (Individual *)(p_values[ind_index]);
+
+		int offset = ind_index * 4;
+		for (size_t pheno_index = 0; pheno_index < 4; ++pheno_index)
+		{
+			ind->phenotype4_value_[pheno_index] = source_data[offset + pheno_index];
+		}
 	}
 }
 
@@ -2309,7 +2354,7 @@ const std::vector<EidosPropertySignature_CSP> *Individual_Class::Properties(void
 		properties->emplace_back((EidosPropertySignature *)(new EidosPropertySignature(gStr_tag,					false,	kEidosValueMaskInt | kEidosValueMaskSingleton))->DeclareAcceleratedGet(Individual::GetProperty_Accelerated_tag)->DeclareAcceleratedSet(Individual::SetProperty_Accelerated_tag));
 		properties->emplace_back((EidosPropertySignature *)(new EidosPropertySignature(gStr_tagF,					false,	kEidosValueMaskFloat | kEidosValueMaskSingleton))->DeclareAcceleratedGet(Individual::GetProperty_Accelerated_tagF)->DeclareAcceleratedSet(Individual::SetProperty_Accelerated_tagF));
 		properties->emplace_back((EidosPropertySignature *)(new EidosPropertySignature(gStr_phenotype,				false,	kEidosValueMaskFloat | kEidosValueMaskSingleton))->DeclareAcceleratedGet(Individual::GetProperty_Accelerated_phenotype)->DeclareAcceleratedSet(Individual::SetProperty_Accelerated_phenotype));
-		properties->emplace_back((EidosPropertySignature *)(new EidosPropertySignature(gStr_phenotype4,				false,	kEidosValueMaskFloat | kEidosValueMaskSingleton)));
+		properties->emplace_back((EidosPropertySignature *)(new EidosPropertySignature(gStr_phenotype4,				false,	kEidosValueMaskFloat | kEidosValueMaskSingleton))->DeclareAcceleratedGet(Individual::GetProperty_Accelerated_phenotype4)->DeclareAcceleratedSet(Individual::SetProperty_Accelerated_phenotype4));
 		properties->emplace_back((EidosPropertySignature *)(new EidosPropertySignature(gStr_ODEPars,				true,	kEidosValueMaskFloat)));
 		properties->emplace_back((EidosPropertySignature *)(new EidosPropertySignature(gStr_tagL0,					false,	kEidosValueMaskLogical | kEidosValueMaskSingleton))->DeclareAcceleratedGet(Individual::GetProperty_Accelerated_tagL0)->DeclareAcceleratedSet(Individual::SetProperty_Accelerated_tagL0));
 		properties->emplace_back((EidosPropertySignature *)(new EidosPropertySignature(gStr_tagL1,					false,	kEidosValueMaskLogical | kEidosValueMaskSingleton))->DeclareAcceleratedGet(Individual::GetProperty_Accelerated_tagL1)->DeclareAcceleratedSet(Individual::SetProperty_Accelerated_tagL1));
