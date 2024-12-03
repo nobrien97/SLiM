@@ -8,28 +8,26 @@
 
 std::unique_ptr<ODEPar> ODEPar::MakeODEPtr(motif_enum motifType)
 {
-        {
-        switch (motifType)
-        {
-            case NAR:
-                return std::make_unique<NARPar>();
-                break;
-            case PAR:
-                return std::make_unique<PARPar>();
-                break;
-            case FFLC1:
-                return std::make_unique<FFLC1Par>();
-                break;
-            case FFLI1:
-                return std::make_unique<FFLI1Par>();
-                break;
-            case FFBH:
-                return std::make_unique<FFBHPar>();
-                break;
-            default:
-                return nullptr;
-                break;
-        }
+    switch (motifType)
+    {
+        case NAR:
+            return std::make_unique<NARPar>();
+            break;
+        case PAR:
+            return std::make_unique<PARPar>();
+            break;
+        case FFLC1:
+            return std::make_unique<FFLC1Par>();
+            break;
+        case FFLI1:
+            return std::make_unique<FFLI1Par>();
+            break;
+        case FFBH:
+            return std::make_unique<FFBHPar>();
+            break;
+        default:
+            return nullptr;
+            break;
     }
 }
 
@@ -38,19 +36,19 @@ std::unique_ptr<ODEPar> ODEPar::MakeODEPtr(motif_enum motifType, const ODEPar &i
     switch (motifType)
     {
         case NAR:
-            return std::make_unique<NARPar>(initialODEPar._AUC, initialODEPar._pars);
+            return std::make_unique<NARPar>(initialODEPar._solutionTraits, initialODEPar._pars);
             break;
         case PAR:
-            return std::make_unique<PARPar>(initialODEPar._AUC, initialODEPar._pars);
+            return std::make_unique<PARPar>(initialODEPar._solutionTraits, initialODEPar._pars);
             break;
         case FFLC1:
-            return std::make_unique<FFLC1Par>(initialODEPar._AUC, initialODEPar._pars);
+            return std::make_unique<FFLC1Par>(initialODEPar._solutionTraits, initialODEPar._pars);
             break;
         case FFLI1:
-            return std::make_unique<FFLI1Par>(initialODEPar._AUC, initialODEPar._pars);
+            return std::make_unique<FFLI1Par>(initialODEPar._solutionTraits, initialODEPar._pars);
             break;
         case FFBH:
-            return std::make_unique<FFBHPar>(initialODEPar._AUC, initialODEPar._pars);
+            return std::make_unique<FFBHPar>(initialODEPar._solutionTraits, initialODEPar._pars);
             break;
         default:
             return nullptr;
@@ -80,19 +78,24 @@ bool ODEPar::Compare(const ODEPar rhs)
 
 ODEPar::ODEPar(int pars) : numPars(pars), _pars(pars, 1.0) {}
 
-ODEPar::ODEPar(int numPar, double AUC, std::vector<double> pars) : numPars(numPar)
+ODEPar::ODEPar(int numPar, int numTrait, std::vector<double> traits, std::vector<double> pars) : numPars(numPar), numTraits(numTrait)
 {
     _pars.resize(pars.size());
     for (size_t i = 0; i < numPars; ++i)
     {
         _pars[i] = pars[i];
     }
-    _AUC = AUC;
+
+    _solutionTraits.resize(traits.size());
+    for (size_t j = 0; j < numTraits; ++j)
+    {
+        _solutionTraits[j] = traits[j]; 
+    }
 
 }
 
 // Get an ODEPar from a vector of ODEPars
-double ODEPar::getODEValFromVector(const ODEPar& target, const std::vector<std::unique_ptr<ODEPar>>& vec, bool incrementCount)
+std::vector<double> ODEPar::getODEValFromVector(const ODEPar& target, const std::vector<std::unique_ptr<ODEPar>>& vec, bool incrementCount)
 {
     for (auto& ODE : vec)
     {
@@ -102,10 +105,10 @@ double ODEPar::getODEValFromVector(const ODEPar& target, const std::vector<std::
             if (incrementCount) 
                 ++*ODE;
 
-            return source._AUC;
+            return source._solutionTraits;
         }
     }
-    return 0;
+    return {0};
 } 
 
 std::vector<double> ODEPar::getPars(bool returnAUC)
@@ -170,7 +173,7 @@ double ODEPar::AUC(const double &h, const double &a, const double &b)
 }
 
 // Calculates the response time and steady state concentration for a given ODE solution
-std::vector<double> ODEPar::SteadyState(const asc::Recorder &solution, const double& startTime, const int &solutionIndex, const bool &reverseOrder)
+std::vector<double> ODEPar::CalcSteadyState(const asc::Recorder &solution, const double& startTime, const int &solutionIndex, const bool &reverseOrder)
 {
     // First get the steady state and halfway point
     std::vector<double> result{0.0, 0.0};
@@ -268,7 +271,7 @@ std::vector<double> ODEPar::SteadyState(const asc::Recorder &solution, const dou
 }
 
 // Finds the delay from a certain point before n ODE starts changing
-double ODEPar::DelayTime(const asc::Recorder &solution, const double &startTime, const int &solutionIndex)
+double ODEPar::CalcDelayTime(const asc::Recorder &solution, const double &startTime, const int &solutionIndex)
 {
     double result = 0.0;
     static float epsilon = 0.001f;
@@ -295,7 +298,7 @@ double ODEPar::DelayTime(const asc::Recorder &solution, const double &startTime,
 }
 
 // Maximum expression and the time at which it is reached
-std::vector<double> ODEPar::MaxExpression(const asc::Recorder &solution, const int &solutionIndex)
+std::vector<double> ODEPar::CalcMaxExpression(const asc::Recorder &solution, const int &solutionIndex)
 {
     std::vector<double> result {0.0, 0.0};
     double curMax = 0.0;
@@ -309,13 +312,13 @@ std::vector<double> ODEPar::MaxExpression(const asc::Recorder &solution, const i
         }
     }
 
-    result[0] = curTime;
-    result[1] = curMax;
+    result[0] = curMax;
+    result[1] = curTime;
     return result;
 }
 
 // Amount of time spent above a threshold
-double ODEPar::TimeAboveThreshold(const asc::Recorder &solution, const double &threshold, const int &solutionIndex)
+double ODEPar::CalcTimeAboveThreshold(const asc::Recorder &solution, const double &threshold, const int &solutionIndex)
 {
     static double DELTA = 0.1; // delta between two measurements
     double timeAboveThreshold = 0.0;

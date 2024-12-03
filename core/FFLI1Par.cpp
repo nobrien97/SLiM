@@ -1,10 +1,11 @@
 #include "FFLI1Par.h"
 
-FFLI1Par::FFLI1Par(double AUC, std::vector<double> pars) : ODEPar(numPars, AUC, pars)
+FFLI1Par::FFLI1Par(std::vector<double> traits, std::vector<double> pars) : ODEPar(numPars, numTraits, traits, pars)
 {
-    _AUC = AUC;
     _pars.resize(numPars, 1.0);
 	setParValue(pars, false);
+	_solutionTraits.resize(numTraits);
+	SetTraits(traits);
     //_pars[6] = 0.01; // constitutive promoter
 }
 
@@ -12,12 +13,13 @@ FFLI1Par::FFLI1Par() : ODEPar(numPars)
 {
 	_pars.resize(numPars, 1.0);
     _pars[6] = 0.01; // constitutive promoter
+	_solutionTraits.resize(numTraits);
 }
 
 std::vector<double> FFLI1Par::SolveODE()
 {
     // Initialise output
-    std::vector<double> result(1, 0.0);
+    //std::vector<double> result(1, 0.0);
 
     // static components
 	const double Xstart = 1.0; 
@@ -55,17 +57,24 @@ std::vector<double> FFLI1Par::SolveODE()
 		recorder({t, (asc::value_t)X, state[0], state[1]});
 		integrator(FFLI1Derivative, state, t, dt);
 	}
+
+	// Calculate traits
+	std::vector<double> maxExp = ODEPar::CalcMaxExpression(recorder, 3);
+	SetMaxExpression(maxExp[0]);
+	SetTimeToMaxExpression(maxExp[1]);
+	SetTimeAboveHalfMaxExpression(ODEPar::CalcTimeAboveThreshold(recorder, maxExp[0]/2, 3)); // time above half max expression
+
 	// Calculate AUC
-	double z = 0;
-	#pragma omp simd reduction(+:z)
-	for (uint i = 0; i < recorder.history.size()-1; ++i)
-	{
-		z += ODEPar::AUC(0.1, (double)recorder.history[i][3], (double)recorder.history[i + 1][3]);
-	}
+	// double z = 0;
+	// #pragma omp simd reduction(+:z)
+	// for (uint i = 0; i < recorder.history.size()-1; ++i)
+	// {
+	// 	z += ODEPar::AUC(0.1, (double)recorder.history[i][3], (double)recorder.history[i + 1][3]);
+	// }
 	
 	// Check that z is > 0, set AUC, return
-	z = (z >= 0) ? z : 0.0;
-    result[0] = z;
-    setAUC(z);
-    return result;
+	// z = (z >= 0) ? z : 0.0;
+    // result[0] = z;
+    // setAUC(z);
+    return {TimeToMaxExpression(), MaxExpression(), TimeAboveHalfMaxExpression()};
 }

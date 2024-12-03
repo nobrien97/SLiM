@@ -1,10 +1,11 @@
 #include "FFBHPar.h"
 
-FFBHPar::FFBHPar(double AUC, std::vector<double> pars) : ODEPar(numPars, AUC, pars)
+FFBHPar::FFBHPar(std::vector<double> traits, std::vector<double> pars) : ODEPar(numPars, numTraits, traits, pars)
 {
-    _AUC = AUC;
     _pars.resize(numPars, 1.0);
     setParValue(pars, false);
+    _solutionTraits.resize(numTraits);
+    SetTraits(traits);
     //_pars[8] = 0.0; // set baseline to 0 to start
 }
 
@@ -12,14 +13,14 @@ FFBHPar::FFBHPar() : ODEPar(numPars)
 {
     _pars.resize(numPars, 1.0);
     _pars[8] = 0.0; // set baseline to 0 to start
-
+    _solutionTraits.resize(numTraits);
 }
 
 
 std::vector<double> FFBHPar::SolveODE()
 {
     // Initialise output
-    std::vector<double> result(1, 0.0);
+    //std::vector<double> result(1, 0.0);
 
     // static components
 	const double Xstart = 1.0; 
@@ -77,17 +78,27 @@ std::vector<double> FFBHPar::SolveODE()
 		recorder({t, (asc::value_t)X, state[0], state[1], state[2]});
 		integrator(FFBHDerivative, state, t, dt);
 	}
+
+    // Calculate traits
+    std::vector<double> maxExp = ODEPar::CalcMaxExpression(recorder, 4);
+    std::vector<double> secondSteadyState = ODEPar::CalcSteadyState(recorder, recorder.history.size() - 1, 4, true);
+
+    SetMaxExpression(maxExp[0]);
+    SetTimeToMaxExpression(maxExp[1]);
+    SetSecondSteadyState(secondSteadyState[0]);
+    SetTimeToSecondSteadyState(secondSteadyState[1]);
+
 	// Calculate AUC
-	double z = 0;
-	#pragma omp simd reduction(+:z)
-	for (uint i = 0; i < recorder.history.size()-1; ++i)
-	{
-		z += ODEPar::AUC(0.1, (double)recorder.history[i][4], (double)recorder.history[i + 1][4]);
-	}
+	// double z = 0;
+	// #pragma omp simd reduction(+:z)
+	// for (uint i = 0; i < recorder.history.size()-1; ++i)
+	// {
+	// 	z += ODEPar::AUC(0.1, (double)recorder.history[i][4], (double)recorder.history[i + 1][4]);
+	// }
 	
 	// Check that z is > 0, set AUC, return
-	z = (z >= 0) ? z : 0.0;
-    result[0] = z;
-    setAUC(z);
-    return result;
+	// z = (z >= 0) ? z : 0.0;
+    // result[0] = z;
+    // setAUC(z);
+    return {TimeToMaxExpression(), MaxExpression(), TimeToSecondSteadyState(), SecondSteadyState()};
 }

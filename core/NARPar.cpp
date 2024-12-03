@@ -1,24 +1,25 @@
 #include "NARPar.h"
 
-NARPar::NARPar(double AUC, std::vector<double> pars) : ODEPar(numPars, AUC, pars)
+NARPar::NARPar(std::vector<double> traits, std::vector<double> pars) : ODEPar(numPars, numTraits, traits, pars)
 {
-    _AUC = AUC;
     _pars.resize(numPars, 1.0);
 	setParValue(pars, false);
-
+	_solutionTraits.resize(numTraits);
+	SetTraits(traits);
     //_pars[4] = 0.0; // set baseline to 0 to start
 }
 
 NARPar::NARPar() : ODEPar(numPars) 
 {
 	_pars.resize(numPars, 1.0);
+	_solutionTraits.resize(numTraits);
     //_pars[4] = 0.0; // set baseline to 0 to start
 }
 
 std::vector<double> NARPar::SolveODE()
 {
     // Initialise output
-    std::vector<double> result(1, 0.0);
+    //std::vector<double> result(1, 0.0);
 
     // static components
 	const double Xstart = 1.0; 
@@ -50,17 +51,23 @@ std::vector<double> NARPar::SolveODE()
 		recorder({t, (asc::value_t)X, state[0]});
 		integrator(NARDerivative, state, t, dt);
 	}
+
+	// Calculate traits
+	std::vector<double> steadyState = ODEPar::CalcSteadyState(recorder, 2);
+	SetSteadyState(steadyState[0]);
+	SetResponseTime(steadyState[1]);
+
 	// Calculate AUC
-	double z = 0;
-	#pragma omp simd reduction(+:z)
-	for (uint i = 0; i < recorder.history.size()-1; ++i)
-	{
-		z += ODEPar::AUC(0.1, (double)recorder.history[i][2], (double)recorder.history[i + 1][2]);
-	}
+	// double z = 0;
+	// #pragma omp simd reduction(+:z)
+	// for (uint i = 0; i < recorder.history.size()-1; ++i)
+	// {
+	// 	z += ODEPar::AUC(0.1, (double)recorder.history[i][2], (double)recorder.history[i + 1][2]);
+	// }
 	
 	// Check that z is > 0, set AUC, return
-	z = (z >= 0) ? z : 0.0;
-    result[0] = z;
-    setAUC(z);
-    return result;
+	// z = (z >= 0) ? z : 0.0;
+    // result[0] = z;
+    // setAUC(z);
+    return {ResponseTime(), SteadyState()};
 }

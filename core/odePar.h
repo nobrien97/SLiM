@@ -7,10 +7,11 @@ class ODEPar
 protected:
     double _AUC = 0.69; // default value when all parameters are 1
     std::vector<double> _pars;
+    std::vector<double> _solutionTraits;
 public:
     ODEPar() {};
     ODEPar(int pars);
-    ODEPar(int numPar, double AUC, std::vector<double> pars);
+    ODEPar(int numPar, int numTrait, std::vector<double> traits, std::vector<double> pars);
     ~ODEPar() = default;
 
     enum motif_enum {
@@ -52,19 +53,20 @@ public:
 
     static double AUC(const double &h, const double &a, const double &b);
 
-    static std::vector<double> SteadyState(const asc::Recorder &solution, const double& startTime, const int &solutionIndex = 0, const bool &reverseOrder = false);
+    static std::vector<double> CalcSteadyState(const asc::Recorder &solution, const double& startTime, const int &solutionIndex = 0, const bool &reverseOrder = false);
 
-    static double DelayTime(const asc::Recorder &solution, const double &startTime, const int &solutionIndex);
+    static double CalcDelayTime(const asc::Recorder &solution, const double &startTime, const int &solutionIndex);
 
-    static std::vector<double> MaxExpression(const asc::Recorder &solution, const int &solutionIndex);
+    static std::vector<double> CalcMaxExpression(const asc::Recorder &solution, const int &solutionIndex);
 
-    static double TimeAboveThreshold(const asc::Recorder &solution, const double &threshold, const int &solutionIndex);
+    static double CalcTimeAboveThreshold(const asc::Recorder &solution, const double &threshold, const int &solutionIndex);
 
     static inline double Interpolate(double x1, double y1, double x2, double y2, double y_target) {
         return x1 + (y_target - y1) * (x2 - x1) / (y2 - y1);
     };
 
     const size_t numPars = 0;
+    const size_t numTraits = 0;
     uint count = 1; // Count the number of instances in the population that this exists: needs to be reset to 1 every generation! 
     
     // Set a given value
@@ -74,7 +76,7 @@ public:
     void setParValue(std::vector<double> vals, bool firstElementIsAUC = false);
 
     // Get an ODEPar from a vector of ODEPars
-    static double getODEValFromVector(const ODEPar& target, const std::vector<std::unique_ptr<ODEPar>>& vec, bool incrementCount = false);
+    static std::vector<double> getODEValFromVector(const ODEPar& target, const std::vector<std::unique_ptr<ODEPar>>& vec, bool incrementCount = false);
 
     // Get all the values from an ODEPar
     std::vector<double> getPars(bool returnAUC = true);
@@ -82,5 +84,20 @@ public:
     void setAUC(double val) { _AUC = val; }
 
     double getParValue(int i);
+
+    inline std::vector<double> GetTraits() { return _solutionTraits; } 
+
+    inline void SetTraits(std::vector<double> values) 
+    {
+        if (_solutionTraits.size() != values.size())
+        {
+            return;
+        }
+
+        for (int i = 0; i < _solutionTraits.size(); ++i)
+        {
+            _solutionTraits[i] = values[i];
+        }
+    }
 
 };
