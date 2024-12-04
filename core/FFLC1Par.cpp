@@ -58,9 +58,9 @@ std::vector<double> FFLC1Par::SolveODE()
 	}
 
 	// Measure traits
-	std::vector<double> steadyState = ODEPar::CalcSteadyState(recorder, 0.0, 3);
-	SetResponseTime(steadyState[1]);
-	SetSteadyState(steadyState[0]);
+	std::vector<double> steadyState = ODEPar::CalcSteadyState(recorder, 1.0, 3);
+	SetResponseTime(steadyState[0]);
+	SetSteadyState(steadyState[1]);
 	SetResponseDelay(ODEPar::CalcDelayTime(recorder, 1.0, 3));
 
 	// Calculate AUC
@@ -75,5 +75,5 @@ std::vector<double> FFLC1Par::SolveODE()
 	// z = (z >= 0) ? z : 0.0;
     // result[0] = z;
     // setAUC(z);
-    return {ResponseTime(), SteadyState(), ResponseDelay()};
+    return {ResponseTime(), ResponseDelay(), SteadyState()};
 }

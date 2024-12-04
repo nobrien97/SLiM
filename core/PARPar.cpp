@@ -53,9 +53,9 @@ std::vector<double> PARPar::SolveODE()
 	}
 
 	// Calculate traits
-	std::vector<double> steadyState = ODEPar::CalcSteadyState(recorder, 2);
-	SetSteadyState(steadyState[0]);
-	SetResponseTime(steadyState[1]);
+	std::vector<double> steadyState = ODEPar::CalcSteadyState(recorder, 1.0, 2);
+	SetSteadyState(steadyState[1]);
+	SetResponseTime(steadyState[0]);
 	SetResponseDelay(ODEPar::CalcDelayTime(recorder, 1.0, 2));
 
 	// Calculate AUC

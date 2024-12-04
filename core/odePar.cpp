@@ -172,11 +172,11 @@ double ODEPar::AUC(const double &h, const double &a, const double &b)
 	return ((a + b) * 0.5) * h;
 }
 
-// Calculates the response time and steady state concentration for a given ODE solution
-std::vector<double> ODEPar::CalcSteadyState(const asc::Recorder &solution, const double& startTime, const int &solutionIndex, const bool &reverseOrder)
+// Calculates the response time [0], steady state concentration [1], and time to steady state [2] for a given ODE solution
+std::vector<double> ODEPar::CalcSteadyState(const asc::Recorder &solution, const double& startTime, const int &solutionIndex)
 {
     // First get the steady state and halfway point
-    std::vector<double> result{0.0, 0.0};
+    std::vector<double> result{0.0, 0.0, 0.0};
     double half = 0.0;
     static float epsilon = 0.001f;
     int steadyCount = 0;
@@ -185,85 +185,101 @@ std::vector<double> ODEPar::CalcSteadyState(const asc::Recorder &solution, const
     // Find start index in solution history
     int startIndex = (int)startTime * 10; // TODO: HACK: multiply by 10 because the sampling rate is 0.1
 
+    // Make sure start index isn't out of bounds
+    if (startIndex >= solution.history.size() - 2) {
+        startIndex = solution.history.size() - 2;
+    }
+
+    for (int i = startIndex + 1; i < solution.history.size() - 1; ++i)
+    {
+        // concentrations for current and previous time points
+        double c1 = solution.history[i-1][solutionIndex];
+        double c2 = solution.history[i][solutionIndex];
+        if (std::abs(c2 - c1) < epsilon) {
+            steadyCount++;
+            result[1] = c2; // steady state value
+            if (steadyCount >= maxSteadyCount) {
+                result[2] = solution.history[i][0];
+                break;
+            }
+            continue;
+        }
+        // Reset steadyCount if we're larger than the epsilon
+        steadyCount = 0;
+    }
+    // If there's no steady state, return early
+    if (result[1] <= epsilon) {
+        return result;
+    }
+    // Find the response time
+    half = result[1] * 0.5;
+    // Figure out where the halfway point is
+    for (int i = 1; i < solution.history.size() - 1; ++i)
+    {
+        double t1 = solution.history[i-1][0];
+        double t2 = solution.history[i][0];
+        double c1 = solution.history[i-1][solutionIndex];
+        double c2 = solution.history[i][solutionIndex];
+        if ((c1 < half && c2 >= half) || (c1 > half && c2 <= half)) {
+            result[0] = Interpolate(t1, c1, t2, c2, half); // response time, relative to start time
+            break;
+        }
+    }
+    return result;
+}
+
+// Calculates the second steady state concentration [0], and the response time from the previous steady state to the next one [1] 
+std::vector<double> ODEPar::CalcSecondSteadyState(const asc::Recorder &solution, const double& prevSteadyState, const double& prevSteadyStateTime, const int &solutionIndex)
+{
+    std::vector<double> result{0.0, 0.0};
+    double half = 0.0;
+    static float epsilon = 0.001f;
+    int steadyCount = 0;
+    static int maxSteadyCount = 4;
+
+    // Find start index in solution history
+    int startIndex = (int)prevSteadyStateTime * 10 + 1; // TODO: HACK: multiply by 10 because the sampling rate is 0.1
+
     if (startIndex >= solution.history.size()) {
         startIndex = solution.history.size() - 1;
     }
 
-    // If we're looking forwards
-    if (!reverseOrder)
-    {
-        for (int i = startIndex + 1; i < solution.history.size() - 1; ++i)
-        {
-            // concentrations for current and previous time points
-            double c1 = solution.history[i-1][solutionIndex];
-            double c2 = solution.history[i][solutionIndex];
 
-            if (std::abs(c2 - c1) < epsilon) {
-                steadyCount++;
-                result[0] = c2; // steady state value
-
-                if (steadyCount >= maxSteadyCount) {
-                    break;
-                }
-            }
-        }
-
-        // If there's no steady state, return early
-        if (result[0] <= epsilon) {
-            return result;
-        }
-
-        // Find the response time
-        half = result[0] * 0.5;
-
-        // Figure out where the halfway point is
-        for (int i = 1; i < solution.history.size() - 1; ++i)
-        {
-            double t1 = solution.history[i-1][0];
-            double t2 = solution.history[i][0];
-            double c1 = solution.history[i-1][solutionIndex];
-            double c2 = solution.history[i][solutionIndex];
-
-            if ((c1 < half && c2 >= half) || (c1 > half && c2 <= half)) {
-                result[1] = Interpolate(t1, c1, t2, c2, half); // response time
-                break;
-            }
-        }
-
-        return result;
-    }
-
-
-    // if we're working backwards, the for loops are different
-    for (int i = startIndex; i > 0; --i)
+    for (int i = startIndex + 1; i < solution.history.size() - 1; ++i)
     {
         // concentrations for current and previous time points
-        double c1 = solution.history[i][solutionIndex];
-        double c2 = solution.history[i-1][solutionIndex];
-
-        // we want to check when the steady state stops being stable, this is the 
-        // point where the steady state starts (assuming steady state is reached at end of evaluation)
-        if (std::abs(c2 - c1) > epsilon) {
-            result[0] = c1;
-            break;
+        double c1 = solution.history[i-1][solutionIndex];
+        double c2 = solution.history[i][solutionIndex];
+        if (std::abs(c2 - c1) < epsilon) {
+            steadyCount++;
+            result[1] = c2; // steady state value
+            if (steadyCount >= maxSteadyCount) {
+                result[2] = solution.history[i][0];
+                break;
+            }
+            continue;
         }
+        // Reset steadyCount if we're larger than the epsilon
+        steadyCount = 0;
     }
+
     // If there's no steady state, return early
-    if (result[0] <= epsilon) {
+    if (result[0] < 0) {
         return result;
     }
 
-    // Find the response time
-    half = result[0] * 0.5;
+    // Find the response time: taken from difference between old and new steady state
+    half = std::abs(prevSteadyState - result[0]) * 0.5;
+
     // Figure out where the halfway point is
-    for (int i = solution.history.size() - 1; i > 1; --i)
+    for (int i = 1; i < solution.history.size() - 1; ++i)
     {
-        double t1 = solution.history[i][0];
-        double t2 = solution.history[i-1][0];
-        double c1 = solution.history[i][solutionIndex];
-        double c2 = solution.history[i-1][solutionIndex];
+        double t1 = solution.history[i-1][0];
+        double t2 = solution.history[i][0];
+        double c1 = solution.history[i-1][solutionIndex];
+        double c2 = solution.history[i][solutionIndex];
         if ((c1 < half && c2 >= half) || (c1 > half && c2 <= half)) {
-            result[1] = Interpolate(t1, c1, t2, c2, half);
+            result[1] = Interpolate(t1, c1, t2, c2, half); // response time, relative to previous steady state
             break;
         }
     }
@@ -274,11 +290,11 @@ std::vector<double> ODEPar::CalcSteadyState(const asc::Recorder &solution, const
 double ODEPar::CalcDelayTime(const asc::Recorder &solution, const double &startTime, const int &solutionIndex)
 {
     double result = 0.0;
-    static float epsilon = 0.001f;
+    float epsilon = 0.001f;
 
-    int startIndex = (int)startTime * 10; // TODO: HACK: multiply by 10 because the sampling rate is 0.1
+    int startIndex = (int)startTime * 10 + 1; // TODO: HACK: multiply by 10 because the sampling rate is 0.1
 
-    if (startIndex >= solution.history.size()) {
+    if (startIndex >= solution.history.size() - 1) {
         startIndex = solution.history.size() - 1;
     }
 
@@ -288,8 +304,9 @@ double ODEPar::CalcDelayTime(const asc::Recorder &solution, const double &startT
         double c1 = solution.history[i-1][solutionIndex];
         double c2 = solution.history[i][solutionIndex];
 
-        if (std::abs(c2 - c1) < epsilon) {
-            result = t;
+        // If the difference in concentration is greater than the epsilon, we've started moving and the delay is over
+        if (std::abs(c2 - c1) > epsilon) {
+            result = t - startTime; // Offset by startTime
             break;
         }
     }
@@ -297,7 +314,7 @@ double ODEPar::CalcDelayTime(const asc::Recorder &solution, const double &startT
     return result;
 }
 
-// Maximum expression and the time at which it is reached
+// Maximum expression [0] and the time at which it is reached [1]
 std::vector<double> ODEPar::CalcMaxExpression(const asc::Recorder &solution, const int &solutionIndex)
 {
     std::vector<double> result {0.0, 0.0};

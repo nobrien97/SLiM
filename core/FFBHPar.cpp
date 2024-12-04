@@ -81,7 +81,8 @@ std::vector<double> FFBHPar::SolveODE()
 
     // Calculate traits
     std::vector<double> maxExp = ODEPar::CalcMaxExpression(recorder, 4);
-    std::vector<double> secondSteadyState = ODEPar::CalcSteadyState(recorder, recorder.history.size() - 1, 4, true);
+    std::vector<double> secondSteadyState = ODEPar::CalcSecondSteadyState(recorder, maxExp[0], 6.0, 4); // Time 6 is when Xstop
+    
 
     SetMaxExpression(maxExp[0]);
     SetTimeToMaxExpression(maxExp[1]);
