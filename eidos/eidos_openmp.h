@@ -501,6 +501,8 @@ private:
 #define EIDOS_OMPMIN_SET_SPATIAL_POS_2_2D	0
 #define EIDOS_OMPMIN_SET_SPATIAL_POS_2_3D	0
 #define EIDOS_OMPMIN_SPATIAL_MAP_VALUE		0
+#define EIDOS_OMPMIN_SET_TRAITS				0
+
 
 // Spatial queries
 #define EIDOS_OMPMIN_CLIPPEDINTEGRAL_1S		0
@@ -640,6 +642,8 @@ extern int gEidos_OMP_threads_SET_SPATIAL_POS_2_1D;
 extern int gEidos_OMP_threads_SET_SPATIAL_POS_2_2D;
 extern int gEidos_OMP_threads_SET_SPATIAL_POS_2_3D;
 extern int gEidos_OMP_threads_SPATIAL_MAP_VALUE;
+extern int gEidos_OMP_threads_SET_TRAITS;
+
 
 // Spatial queries; benchmark sections D and S
 extern int gEidos_OMP_threads_CLIPPEDINTEGRAL_1S;

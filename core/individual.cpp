@@ -760,6 +760,11 @@ EidosValue_SP Individual::GetProperty(EidosGlobalStringID p_property_id)
 						
 			return EidosValue_SP(vec);
 		}
+		case gID_traits:
+		{
+			return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float({trait1_value_, trait2_value_, trait3_value_, trait4_value_}));
+		}
+
 		case gID_migrant:			// ACCELERATED
 		{
 			return (migrant_ ? gStaticEidosValue_LogicalT : gStaticEidosValue_LogicalF);
@@ -1035,6 +1040,26 @@ EidosValue *Individual::GetProperty_Accelerated_phenotype4(EidosObject **p_value
 	
 	return float_result;
 }
+
+EidosValue *Individual::GetProperty_Accelerated_traits(EidosObject **p_values, size_t p_values_size)
+{
+	EidosValue_Float *float_result = (new (gEidosValuePool->AllocateChunk()) EidosValue_Float())->resize_no_initialize(p_values_size * 4);
+	
+	for (size_t ind_index = 0; ind_index < p_values_size; ++ind_index)
+	{
+		Individual *value = (Individual *)(p_values[ind_index]);
+		double phenotype_value = value->trait1_value_;
+		
+		int offset = ind_index * 4;
+		float_result->set_float_no_check(value->trait1_value_, offset + 0);
+		float_result->set_float_no_check(value->trait2_value_, offset + 1);
+		float_result->set_float_no_check(value->trait3_value_, offset + 2);
+		float_result->set_float_no_check(value->trait4_value_, offset + 3);
+	}
+	
+	return float_result;
+}
+
 
 
 EidosValue *Individual::GetProperty_Accelerated_migrant(EidosObject **p_values, size_t p_values_size)
@@ -2354,7 +2379,7 @@ const std::vector<EidosPropertySignature_CSP> *Individual_Class::Properties(void
 		properties->emplace_back((EidosPropertySignature *)(new EidosPropertySignature(gStr_tag,					false,	kEidosValueMaskInt | kEidosValueMaskSingleton))->DeclareAcceleratedGet(Individual::GetProperty_Accelerated_tag)->DeclareAcceleratedSet(Individual::SetProperty_Accelerated_tag));
 		properties->emplace_back((EidosPropertySignature *)(new EidosPropertySignature(gStr_tagF,					false,	kEidosValueMaskFloat | kEidosValueMaskSingleton))->DeclareAcceleratedGet(Individual::GetProperty_Accelerated_tagF)->DeclareAcceleratedSet(Individual::SetProperty_Accelerated_tagF));
 		properties->emplace_back((EidosPropertySignature *)(new EidosPropertySignature(gStr_phenotype,				false,	kEidosValueMaskFloat | kEidosValueMaskSingleton))->DeclareAcceleratedGet(Individual::GetProperty_Accelerated_phenotype)->DeclareAcceleratedSet(Individual::SetProperty_Accelerated_phenotype));
-		properties->emplace_back((EidosPropertySignature *)(new EidosPropertySignature(gStr_phenotype4,				false,	kEidosValueMaskFloat | kEidosValueMaskSingleton))->DeclareAcceleratedGet(Individual::GetProperty_Accelerated_phenotype4)->DeclareAcceleratedSet(Individual::SetProperty_Accelerated_phenotype4));
+		properties->emplace_back((EidosPropertySignature *)(new EidosPropertySignature(gStr_traits,					true,	kEidosValueMaskFloat))->DeclareAcceleratedGet(Individual::GetProperty_Accelerated_traits));		
 		properties->emplace_back((EidosPropertySignature *)(new EidosPropertySignature(gStr_ODEPars,				true,	kEidosValueMaskFloat)));
 		properties->emplace_back((EidosPropertySignature *)(new EidosPropertySignature(gStr_tagL0,					false,	kEidosValueMaskLogical | kEidosValueMaskSingleton))->DeclareAcceleratedGet(Individual::GetProperty_Accelerated_tagL0)->DeclareAcceleratedSet(Individual::SetProperty_Accelerated_tagL0));
 		properties->emplace_back((EidosPropertySignature *)(new EidosPropertySignature(gStr_tagL1,					false,	kEidosValueMaskLogical | kEidosValueMaskSingleton))->DeclareAcceleratedGet(Individual::GetProperty_Accelerated_tagL1)->DeclareAcceleratedSet(Individual::SetProperty_Accelerated_tagL1));
@@ -2403,6 +2428,7 @@ const std::vector<EidosMethodSignature_CSP> *Individual_Class::Methods(void) con
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_sharedParentCount, kEidosValueMaskInt))->AddObject("individuals", gSLiM_Individual_Class));
 		methods->emplace_back(((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_sumOfMutationsOfType, kEidosValueMaskFloat | kEidosValueMaskSingleton))->AddIntObject_S("mutType", gSLiM_MutationType_Class))->DeclareAcceleratedImp(Individual::ExecuteMethod_Accelerated_sumOfMutationsOfType));
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_uniqueMutationsOfType, kEidosValueMaskObject, gSLiM_Mutation_Class))->AddIntObject_S("mutType", gSLiM_MutationType_Class));
+		methods->emplace_back((EidosClassMethodSignature *)(new EidosClassMethodSignature(gStr_setTraitValues, kEidosValueMaskVOID))->AddFloat("traitValues")->AddInt_S("numTraits"));
 		
 		std::sort(methods->begin(), methods->end(), CompareEidosCallSignatures);
 	}
@@ -2415,6 +2441,8 @@ EidosValue_SP Individual_Class::ExecuteClassMethod(EidosGlobalStringID p_method_
 	switch (p_method_id)
 	{
 		case gID_setSpatialPosition:	return ExecuteMethod_setSpatialPosition(p_method_id, p_target, p_arguments, p_interpreter);
+		case gID_setTraitValues:		return ExecuteMethod_setTraitValues(p_method_id, p_target, p_arguments, p_interpreter);				
+
 		default:						return EidosDictionaryUnretained_Class::ExecuteClassMethod(p_method_id, p_target, p_arguments, p_interpreter);
 	}
 }
@@ -2614,6 +2642,86 @@ EidosValue_SP Individual_Class::ExecuteMethod_setSpatialPosition(EidosGlobalStri
 	return gStaticEidosValueVOID;
 }			
 
+//	*********************	– (void)setTraitValues(float traitValues, int$ numTraits)
+//
+EidosValue_SP Individual_Class::ExecuteMethod_setTraitValues(EidosGlobalStringID p_method_id, EidosValue_Object *p_target, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter) const
+{
+#pragma unused (p_method_id, p_arguments, p_interpreter)
+	EidosValue *trait_value = p_arguments[0].get();
+	EidosValue *num_traits_value = p_arguments[1].get();
+	int num_traits = num_traits_value->IntAtIndex_NOCAST(0, nullptr);
+	int value_count = trait_value->Count();
+	int inds_count = p_target->Count();
+	
+	if ((value_count % num_traits != 0))
+	{
+		EIDOS_TERMINATION << "ERROR (Individual_Class::ExecuteMethod_setTraitValues): traits must be a multiple of numTraits." << EidosTerminate();
+	}
+	
+	// One trait value set is being set across all targets
+	if (inds_count >= 1 && value_count == num_traits)
+	{
+		// Vector target case, one point
+		Individual * const *targets = (Individual * const *)(p_target->ObjectData());
+		
+		std::vector<double> traits(num_traits);
+		for (int i = 0; i < num_traits; ++i)
+		{
+			traits[i] = trait_value->FloatAtIndex_NOCAST(i, nullptr);
+		}
+				
+		EIDOS_THREAD_COUNT(gEidos_OMP_threads_SET_TRAITS);
+#pragma omp parallel for simd schedule(simd:static) default(none) shared(target_size) firstprivate(targets, trait1, trait2, trait3, trait4) if(target_size >= EIDOS_OMPMIN_SET_TRAITS) num_threads(thread_count)
+		for (int target_index = 0; target_index < inds_count; ++target_index)
+		{
+			Individual *target = targets[target_index];
+			std::vector<double*> ind_traits{&(target->trait1_value_), &(target->trait2_value_), &(target->trait3_value_), &(target->trait4_value_)};
+			for (int j =0 ; j < num_traits; ++j)
+			{
+				*ind_traits[j] = traits[j];
+			}
+		}
+	} 
+	// Otherwise vector case, we want the most
+	else if (value_count == inds_count * num_traits)
+	{
+		// Vector target case, one point per target (so the point vector has to be non-singleton too)
+		Individual * const *targets = (Individual * const *)(p_target->ObjectData());
+		const double *positions = trait_value->FloatData();
+		
+#ifdef _OPENMP
+	EIDOS_THREAD_COUNT(gEidos_OMP_threads_SET_TRAITS);
+#pragma omp parallel for schedule(static) default(none) shared(target_size) firstprivate(targets, positions) num_threads(thread_count) // if(EIDOS_OMPMIN_SET_SPATIAL_POS_2_3D) is above
+		for (int target_index = 0; target_index < target_size; ++target_index)
+		{
+			Individual *target = targets[target_index];
+			const double *target_pos = positions + target_index * num_traits;
+			
+			std::vector<double*> ind_traits{&(target->trait1_value_), &(target->trait2_value_), &(target->trait3_value_), &(target->trait4_value_)};
+			for (int j = 0; j < num_traits; ++j)
+			{
+				*ind_traits[j] = target_pos[j];
+			}
+		}		
+#endif
+		for (int target_index = 0; target_index < inds_count; ++target_index)
+		{
+			Individual *target = targets[target_index];
+			std::vector<double*> ind_traits{&(target->trait1_value_), &(target->trait2_value_), &(target->trait3_value_), &(target->trait4_value_)};
+
+			for (int j = 0; j < num_traits; ++j)
+			{
+				*ind_traits[j] = *(positions++);
+			}
+		}
+	}
+	else
+	{
+		EIDOS_TERMINATION << "ERROR (Individual_Class::ExecuteMethod_setTraitValues): Insufficient trait values for individuals." << EidosTerminate();
+	}
+
+	return gStaticEidosValueVOID;
+}			
 
 
 

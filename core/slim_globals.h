@@ -826,6 +826,7 @@ extern const std::string &gStr_tagL3;
 extern const std::string &gStr_tagL4;
 extern const std::string &gStr_phenotype;
 extern const std::string &gStr_phenotype4;
+extern const std::string &gStr_traits;
 extern const std::string &gStr_ODEPars;
 extern const std::string &gStr_migrant;
 extern const std::string &gStr_fitnessScaling;
@@ -895,6 +896,7 @@ extern const std::string &gStr_mutationsOfType;
 extern const std::string &gStr_setSpatialPosition;
 extern const std::string &gStr_sumOfMutationsOfType;
 extern const std::string &gStr_uniqueMutationsOfType;
+extern const std::string &gStr_setTraitValues;
 extern const std::string &gStr_readFromMS;
 extern const std::string &gStr_readFromVCF;
 extern const std::string &gStr_removeMutations;
@@ -1258,6 +1260,7 @@ enum _SLiMGlobalStringID : int {
 	gID_tagL4,
 	gID_phenotype,
 	gID_phenotype4,
+	gID_traits,
 	gID_ODEPars,
 	gID_migrant,
 	gID_fitnessScaling,
@@ -1327,6 +1330,7 @@ enum _SLiMGlobalStringID : int {
 	gID_setSpatialPosition,
 	gID_sumOfMutationsOfType,
 	gID_uniqueMutationsOfType,
+	gID_setTraitValues,
 	gID_readFromMS,
 	gID_readFromVCF,
 	gID_removeMutations,

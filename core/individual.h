@@ -124,6 +124,11 @@ public:
 	double tagF_value_;					// a user-defined tag value of float type
 	double phenotype_value_ = 0.0;		// a user-defined phenotype: float
 	std::vector<double> phenotype4_value_;				// a user-defined phenotype for models with 4 traits
+	double trait1_value_;
+	double trait2_value_;
+	double trait3_value_;
+	double trait4_value_;
+
 	std::unique_ptr<ODEPar> phenoPars = std::make_unique<ODEPar>();	// The parameters feeding the ODE function
 	
 	double fitness_scaling_ = 1.0;		// the fitnessScaling property value
@@ -301,8 +306,7 @@ public:
 	EidosValue_SP ExecuteMethod_sharedParentCount(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter);
 	static EidosValue_SP ExecuteMethod_Accelerated_sumOfMutationsOfType(EidosObject **p_values, size_t p_values_size, EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter);
 	EidosValue_SP ExecuteMethod_uniqueMutationsOfType(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter);
-
-
+	
 	// Accelerated property access; see class EidosObject for comments on this mechanism
 	static EidosValue *GetProperty_Accelerated_index(EidosObject **p_values, size_t p_values_size);
 	static EidosValue *GetProperty_Accelerated_pedigreeID(EidosObject **p_values, size_t p_values_size);
@@ -317,6 +321,7 @@ public:
 	static EidosValue *GetProperty_Accelerated_tagF(EidosObject **p_values, size_t p_values_size);
 	static EidosValue *GetProperty_Accelerated_phenotype(EidosObject **p_values, size_t p_values_size);
 	static EidosValue *GetProperty_Accelerated_phenotype4(EidosObject **p_values, size_t p_values_size);
+	static EidosValue *GetProperty_Accelerated_traits(EidosObject **p_values, size_t p_values_size);
 	static EidosValue *GetProperty_Accelerated_migrant(EidosObject **p_values, size_t p_values_size);
 	static EidosValue *GetProperty_Accelerated_fitnessScaling(EidosObject **p_values, size_t p_values_size);
 	static EidosValue *GetProperty_Accelerated_x(EidosObject **p_values, size_t p_values_size);
@@ -378,6 +383,8 @@ public:
 	
 	virtual EidosValue_SP ExecuteClassMethod(EidosGlobalStringID p_method_id, EidosValue_Object *p_target, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter) const override;
 	EidosValue_SP ExecuteMethod_setSpatialPosition(EidosGlobalStringID p_method_id, EidosValue_Object *p_target, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter) const;
+	EidosValue_SP ExecuteMethod_setTraitValues(EidosGlobalStringID p_method_id, EidosValue_Object *p_target, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter) const;
+
 };
 
 
