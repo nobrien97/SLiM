@@ -228,19 +228,19 @@ std::vector<double> ODEPar::CalcSteadyState(const asc::Recorder &solution, const
     return result;
 }
 
-// Calculates the second steady state concentration [0], and the response time from the previous steady state to the next one [1] 
+// Calculates response time to steady state [0], second steady state [1], time to steady state [2]
 std::vector<double> ODEPar::CalcSecondSteadyState(const asc::Recorder &solution, const double& prevSteadyState, const double& prevSteadyStateTime, const int &solutionIndex)
 {
-    std::vector<double> result{0.0, 0.0};
+    std::vector<double> result{0.0, 0.0, 0.0};
     double half = 0.0;
     static float epsilon = 0.001f;
     int steadyCount = 0;
     static int maxSteadyCount = 4;
 
     // Find start index in solution history
-    int startIndex = (int)prevSteadyStateTime * 10 + 1; // TODO: HACK: multiply by 10 because the sampling rate is 0.1
+    int startIndex = (int)prevSteadyStateTime * 10; // TODO: HACK: multiply by 10 because the sampling rate is 0.1
 
-    if (startIndex >= solution.history.size()) {
+    if (startIndex > solution.history.size() - 1) {
         startIndex = solution.history.size() - 1;
     }
 
@@ -252,8 +252,8 @@ std::vector<double> ODEPar::CalcSecondSteadyState(const asc::Recorder &solution,
         double c2 = solution.history[i][solutionIndex];
         if (std::abs(c2 - c1) < epsilon) {
             steadyCount++;
-            result[1] = c2; // steady state value
             if (steadyCount >= maxSteadyCount) {
+                result[1] = c2; // steady state value
                 result[2] = solution.history[i][0];
                 break;
             }
@@ -263,23 +263,18 @@ std::vector<double> ODEPar::CalcSecondSteadyState(const asc::Recorder &solution,
         steadyCount = 0;
     }
 
-    // If there's no steady state, return early
-    if (result[0] < 0) {
-        return result;
-    }
-
     // Find the response time: taken from difference between old and new steady state
-    half = std::abs(prevSteadyState - result[0]) * 0.5;
+    half = std::abs(prevSteadyState - result[1]) * 0.5;
 
     // Figure out where the halfway point is
-    for (int i = 1; i < solution.history.size() - 1; ++i)
+    for (int i = 1; i < solution.history.size(); ++i)
     {
         double t1 = solution.history[i-1][0];
         double t2 = solution.history[i][0];
         double c1 = solution.history[i-1][solutionIndex];
         double c2 = solution.history[i][solutionIndex];
         if ((c1 < half && c2 >= half) || (c1 > half && c2 <= half)) {
-            result[1] = Interpolate(t1, c1, t2, c2, half); // response time, relative to previous steady state
+            result[0] = Interpolate(t1, c1, t2, c2, half); // response time, relative to previous steady state
             break;
         }
     }

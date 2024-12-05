@@ -86,8 +86,8 @@ std::vector<double> FFBHPar::SolveODE()
 
     SetMaxExpression(maxExp[0]);
     SetTimeToMaxExpression(maxExp[1]);
-    SetSecondSteadyState(secondSteadyState[0]);
-    SetTimeToSecondSteadyState(secondSteadyState[1]);
+    SetSecondSteadyState(secondSteadyState[1]);
+    SetTimeToSecondSteadyState(secondSteadyState[0]);
 
 	// Calculate AUC
 	// double z = 0;
