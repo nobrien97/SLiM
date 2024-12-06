@@ -2429,6 +2429,7 @@ const std::vector<EidosMethodSignature_CSP> *Individual_Class::Methods(void) con
 		methods->emplace_back(((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_sumOfMutationsOfType, kEidosValueMaskFloat | kEidosValueMaskSingleton))->AddIntObject_S("mutType", gSLiM_MutationType_Class))->DeclareAcceleratedImp(Individual::ExecuteMethod_Accelerated_sumOfMutationsOfType));
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_uniqueMutationsOfType, kEidosValueMaskObject, gSLiM_Mutation_Class))->AddIntObject_S("mutType", gSLiM_MutationType_Class));
 		methods->emplace_back((EidosClassMethodSignature *)(new EidosClassMethodSignature(gStr_setTraitValues, kEidosValueMaskVOID))->AddFloat("traitValues")->AddInt_S("numTraits"));
+		methods->emplace_back((EidosClassMethodSignature *)(new EidosClassMethodSignature(gStr_getTraitValues, kEidosValueMaskFloat))->AddInt("traitIndices"));
 		
 		std::sort(methods->begin(), methods->end(), CompareEidosCallSignatures);
 	}
@@ -2441,7 +2442,8 @@ EidosValue_SP Individual_Class::ExecuteClassMethod(EidosGlobalStringID p_method_
 	switch (p_method_id)
 	{
 		case gID_setSpatialPosition:	return ExecuteMethod_setSpatialPosition(p_method_id, p_target, p_arguments, p_interpreter);
-		case gID_setTraitValues:		return ExecuteMethod_setTraitValues(p_method_id, p_target, p_arguments, p_interpreter);				
+		case gID_setTraitValues:		return ExecuteMethod_setTraitValues(p_method_id, p_target, p_arguments, p_interpreter);		
+		case gID_getTraitValues:		return ExecuteMethod_getTraitValues(p_method_id, p_target, p_arguments, p_interpreter);						
 
 		default:						return EidosDictionaryUnretained_Class::ExecuteClassMethod(p_method_id, p_target, p_arguments, p_interpreter);
 	}
@@ -2723,7 +2725,57 @@ EidosValue_SP Individual_Class::ExecuteMethod_setTraitValues(EidosGlobalStringID
 	return gStaticEidosValueVOID;
 }			
 
+//	*********************	– (void)getTraitValues(int traitIndices)
+//
+EidosValue_SP Individual_Class::ExecuteMethod_getTraitValues(EidosGlobalStringID p_method_id, EidosValue_Object *p_target, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter) const
+{
+#pragma unused (p_method_id, p_arguments, p_interpreter)
+	EidosValue *traits_value = p_arguments[0].get();
+	int num_traits = traits_value->Count();
+	int inds_count = p_target->Count();
 
+	std::vector<double> result(inds_count * num_traits);
+
+	
+	if ((num_traits > 4))
+	{
+		EIDOS_TERMINATION << "ERROR (Individual_Class::ExecuteMethod_getTraitValues): only four traits defined for individuals!" << EidosTerminate();
+	}
+
+
+	
+	// Vector target case, one point per target (so the point vector has to be non-singleton too)
+	Individual * const *targets = (Individual * const *)(p_target->ObjectData());
+	const int64_t *positions = traits_value->IntData();
+
+	// Check traits are valid
+	for (size_t i = 0; i < num_traits; ++i)
+	{
+		if (positions[i] > 3)
+		{
+			EIDOS_TERMINATION << "ERROR (Individual_Class::ExecuteMethod_getTraitValues): valid trait indices are 0, 1, 2, and/or 3!" << EidosTerminate();		
+		}
+	}
+	
+
+
+	for (size_t value_index = 0; value_index < inds_count; ++value_index)
+	{
+		Individual *value = targets[value_index];
+		int offset = value_index * num_traits;
+		std::vector<double*> ind_traits{&(value->trait1_value_), &(value->trait2_value_), &(value->trait3_value_), &(value->trait4_value_)};
+		
+		for (size_t trait_index = 0; trait_index < num_traits; ++trait_index)
+		{
+			int trait = positions[trait_index];
+			result[(offset + trait_index)] = *(ind_traits[trait]);
+		}
+	}
+
+
+	return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float{result});
+
+}
 
 
 

@@ -897,6 +897,7 @@ extern const std::string &gStr_setSpatialPosition;
 extern const std::string &gStr_sumOfMutationsOfType;
 extern const std::string &gStr_uniqueMutationsOfType;
 extern const std::string &gStr_setTraitValues;
+extern const std::string &gStr_getTraitValues;
 extern const std::string &gStr_readFromMS;
 extern const std::string &gStr_readFromVCF;
 extern const std::string &gStr_removeMutations;
@@ -1331,6 +1332,7 @@ enum _SLiMGlobalStringID : int {
 	gID_sumOfMutationsOfType,
 	gID_uniqueMutationsOfType,
 	gID_setTraitValues,
+	gID_getTraitValues,
 	gID_readFromMS,
 	gID_readFromVCF,
 	gID_removeMutations,
