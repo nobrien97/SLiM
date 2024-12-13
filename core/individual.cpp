@@ -2430,6 +2430,7 @@ const std::vector<EidosMethodSignature_CSP> *Individual_Class::Methods(void) con
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_uniqueMutationsOfType, kEidosValueMaskObject, gSLiM_Mutation_Class))->AddIntObject_S("mutType", gSLiM_MutationType_Class));
 		methods->emplace_back((EidosClassMethodSignature *)(new EidosClassMethodSignature(gStr_setTraitValues, kEidosValueMaskVOID))->AddFloat("traitValues")->AddInt_S("numTraits"));
 		methods->emplace_back((EidosClassMethodSignature *)(new EidosClassMethodSignature(gStr_getTraitValues, kEidosValueMaskFloat))->AddInt("traitIndices"));
+		methods->emplace_back((EidosClassMethodSignature *)(new EidosClassMethodSignature(gStr_getDistanceFromOptimum, kEidosValueMaskFloat))->AddFloat("optimumValues"));
 		
 		std::sort(methods->begin(), methods->end(), CompareEidosCallSignatures);
 	}
@@ -2441,9 +2442,10 @@ EidosValue_SP Individual_Class::ExecuteClassMethod(EidosGlobalStringID p_method_
 {
 	switch (p_method_id)
 	{
-		case gID_setSpatialPosition:	return ExecuteMethod_setSpatialPosition(p_method_id, p_target, p_arguments, p_interpreter);
-		case gID_setTraitValues:		return ExecuteMethod_setTraitValues(p_method_id, p_target, p_arguments, p_interpreter);		
-		case gID_getTraitValues:		return ExecuteMethod_getTraitValues(p_method_id, p_target, p_arguments, p_interpreter);						
+		case gID_setSpatialPosition:		return ExecuteMethod_setSpatialPosition(p_method_id, p_target, p_arguments, p_interpreter);
+		case gID_setTraitValues:			return ExecuteMethod_setTraitValues(p_method_id, p_target, p_arguments, p_interpreter);		
+		case gID_getTraitValues:			return ExecuteMethod_getTraitValues(p_method_id, p_target, p_arguments, p_interpreter);
+		case gID_getDistanceFromOptimum:	return ExecuteMethod_getDistanceFromOptimum(p_method_id, p_target, p_arguments, p_interpreter);				
 
 		default:						return EidosDictionaryUnretained_Class::ExecuteClassMethod(p_method_id, p_target, p_arguments, p_interpreter);
 	}
@@ -2777,6 +2779,46 @@ EidosValue_SP Individual_Class::ExecuteMethod_getTraitValues(EidosGlobalStringID
 
 }
 
+//	*********************	– (float)getDistanceFromOptimum(float optimumValues)
+//
+EidosValue_SP Individual_Class::ExecuteMethod_getDistanceFromOptimum(EidosGlobalStringID p_method_id, EidosValue_Object *p_target, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter) const
+{
+#pragma unused (p_method_id, p_arguments, p_interpreter)
+	EidosValue *optimum_value = p_arguments[0].get();
+	int num_traits = optimum_value->Count();
+	int inds_count = p_target->Count();
+	
+	const double* optimum = optimum_value->FloatData();
+
+	std::vector<double> result(inds_count);
+
+	
+	if ((num_traits > 4))
+	{
+		EIDOS_TERMINATION << "ERROR (Individual_Class::ExecuteMethod_getDistanceFromOptimum): only four traits defined for individuals!" << EidosTerminate();
+	}
+
+	// Vector target case, one point per target (so the point vector has to be non-singleton too)
+	Individual * const *targets = (Individual * const *)(p_target->ObjectData());
+	
+	// For each individual, get their distance from the optimum
+	for (size_t value_index = 0; value_index < inds_count; ++value_index)
+	{
+		Individual *value = targets[value_index];
+		std::vector<double*> ind_traits{&(value->trait1_value_), &(value->trait2_value_), &(value->trait3_value_), &(value->trait4_value_)};
+		double ind_result = 0.0;
+
+		for (size_t trait_index = 0; trait_index < num_traits; ++trait_index)
+		{
+			ind_result += std::pow(*(ind_traits[trait_index]) - optimum[trait_index], 2.0);
+		}
+
+		result[value_index] = std::sqrt(ind_result);
+	}
+
+	return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float{result});
+
+}
 
 
 

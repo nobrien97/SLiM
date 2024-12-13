@@ -1305,6 +1305,7 @@ const std::string &gStr_sumOfMutationsOfType = EidosRegisteredString("sumOfMutat
 const std::string &gStr_uniqueMutationsOfType = EidosRegisteredString("uniqueMutationsOfType", gID_uniqueMutationsOfType);
 const std::string &gStr_setTraitValues = EidosRegisteredString("setTraitValues", gID_setTraitValues);
 const std::string &gStr_getTraitValues = EidosRegisteredString("getTraitValues", gID_getTraitValues);
+const std::string &gStr_getDistanceFromOptimum = EidosRegisteredString("getDistanceFromOptimum", gID_getDistanceFromOptimum);
 const std::string &gStr_readFromMS = EidosRegisteredString("readFromMS", gID_readFromMS);
 const std::string &gStr_readFromVCF = EidosRegisteredString("readFromVCF", gID_readFromVCF);
 const std::string &gStr_removeMutations = EidosRegisteredString("removeMutations", gID_removeMutations);
