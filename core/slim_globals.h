@@ -44,7 +44,7 @@ class SLiMEidosBlock;
 
 
 // SLiM version: see also Info.plist and QtSLiM.pro
-#define SLIM_VERSION_STRING	("4.3 OB Lab")
+#define SLIM_VERSION_STRING	(("4.3 OB Lab; Built: " __DATE__ " " __TIME__))
 #define SLIM_VERSION_FLOAT	(4.3)
 
 
