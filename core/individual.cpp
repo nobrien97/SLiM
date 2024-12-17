@@ -2787,6 +2787,7 @@ EidosValue_SP Individual_Class::ExecuteMethod_getDistanceFromOptimum(EidosGlobal
 	EidosValue *optimum_value = p_arguments[0].get();
 	EidosValue *selection_value = p_arguments[1].get();
 	int num_traits = optimum_value->Count();
+	int num_selStrengths = selection_value->Count();
 	int inds_count = p_target->Count();
 	
 	const double* optimum = optimum_value->FloatData();
@@ -2794,7 +2795,7 @@ EidosValue_SP Individual_Class::ExecuteMethod_getDistanceFromOptimum(EidosGlobal
 
 	std::vector<double> result(inds_count);
 
-	if ((num_traits != selection_value->Count()))
+	if ((num_traits != num_selStrengths))
 	{
 		EIDOS_TERMINATION << "ERROR (Individual_Class::ExecuteMethod_getDistanceFromOptimum): There must be a selection strength for each trait!" << EidosTerminate();
 	}
