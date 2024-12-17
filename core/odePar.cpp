@@ -5,6 +5,8 @@
 #include "FFLI1Par.h"
 #include "FFBHPar.h"
 
+#define MAX_EXP 10000
+#define MAX_TIME 10.0
 
 std::unique_ptr<ODEPar> ODEPar::MakeODEPtr(motif_enum motifType)
 {
@@ -207,6 +209,18 @@ std::vector<double> ODEPar::CalcSteadyState(const asc::Recorder &solution, const
         // Reset steadyCount if we're larger than the epsilon
         steadyCount = 0;
     }
+
+    // Check that the result is valid
+    if (std::isnan(result[2]) || result[2] > MAX_TIME) 
+    {
+        result[2] = 0.0;
+    }
+
+    if (std::isnan(result[1]) || result[1] > MAX_EXP) 
+    {
+        result[1] = 10000; // HACK: Big number, but not so big we run into floating point issues
+    }
+
     // If there's no steady state, return early
     if (result[1] <= epsilon) {
         return result;
@@ -225,6 +239,12 @@ std::vector<double> ODEPar::CalcSteadyState(const asc::Recorder &solution, const
             break;
         }
     }
+
+    if (std::isnan(result[0]) || result[0] > MAX_TIME) 
+    {
+        result[0] = 0.0;
+    }
+
     return result;
 }
 
@@ -263,6 +283,18 @@ std::vector<double> ODEPar::CalcSecondSteadyState(const asc::Recorder &solution,
         steadyCount = 0;
     }
 
+        // Check that the result is valid
+    if (std::isnan(result[2]) || std::isinf(result[2])) 
+    {
+        result[2] = 0.0;
+    }
+
+    if (std::isnan(result[1]) || result[1] > MAX_EXP) 
+    {
+        result[1] = 10000; // HACK: Big number, but not so big we run into floating point issues
+    }
+
+
     // Find the response time: taken from difference between old and new steady state
     half = std::abs(prevSteadyState - result[1]) * 0.5;
 
@@ -278,6 +310,12 @@ std::vector<double> ODEPar::CalcSecondSteadyState(const asc::Recorder &solution,
             break;
         }
     }
+
+    if (std::isnan(result[0]) || std::isinf(result[0])) 
+    {
+        result[0] = 0.0;
+    }
+
     return result;
 }
 
@@ -323,6 +361,20 @@ std::vector<double> ODEPar::CalcMaxExpression(const asc::Recorder &solution, con
             curTime = solution.history[i][0];
         }
     }
+
+
+    // Check values
+    if (std::isnan(curMax) || curMax > MAX_EXP) 
+    {
+        curMax = 10000; // HACK: Big number, but not so big we run into floating point issues
+    }
+
+
+    if (std::isnan(curTime) || curTime > MAX_TIME) 
+    {
+        curTime = 0.0;
+    }
+
 
     result[0] = curMax;
     result[1] = curTime;
