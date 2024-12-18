@@ -29,8 +29,13 @@ std::vector<double> FFBHPar::SolveODE()
     // Starting X
 	int X = 0;
 
+    // Precompute K^n parameters (reduce pow calls)
+    const double KYn = pow(KY(), n());
+    const double KZXn = pow(KZX(), n());
+    const double KXZn = pow(KXZ(), n());
+
     // FFBH system
-	auto FFBHDerivative = [this, &Xstart, &Xstop, &X](const asc::state_t &curState, asc::state_t &nextState, double t)
+	auto FFBHDerivative = [this, &Xstart, &Xstop, &X, &KYn, &KZXn, &KXZn](const asc::state_t &curState, asc::state_t &nextState, double t)
 	{
         // # Manually set X
         //     X <- XMult * (t > Xstart && t <= Xstop)
@@ -51,16 +56,16 @@ std::vector<double> FFBHPar::SolveODE()
         double baseline = std::max(base() - 1.0, 0.0); // Adjust baseline so it is relative to the default value, 0 (instead of 1)
 
         // Hill function/feedback component of X
-        nextState[0] = ( pow(curState[2], n()) / (pow(KZX(), n()) + pow(curState[2], n())) ) - aX() * curState[0];
+        nextState[0] = ( pow(curState[2], n()) / (KZXn + pow(curState[2], n())) ) - aX() * curState[0];
         
         // Update X with the Hill function X component
         Xnew += nextState[0];
 
         // Y
-		nextState[1] = bY() * pow(Xnew, n()) / ( pow(KY(), n()) + pow(Xnew, n()) ) - aY() * curState[1];
+		nextState[1] = bY() * pow(Xnew, n()) / ( KYn + pow(Xnew, n()) ) - aY() * curState[1];
 		
         // Z
-        nextState[2] = baseline + bZ() * pow(Xnew * curState[1], n()) / ( ( pow(KXZ(), n()) + pow(Xnew, n()) ) * ( pow(KY(), n()) + pow(curState[1], n()) ) ) - aZ() * curState[2];    
+        nextState[2] = baseline + bZ() * pow(Xnew * curState[1], n()) / ( ( KXZn + pow(Xnew, n()) ) * ( KYn + pow(curState[1], n()) ) ) - aZ() * curState[2];    
     };
 
 	// Set up the initial state
