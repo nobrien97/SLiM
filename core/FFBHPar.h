@@ -48,7 +48,7 @@ public:
     const double& TimeToSecondSteadyState() const { return _solutionTraits[2]; }
     const double& SecondSteadyState() const { return _solutionTraits[3]; }
 
-    const inline void SetTimeToMaxExpression(double value) { _solutionTraits[0] = value; }
+    const inline void SetTimeToHalfMaxExpression(double value) { _solutionTraits[0] = value; }
     const inline void SetMaxExpression(double value) { _solutionTraits[1] = value; }
     const inline void SetTimeToSecondSteadyState(double value) { _solutionTraits[2] = value; }
     const inline void SetSecondSteadyState(double value) { _solutionTraits[3] = value; }

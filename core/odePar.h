@@ -53,15 +53,20 @@ public:
 
     static double AUC(const double &h, const double &a, const double &b);
 
-    static std::vector<double> CalcSteadyState(const asc::Recorder &solution, const double& startTime, const int &solutionIndex = 0);
+    static std::vector<double> CalcSteadyState(const asc::Recorder &solution, const double& startTime, const double& stopTime, const int &solutionIndex = 0);
 
-    static double CalcDelayTime(const asc::Recorder &solution, const double &startTime, const int &solutionIndex);
+    static double CalcDelayTime(const asc::Recorder &solution, const double &startTime, const double &stopTime, const int &solutionIndex, const double& aZ = 1.0, const double& baseline = 0.0);
 
-    static std::vector<double> CalcMaxExpression(const asc::Recorder &solution, const int &solutionIndex);
+    static std::vector<double> CalcMaxExpression(const asc::Recorder &solution, const float& startTime, const int &solutionIndex);
 
     static double CalcTimeAboveThreshold(const asc::Recorder &solution, const double &threshold, const int &solutionIndex);
 
     static std::vector<double> CalcSecondSteadyState(const asc::Recorder &solution, const double& prevSteadyState, const double& prevSteadyStateTime, const int &solutionIndex);
+
+    // Function for simple baseline regulation when t < Xstart
+    static inline double SimpleRegulation(const float& t, const float& aZ, const float &baseline) {
+        return (baseline / aZ) * (1 - std::exp(-aZ*t));
+    };
 
     static inline double Interpolate(double x1, double y1, double x2, double y2, double y_target) {
         return x1 + (y_target - y1) * (x2 - x1) / (y2 - y1);

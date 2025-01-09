@@ -53,7 +53,7 @@ std::vector<double> NARPar::SolveODE()
 	}
 
 	// Calculate traits
-	std::vector<double> steadyState = ODEPar::CalcSteadyState(recorder, 1.0, 2);
+	std::vector<double> steadyState = ODEPar::CalcSteadyState(recorder, Xstart, Xstop, 2);
 	SetSteadyState(steadyState[1]);
 	SetResponseTime(steadyState[0]);
 

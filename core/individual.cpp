@@ -2808,7 +2808,7 @@ EidosValue_SP Individual_Class::ExecuteMethod_getDistanceFromOptimum(EidosGlobal
 	// Vector target case, one point per target (so the point vector has to be non-singleton too)
 	Individual * const *targets = (Individual * const *)(p_target->ObjectData());
 	
-	// For each individual, get their distance from the optimum
+	// For each individual, get their Euclidean distance from the optimum
 	for (size_t value_index = 0; value_index < inds_count; ++value_index)
 	{
 		Individual *value = targets[value_index];

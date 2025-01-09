@@ -39,11 +39,11 @@ public:
     double& XMult() { return _pars[8]; }
 
     // Traits
-    const double& TimeToMaxExpression() const { return _solutionTraits[0]; }
+    const double& TimeToHalfMaxExpression() const { return _solutionTraits[0]; }
     const double& MaxExpression() const {return _solutionTraits[1]; }
     const double& TimeAboveHalfMaxExpression() const { return _solutionTraits[2]; }
 
-    const inline void SetTimeToMaxExpression(double value) { _solutionTraits[0] = value; }
+    const inline void SetTimeToHalfMaxExpression(double value) { _solutionTraits[0] = value; }
     const inline void SetMaxExpression(double value) { _solutionTraits[1] = value; }
     const inline void SetTimeAboveHalfMaxExpression(double value) { _solutionTraits[2] = value; }
 

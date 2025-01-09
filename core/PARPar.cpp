@@ -53,10 +53,13 @@ std::vector<double> PARPar::SolveODE()
 	}
 
 	// Calculate traits
-	std::vector<double> steadyState = ODEPar::CalcSteadyState(recorder, 1.0, 2);
+	std::vector<double> steadyState = ODEPar::CalcSteadyState(recorder, Xstart, Xstop, 2);
 	SetSteadyState(steadyState[1]);
-	SetResponseTime(steadyState[0]);
-	SetResponseDelay(ODEPar::CalcDelayTime(recorder, 1.0, 2));
+	SetResponseTime(steadyState[0]);	
+
+	// NOTE: Cut response delay since it requires very specific molecular components
+	// For the response delay, need to calculate the dt coming from the environmental input X
+	//SetResponseDelay(ODEPar::CalcDelayTime(recorder, Xstart, Xstop, 2, aZ(), base()));
 
 	// Calculate AUC
 	// double z = 0;
@@ -70,5 +73,5 @@ std::vector<double> PARPar::SolveODE()
 	// z = (z >= 0) ? z : 0.0;
     // result[0] = z;
     // setAUC(z);
-    return {ResponseTime(), ResponseDelay(), SteadyState()};
+    return {ResponseTime(), SteadyState()};
 }

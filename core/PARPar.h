@@ -13,7 +13,7 @@ public:
     std::vector<double> SolveODE() override;
 
     const static int numPars = 7;
-    const static int numTraits = 3;
+    const static int numTraits = 2;
  
     // Molecular components
     const double& AUC() const { return _AUC; }
@@ -36,11 +36,11 @@ public:
 
     // Traits
     const double& ResponseTime() const { return _solutionTraits[0]; }
-    const double& ResponseDelay() const {return _solutionTraits[1]; }
+    //const double& ResponseDelay() const {return _solutionTraits[1]; } // NOTE: ResponseDelay requires very specific conditions to arise, secondary function, removing for now
     const double& SteadyState() const { return _solutionTraits[2]; }
 
     const inline void SetResponseTime(double value) { _solutionTraits[0] = value; }
-    const inline void SetResponseDelay(double value) { _solutionTraits[1] = value; }
+    //const inline void SetResponseDelay(double value) { _solutionTraits[1] = value; }
     const inline void SetSteadyState(double value) { _solutionTraits[2] = value; }
 
 };
