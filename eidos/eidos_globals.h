@@ -46,6 +46,14 @@
 
 #include "eidos_openmp.h"
 #include "eidos_intrusive_ptr.h"
+#include "eidos_plugin.h"
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <dlfcn.h>
+#endif
+#include <memory>
+
 
 class EidosScript;
 class EidosToken;
@@ -77,6 +85,32 @@ void Eidos_WarmUpOpenMP(std::ostream *outstream, bool changed_max_thread_count, 
 #endif
 
 void Eidos_WarmUp(void);
+
+struct LibClose
+{
+    void operator()(void* handle) 
+    {
+#ifdef _WIN32
+        FreeLibrary((HINSTANCE)handle);
+        return;
+#endif
+        dlclose(handle);
+    }
+};
+
+template <class T>
+using lib_ptr = std::unique_ptr<T, LibClose>;
+
+int (*ODE_fn_ptr)(double, const double*, double*, void*);
+int (*jac)(double, const double*, double*, double*, void*);
+
+using ODE_func_t = std::add_pointer_t<int(double, const double*, double*, void*)>;
+
+lib_ptr<void> LoadDynLib(std::string path);
+
+template<typename T>
+T* LoadSymFromLib(lib_ptr lib, std::string sym);
+
 
 // This can be called at startup, after Eidos_WarmUp(), to define global constants from the command line
 void Eidos_DefineConstantsFromCommandLine(const std::vector<std::string> &p_constants);

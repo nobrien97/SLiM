@@ -84,6 +84,15 @@
 #define gettimeofday gnulib::gettimeofday
 #endif
 
+// Handle loading libraries
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <dlfcn.h>
+#endif
+
+#include "eidos_plugin.h"
+
 #ifdef _OPENMP
 #include <stdlib.h>
 #endif
@@ -1269,6 +1278,58 @@ void Eidos_WarmUp(void)
 #endif
 	}
 }
+
+// Loads a dynamic library from a path
+lib_ptr<void> LoadDynLib(std::string path)
+{
+#if _WIN32
+	lib_ptr<void> library(LoadLibrary(path->const_pointer));
+
+	if (!library) 
+	{
+		std::cout << "Could not load library at " << path << std::endl;
+		return nullptr;
+	}
+
+	return library;
+#endif
+	lib_ptr<void> library(dlopen(path.c_str(), RTLD_LAZY));
+
+	if (library == NULL)
+	{
+		std::cout << "Could not load library at " << path << std::endl;
+		return nullptr;
+	}
+
+	return library;
+}
+
+// Loads a symbol from a loaded library with T being a typedef'd function pointer signature
+template<typename T>
+T* LoadSymFromLib(lib_ptr<void> lib, std::string sym)
+{
+#if _WIN32
+	T symbol = (T)GetProcAddress((HINSTANCE)lib->get(), sym);
+
+	if (!symbol)
+	{
+		std::cout << "Could not load symbol " << sym << " in library" << std::endl;
+		return nullptr;
+	}
+
+	return &symbol;
+#endif
+	T* symbol = (T*)dlsym(lib->get(), sym);
+
+	if (!symbol)
+	{
+		std::cout << "Could not load symbol " << sym << " in library" << std::endl;
+		return nullptr;
+	}
+
+	return symbol;
+}
+
 
 bool Eidos_GoodSymbolForDefine(std::string &p_symbol_name)
 {
