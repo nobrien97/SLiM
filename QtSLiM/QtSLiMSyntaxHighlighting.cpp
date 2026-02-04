@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 8/4/2019.
-//  Copyright (c) 2019-2024 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2019-2025 Benjamin C. Haller.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -90,6 +90,7 @@ void QtSLiMOutputHighlighter::highlightBlock(const QString &text)
                         setFormat(match.capturedStart(), match.capturedLength(), genomicElementFormat);
                     else if (matchString[0] == 'm')
                         setFormat(match.capturedStart(), match.capturedLength(), mutationTypeFormat);
+					// we don't presently color sX or iX in the output
                 }
             }
         }
@@ -200,7 +201,7 @@ void QtSLiMScriptHighlighter::highlightBlock(__attribute__((__unused__)) const Q
     // set up a new cached script if we don't have one
     if (!script)
     {
-        script = new EidosScript(document()->toPlainText().toUtf8().constData(), -1);
+        script = new EidosScript(document()->toPlainText().toUtf8().constData());
         
         script->Tokenize(true, true);	// make bad tokens as needed, keep nonsignificant tokens
         

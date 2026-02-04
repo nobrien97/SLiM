@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 2/25/17.
-//  Copyright (c) 2017-2024 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2017-2025 Benjamin C. Haller.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -27,6 +27,7 @@
 #include "species.h"
 #include "slim_globals.h"
 #include "sparse_vector.h"
+#include "eidos_simd.h"
 
 #include <utility>
 #include <algorithm>
@@ -216,7 +217,7 @@ void InteractionType::EvaluateSubpopulation(Subpopulation *p_subpop)
 		subpop_data->kd_node_count_EXERTERS_ = 0;
 		
 		// Free the interaction() callbacks that were cached
-		subpop_data->evaluation_interaction_callbacks_.clear();
+		subpop_data->evaluation_interaction_callbacks_.resize(0);
 	}
 	
 	// At this point, positions_ is guaranteed to be nullptr, as are the k-d tree buffers.
@@ -513,7 +514,7 @@ void InteractionType::EvaluateSubpopulation(Subpopulation *p_subpop)
 	// Note that interaction() callbacks are non-species-specific, so we fetch from the Community with species nullptr.
 	// Callbacks used depend upon the exerter subpopulation, so this is snapping the callbacks for subpop as exerters;
 	// the subpopulation of receivers does not influence the choice of which callbacks are used.
-	subpop_data->evaluation_interaction_callbacks_ = community_.ScriptBlocksMatching(community_.Tick(), SLiMEidosBlockType::SLiMEidosInteractionCallback, -1, interaction_type_id_, subpop_id, nullptr);
+	subpop_data->evaluation_interaction_callbacks_ = community_.ScriptBlocksMatching(community_.Tick(), SLiMEidosBlockType::SLiMEidosInteractionCallback, -1, interaction_type_id_, subpop_id, -1, nullptr);
 	
 	// Note that we do not create the k-d tree here.  Non-spatial models will never have a k-d tree; spatial models may or
 	// may not need one, depending upon what methods are called by the client, which may vary cycle by cycle.
@@ -610,7 +611,7 @@ void InteractionType::_InvalidateData(InteractionsData &data)
 	data.kd_root_EXERTERS_ = nullptr;
 	data.kd_node_count_EXERTERS_ = 0;
 	
-	data.evaluation_interaction_callbacks_.clear();
+	data.evaluation_interaction_callbacks_.resize(0);
 }
 
 void InteractionType::Invalidate(void)
@@ -1343,7 +1344,11 @@ double InteractionType::ApplyInteractionCallbacks(Individual *p_receiver, Indivi
 					EidosSymbolTable callback_symbols(EidosSymbolTableType::kContextConstantsTable, &community_.SymbolTable());
 					EidosSymbolTable client_symbols(EidosSymbolTableType::kLocalVariablesTable, &callback_symbols);
 					EidosFunctionMap &function_map = community_.FunctionMap();
-					EidosInterpreter interpreter(interaction_callback->compound_statement_node_, client_symbols, function_map, &community_, SLIM_OUTSTREAM, SLIM_ERRSTREAM);
+					EidosInterpreter interpreter(interaction_callback->compound_statement_node_, client_symbols, function_map, &community_, SLIM_OUTSTREAM, SLIM_ERRSTREAM
+#ifdef SLIMGUI
+						, community_.check_infinite_loops_
+#endif
+						);
 					
 					if (interaction_callback->contains_self_)
 						callback_symbols.InitializeConstantSymbolEntry(interaction_callback->SelfSymbolTableEntry());		// define "self"
@@ -1352,6 +1357,7 @@ double InteractionType::ApplyInteractionCallbacks(Individual *p_receiver, Indivi
 					// We can use that method because we know the lifetime of the symbol table is shorter than that of
 					// the value objects, and we know that the values we are setting here will not change (the objects
 					// referred to by the values may change, but the values themselves will not change).
+					// BCH 11/7/2025: note these symbols are now protected in SLiM_ConfigureContext()
 					if (interaction_callback->contains_distance_)
 					{
 						local_distance.StackAllocated();		// prevent Eidos_intrusive_ptr from trying to delete this
@@ -2841,12 +2847,26 @@ void InteractionType::FillSparseVectorForReceiverStrengths(SparseVector *sv, Ind
 		// Figure out what index in the exerter subpopulation, if any, needs to be excluded so self-interaction is zero
 		slim_popsize_t excluded_index = (exerter_subpop == receiver->subpopulation_) ? receiver->index_ : -1;
 		
-		// We special-case some builds directly to strength values here, for efficiency,
-		// with no callbacks and spatiality "xy".
+		// We special-case Fixed kernel builds directly to strength values here, for efficiency,
+		// with no callbacks and spatiality "xy". Other kernels use the two-pass path below
+		// which enables SIMD optimizations for Exponential and Normal kernels.
+		// ADK 12/16/2025: changed to only use special-case path for Fixed kernel
+		if ((interaction_callbacks.size() == 0) && (spatiality_ == 2) && (if_type_ == SpatialKernelType::kFixed))
+		{
+			sv->SetDataType(SparseVectorDataType::kStrengths);
+			BuildSV_Strengths_f_2(kd_root, receiver_position, excluded_index, sv, 0);
+			sv->Finished();
+			return;
+		}
+
+		// ADK 12/16/2025: The original switch below handled all kernel types in the special-case
+		// single-pass path. Now only Fixed uses the special path above; other kernels fall
+		// through to the two-pass distance-then-transform path, enabling SIMD optimizations.
+#if 0
 		if ((interaction_callbacks.size() == 0) && (spatiality_ == 2))
 		{
 			sv->SetDataType(SparseVectorDataType::kStrengths);
-			
+
 			switch (if_type_)
 			{
 				case SpatialKernelType::kFixed:			BuildSV_Strengths_f_2(kd_root, receiver_position, excluded_index, sv, 0); break;
@@ -2858,11 +2878,12 @@ void InteractionType::FillSparseVectorForReceiverStrengths(SparseVector *sv, Ind
 				default:
 					EIDOS_TERMINATION << "ERROR (InteractionType::FillSparseVectorForReceiverStrengths): (internal error) unoptimized SpatialKernelType value." << EidosTerminate();
 			}
-			
+
 			sv->Finished();
 			return;
 		}
-		
+#endif
+
 		// Set up to build distances first; this is an internal implementation detail, so we require the sparse vector set up for strengths above
 		sv->SetDataType(SparseVectorDataType::kDistances);
 		
@@ -2896,53 +2917,32 @@ void InteractionType::FillSparseVectorForReceiverStrengths(SparseVector *sv, Ind
 			}
 			case SpatialKernelType::kLinear:
 			{
-				for (uint32_t col_iter = 0; col_iter < nnz; ++col_iter)
-				{
-					sv_value_t distance = values[col_iter];
-					
-					values[col_iter] = (sv_value_t)(if_param1_ * (1.0 - distance / max_distance_));
-				}
+				// Use SIMD-optimized kernel: fmax = if_param1_, max_distance = max_distance_
+				Eidos_SIMD::linear_kernel_float32(values, nnz, (float)if_param1_, (float)max_distance_);
 				break;
 			}
 			case SpatialKernelType::kExponential:
 			{
-				for (uint32_t col_iter = 0; col_iter < nnz; ++col_iter)
-				{
-					sv_value_t distance = values[col_iter];
-					
-					values[col_iter] = (sv_value_t)(if_param1_ * exp(-if_param2_ * distance));
-				}
+				// SIMD-accelerated exponential kernel: strength = fmax * exp(-lambda * distance)
+				Eidos_SIMD::exp_kernel_float32(values, nnz, (float)if_param1_, (float)if_param2_);
 				break;
 			}
 			case SpatialKernelType::kNormal:
 			{
-				for (uint32_t col_iter = 0; col_iter < nnz; ++col_iter)
-				{
-					sv_value_t distance = values[col_iter];
-					
-					values[col_iter] = (sv_value_t)(if_param1_ * exp(-(distance * distance) / n_2param2sq_));
-				}
+				// SIMD-accelerated Gaussian kernel: strength = fmax * exp(-d^2 / 2sigma^2)
+				Eidos_SIMD::normal_kernel_float32(values, nnz, (float)if_param1_, (float)n_2param2sq_);
 				break;
 			}
 			case SpatialKernelType::kCauchy:
 			{
-				for (uint32_t col_iter = 0; col_iter < nnz; ++col_iter)
-				{
-					sv_value_t distance = values[col_iter];
-					double temp = distance / if_param2_;
-					
-					values[col_iter] = (sv_value_t)(if_param1_ / (1.0 + temp * temp));
-				}
+				// Use SIMD-optimized kernel: fmax = if_param1_, lambda = if_param2_
+				Eidos_SIMD::cauchy_kernel_float32(values, nnz, (float)if_param1_, (float)if_param2_);
 				break;
 			}
 			case SpatialKernelType::kStudentsT:
 			{
-				for (uint32_t col_iter = 0; col_iter < nnz; ++col_iter)
-				{
-					sv_value_t distance = values[col_iter];
-					
-					values[col_iter] = (sv_value_t)SpatialKernel::tdist(distance, if_param1_, if_param2_, if_param3_);
-				}
+				// Use SIMD-optimized kernel: fmax = if_param1_, nu = if_param2_, tau = if_param3_
+				Eidos_SIMD::tdist_kernel_float32(values, nnz, (float)if_param1_, (float)if_param2_, (float)if_param3_);
 				break;
 			}
 			default:
@@ -3460,7 +3460,7 @@ const EidosClass *InteractionType::Class(void) const
 
 void InteractionType::Print(std::ostream &p_ostream) const
 {
-	p_ostream << Class()->ClassName() << "<i" << interaction_type_id_ << ">";
+	p_ostream << Class()->ClassNameForDisplay() << "<i" << interaction_type_id_ << ">";
 }
 
 EidosValue_SP InteractionType::GetProperty(EidosGlobalStringID p_property_id)
@@ -4147,18 +4147,18 @@ static void DrawByWeights(int draw_count, const double *weights, int n_weights, 
 	// than the GSL; and for large counts the GSL is surely a win.  Trying to figure out exactly where
 	// the crossover is in all cases would be overkill; my testing indicates the performance difference
 	// between the two methods is not really that large anyway.
-	gsl_rng *rng = EIDOS_GSL_RNG(omp_get_thread_num());
-	
 	if (weight_total > 0.0)
 	{
 		if (draw_count > 50)		// the empirically determined crossover point in performance
 		{
 			// Use gsl_ran_discrete() to do the drawing
+			gsl_rng *rng_gsl = EIDOS_GSL_RNG(omp_get_thread_num());
+			
 			gsl_ran_discrete_t *gsl_lookup = gsl_ran_discrete_preproc(n_weights, weights);
 			
 			for (int64_t draw_index = 0; draw_index < draw_count; ++draw_index)
 			{
-				int hit_index = (int)gsl_ran_discrete(rng, gsl_lookup);
+				int hit_index = (int)gsl_ran_discrete(rng_gsl, gsl_lookup);
 				
 				draw_indices.emplace_back(hit_index);
 			}
@@ -4168,9 +4168,11 @@ static void DrawByWeights(int draw_count, const double *weights, int n_weights, 
 		else
 		{
 			// Use linear search to do the drawing
+			EidosRNG_64_bit &rng_64 = EIDOS_64BIT_RNG(omp_get_thread_num());
+			
 			for (int64_t draw_index = 0; draw_index < draw_count; ++draw_index)
 			{
-				double the_rose_in_the_teeth = Eidos_rng_uniform(rng) * weight_total;
+				double the_rose_in_the_teeth = Eidos_rng_uniform_doubleCO(rng_64) * weight_total;
 				double cumulative_weight = 0.0;
 				int hit_index;
 				
@@ -4354,13 +4356,13 @@ EidosValue_SP InteractionType::ExecuteMethod_drawByStrength(EidosGlobalStringID 
 					if (nnz > 0)
 					{
 						std::vector<Individual *> &exerters = exerter_subpop->parent_individuals_;
-						gsl_rng *rng = EIDOS_GSL_RNG(omp_get_thread_num());
+						EidosRNG_32_bit &rng_32 = EIDOS_32BIT_RNG(omp_get_thread_num());
 						
 						result_vec->resize_no_initialize(count);
 						
 						for (int64_t result_index = 0; result_index < count; ++result_index)
 						{
-							int presence_index = Eidos_rng_uniform_int(rng, nnz);	// equal probability for each exerter
+							int presence_index = Eidos_rng_interval_uint32(rng_32, nnz);	// equal probability for each exerter
 							uint32_t exerter_index = columns[presence_index];
 							Individual *chosen_individual = exerters[exerter_index];
 							
@@ -4517,13 +4519,13 @@ EidosValue_SP InteractionType::ExecuteMethod_drawByStrength(EidosGlobalStringID 
 						if (nnz > 0)
 						{
 							std::vector<Individual *> &exerters = exerter_subpop->parent_individuals_;
-							gsl_rng *rng = EIDOS_GSL_RNG(omp_get_thread_num());
+							EidosRNG_32_bit &rng_32 = EIDOS_32BIT_RNG(omp_get_thread_num());
 							
 							result_vec->resize_no_initialize(count);
 							
 							for (int64_t result_index = 0; result_index < count; ++result_index)
 							{
-								int presence_index = Eidos_rng_uniform_int(rng, nnz);	// equal probability for each exerter
+								int presence_index = Eidos_rng_interval_uint32(rng_32, nnz);	// equal probability for each exerter
 								uint32_t exerter_index = columns[presence_index];
 								Individual *chosen_individual = exerters[exerter_index];
 								
@@ -6595,7 +6597,7 @@ _InteractionsData::_InteractionsData(_InteractionsData&& p_source) noexcept
 	kd_node_count_EXERTERS_ = p_source.kd_node_count_EXERTERS_;
 	
 	p_source.evaluated_ = false;
-	p_source.evaluation_interaction_callbacks_.clear();
+	p_source.evaluation_interaction_callbacks_.resize(0);
 	p_source.individual_count_ = 0;
 	p_source.first_male_index_ = 0;
 	p_source.periodic_x_ = false;
@@ -6647,7 +6649,7 @@ _InteractionsData& _InteractionsData::operator=(_InteractionsData&& p_source) no
 		kd_node_count_EXERTERS_ = p_source.kd_node_count_EXERTERS_;
 		
 		p_source.evaluated_ = false;
-		p_source.evaluation_interaction_callbacks_.clear();
+		p_source.evaluation_interaction_callbacks_.resize(0);
 		p_source.individual_count_ = 0;
 		p_source.first_male_index_ = 0;
 		p_source.periodic_x_ = false;
@@ -6707,7 +6709,7 @@ _InteractionsData::~_InteractionsData(void)
 	kd_node_count_EXERTERS_ = 0;
 	
 	// Unnecessary since it's about to be destroyed anyway
-	//evaluation_interaction_callbacks_.clear();
+	//evaluation_interaction_callbacks_.resize(0);
 }
 
 

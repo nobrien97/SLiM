@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 8/30/2020.
-//  Copyright (c) 2020-2024 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2020-2025 Benjamin C. Haller.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -39,8 +39,11 @@ QtSLiMGraphView_AgeDistribution::QtSLiMGraphView_AgeDistribution(QWidget *p_pare
     histogramBinCount_ = 10;        // max age (no age 0 since we display after tick increment); this rescales automatically
     allowBinCountRescale_ = false;
     
-    x0_ = 0;
-    x1_ = histogramBinCount_;
+    original_x0_ = 0;
+    original_x1_ = histogramBinCount_;
+    
+    x0_ = original_x0_;
+    x1_ = original_x1_;
     
     xAxisMin_ = x0_;
     xAxisMax_ = x1_;
@@ -92,7 +95,8 @@ void QtSLiMGraphView_AgeDistribution::subpopulation1PopupChanged(int /* index */
         // Reset our autoscaling x axis
         histogramBinCount_ = 10;
         xAxisMax_ = histogramBinCount_;
-        x1_ = xAxisMax_;               // the same as xAxisMax_, for base plots
+        original_x1_ = xAxisMax_;               // the same as xAxisMax_, for base plots
+        x1_ = original_x1_;
         
         invalidateCachedData();
         update();
@@ -110,11 +114,13 @@ void QtSLiMGraphView_AgeDistribution::controllerRecycled(void)
     // Reset our autoscaling x axis
     histogramBinCount_ = 10;
     xAxisMax_ = histogramBinCount_;
-    x1_ = xAxisMax_;               // the same as xAxisMax_, for base plots
+    original_x1_ = xAxisMax_;               // the same as xAxisMax_, for base plots
+    x1_ = original_x1_;
     
     // Reset our autoscaling y axis
     yAxisMax_ = 1.0;
-    y1_ = yAxisMax_;               // the same as yAxisMax_, for base plots
+    original_y1_ = yAxisMax_;               // the same as yAxisMax_, for base plots
+    y1_ = original_y1_;
     yAxisMajorTickInterval_ = 0.5;
     yAxisMinorTickInterval_ = 0.25;
     
@@ -176,7 +182,8 @@ void QtSLiMGraphView_AgeDistribution::drawGraph(QPainter &painter, QRect interio
         {
             histogramBinCount_ = binCount;
             xAxisMax_ = histogramBinCount_;
-            x1_ = xAxisMax_;               // the same as xAxisMax_, for base plots
+            original_x1_ = xAxisMax_;               // the same as xAxisMax_, for base plots
+            x1_ = original_x1_;
             invalidateCachedData();
         }
         
@@ -192,7 +199,8 @@ void QtSLiMGraphView_AgeDistribution::drawGraph(QPainter &painter, QRect interio
                 ((ceilingFreq < yAxisMax_) && (maxFreq + 0.05 < ceilingFreq)))    // require a margin of error to jump down
         {
             yAxisMax_ = ceilingFreq;
-            y1_ = yAxisMax_;               // the same as yAxisMax_, for base plots
+            original_y1_ = yAxisMax_;               // the same as yAxisMax_, for base plots
+            y1_ = original_y1_;
             yAxisMajorTickInterval_ = ceilingFreq / 2.0;
             yAxisMinorTickInterval_ = ceilingFreq / 4.0;
         }
@@ -277,7 +285,7 @@ double *QtSLiMGraphView_AgeDistribution::ageDistribution(int *binCount, bool tal
     // Find the maximum age and choose the new bin count
     slim_age_t maxAge = 1;
     
-    for (const Individual *individual : subpop1->CurrentIndividuals())
+    for (const Individual *individual : subpop1->parent_individuals_)
         maxAge = std::max(maxAge, individual->age_);
     
     // compare to the logic in QtSLiMGraphView_LifetimeReproduction::reproductionDistribution();
@@ -292,7 +300,7 @@ double *QtSLiMGraphView_AgeDistribution::ageDistribution(int *binCount, bool tal
     int totalBinCount = (tallySexesSeparately ? newBinCount * 2 : newBinCount);
     double *ageTallies = static_cast<double *>(calloc(totalBinCount, sizeof(double)));
     
-    for (const Individual *individual : subpop1->CurrentIndividuals())
+    for (const Individual *individual : subpop1->parent_individuals_)
     {
         slim_age_t age = individual->age_ - 1;  // age 1 is bin 0, age binCount is bin binCount-1
         

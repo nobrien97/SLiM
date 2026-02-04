@@ -3,7 +3,7 @@
 //  Eidos
 //
 //  Created by Ben Haller on 4/12/15.
-//  Copyright (c) 2015-2024 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2015-2025 Benjamin C. Haller.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -162,6 +162,7 @@ public:
 	bool ContainsSymbol(EidosGlobalStringID p_symbol_name) const;
 	bool ContainsSymbol_IsConstant(EidosGlobalStringID p_symbol_name, bool *p_is_const) const;
 	bool SymbolDefinedAnywhere(EidosGlobalStringID p_symbol_name) const;
+	bool SymbolDefinedAnywhere_IsConstant(EidosGlobalStringID p_symbol_name, bool *p_is_const) const;
 	
 	// Set as a variable (raises if already defined as a constant)
 	void SetValueForSymbol(EidosGlobalStringID p_symbol_name, EidosValue_SP p_value);

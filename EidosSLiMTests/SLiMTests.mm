@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 1/27/17.
-//  Copyright (c) 2017-2022 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2017-2022 Benjamin C. Haller.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -39,6 +39,7 @@
 #ifdef _OPENMP
 	Eidos_WarmUpOpenMP(&SLIM_ERRSTREAM, changed_max_thread_count, (int)max_thread_count, true, /* max per-task thread counts */ "maxThreads");
 #endif
+	SLiM_ConfigureContext();
 	Eidos_WarmUp();
 	SLiM_WarmUp();
 	

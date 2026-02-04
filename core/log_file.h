@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 11/2/20.
-//  Copyright (c) 2020-2024 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2020-2025 Benjamin C. Haller.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -64,7 +64,7 @@ private:
 	typedef EidosDictionaryRetained super;
 
 protected:
-	virtual void Raise_UsesStringKeys() const override;
+	virtual void Raise_UsesStringKeys() const override __attribute__((__noreturn__)) __attribute__((cold)) __attribute__((analyzer_noreturn));
 	
 #ifdef SLIMGUI
 public:
@@ -76,6 +76,7 @@ private:
 	std::string user_file_path_;								// the one given by the user to us
 	std::string resolved_file_path_;							// the path we use internally, which must be an absolute path
 	
+	bool emit_header_ = true;									// true if we are supposed to emit a header line at the start
 	bool header_logged_ = false;								// true if the header has been written out (in which case our generators are locked)
 	
 	bool compress_;
@@ -127,7 +128,7 @@ public:
 	explicit LogFile(Community &p_community);
 	virtual ~LogFile(void) override;
 	
-	void ConfigureFile(const std::string &p_filePath, std::vector<const std::string *> &p_initialContents, bool p_append, bool p_compress, const std::string &p_sep);
+	void ConfigureFile(const std::string &p_filePath, std::vector<const std::string *> &p_initialContents, bool p_append, bool p_emitHeader, bool p_compress, const std::string &p_sep);
 	void SetLogInterval(bool p_autologging_enabled, int64_t p_logInterval);
 	void SetFlushInterval(bool p_explicit_flushing, int64_t p_flushInterval);
 	
@@ -186,6 +187,10 @@ public:
 	
 	virtual const std::vector<EidosPropertySignature_CSP> *Properties(void) const override;
 	virtual const std::vector<EidosMethodSignature_CSP> *Methods(void) const override;
+	
+	// Overrides of Dictionary methods, since we have a special Dictionary behavior
+	virtual EidosValue_SP ExecuteClassMethod(EidosGlobalStringID p_method_id, EidosValue_Object *p_target, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter) const override;
+	EidosValue_SP ExecuteMethod_setValuesVectorized(EidosGlobalStringID p_method_id, EidosValue_Object *p_target, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter) const;
 };
 
 

@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 11/24/2019.
-//  Copyright (c) 2019-2024 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2019-2025 Benjamin C. Haller.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -100,6 +100,11 @@ void QtSLiMTextEdit::selfInit(void)
     // clear the status bar on a selection change
     connect(this, &QPlainTextEdit::selectionChanged, this, &QtSLiMTextEdit::updateStatusFieldFromSelection);
     connect(this, &QPlainTextEdit::cursorPositionChanged, this, &QtSLiMTextEdit::updateStatusFieldFromSelection);
+    
+    // BCH 28 August 2025: get rid of the annoying insertion point remnant shown briefly when the selection changes
+    // this is a dangerous change since it could, if there is a bug somewhere, make the insertion point disappear!
+    connect(this, &QPlainTextEdit::selectionChanged, this, [this]() { if (textCursor().hasSelection()) setCursorWidth(0); else setCursorWidth(1); });
+    connect(this, &QPlainTextEdit::cursorPositionChanged, this, [this]() { if (textCursor().hasSelection()) setCursorWidth(0); else setCursorWidth(1); });
     
     // Wire up to change the font when the display font pref changes
     QtSLiMPreferencesNotifier &prefsNotifier = QtSLiMPreferencesNotifier::instance();
@@ -221,10 +226,14 @@ void QtSLiMTextEdit::highlightError(int startPosition, int endPosition)
 
 void QtSLiMTextEdit::selectErrorRange(EidosErrorContext &errorContext)
 {
-	// If there is error-tracking information set, and the error is not attributed to a runtime script
-	// such as a lambda or a callback, then we can highlight the error range
-	if (!errorContext.executingRuntimeScript && (errorContext.errorPosition.characterStartOfErrorUTF16 >= 0) && (errorContext.errorPosition.characterEndOfErrorUTF16 >= errorContext.errorPosition.characterStartOfErrorUTF16))
-        highlightError(errorContext.errorPosition.characterStartOfErrorUTF16, errorContext.errorPosition.characterEndOfErrorUTF16 + 1);
+    // If there is error-tracking information set, and the error is attributed to the user script,
+    // then we can highlight the error range
+    if ((!gEidosErrorContext.currentScript || (gEidosErrorContext.currentScript->UserScriptUTF16Offset() == 0)) &&
+        (errorContext.errorPosition.characterStartOfErrorUTF16 >= 0) &&
+        (errorContext.errorPosition.characterEndOfErrorUTF16 >= errorContext.errorPosition.characterStartOfErrorUTF16))
+    {
+		highlightError(errorContext.errorPosition.characterStartOfErrorUTF16, errorContext.errorPosition.characterEndOfErrorUTF16 + 1);
+    }
 }
 
 QPalette QtSLiMTextEdit::qtslimStandardPalette(void)
@@ -288,8 +297,7 @@ bool QtSLiMTextEdit::checkScriptSuppressSuccessResponse(bool suppressSuccessResp
 {
 	// Note this does *not* check out scriptString, which represents the state of the script when the Community object was created
 	// Instead, it checks the current script in the script TextView – which is not used for anything until the recycle button is clicked.
-	QString currentScriptString = toPlainText();
-    QByteArray utf8bytes = currentScriptString.toUtf8();
+    QByteArray utf8bytes = toPlainText().toUtf8();
 	const char *cstr = utf8bytes.constData();
 	std::string errorDiagnostic;
 	
@@ -301,7 +309,7 @@ bool QtSLiMTextEdit::checkScriptSuppressSuccessResponse(bool suppressSuccessResp
 	{
         if (scriptType == EidosScriptType)
         {
-            EidosScript script(cstr, -1);
+            EidosScript script(cstr);
             
             try {
                 script.Tokenize();
@@ -342,7 +350,7 @@ bool QtSLiMTextEdit::checkScriptSuppressSuccessResponse(bool suppressSuccessResp
             
             EidosErrorContext errorContext = gEidosErrorContext;
             
-            gEidosErrorContext = EidosErrorContext{{-1, -1, -1, -1}, nullptr, false};
+            ClearErrorContext();
             
             selectErrorRange(errorContext);
             
@@ -351,7 +359,11 @@ bool QtSLiMTextEdit::checkScriptSuppressSuccessResponse(bool suppressSuccessResp
             messageBox.setText("Script error");
             messageBox.setInformativeText(q_errorDiagnostic);
             messageBox.setIcon(QMessageBox::Warning);
-            messageBox.setWindowModality(Qt::WindowModal);
+            
+            // see https://forum.qt.io/topic/160751/error-panel-goes-underneath-floating-window-causing-confusion
+            // regarding the choice between Qt::WindowModal and Qt::ApplicationModal; here Qt::ApplicationModal
+            // seems necessary so floating windows can't be on top of the message box
+            messageBox.setWindowModality(Qt::ApplicationModal);
             messageBox.setFixedWidth(700);      // seems to be ignored
             messageBox.exec();
             
@@ -373,7 +385,11 @@ bool QtSLiMTextEdit::checkScriptSuppressSuccessResponse(bool suppressSuccessResp
                 messageBox.setText("No script errors");
                 messageBox.setInformativeText("No errors found.");
                 messageBox.setIcon(QMessageBox::Information);
-                messageBox.setWindowModality(Qt::WindowModal);
+                
+                // see https://forum.qt.io/topic/160751/error-panel-goes-underneath-floating-window-causing-confusion
+                // regarding the choice between Qt::WindowModal and Qt::ApplicationModal; here Qt::ApplicationModal
+                // seems necessary so floating windows can't be on top of the message box
+                messageBox.setWindowModality(Qt::ApplicationModal);
                 messageBox.setCheckBox(new QCheckBox("Do not show this message again", nullptr));
                 messageBox.exec();
                 
@@ -398,10 +414,9 @@ void QtSLiMTextEdit::_prettyprint_reformat(bool p_reformat)
 		if (checkScriptSuppressSuccessResponse(true))
 		{
 			// We know the script is syntactically correct, so we can tokenize and parse it without worries
-            QString currentScriptString = toPlainText();
-            QByteArray utf8bytes = currentScriptString.toUtf8();
+            QByteArray utf8bytes = toPlainText().toUtf8();
             const char *cstr = utf8bytes.constData();
-			EidosScript script(cstr, -1);
+			EidosScript script(cstr);
             
 			script.Tokenize(false, true);	// get whitespace and comment tokens
 			
@@ -497,8 +512,13 @@ void QtSLiMTextEdit::scriptHelpOptionClick(QString searchString)
     else if (searchString == "//")              searchString = "comments";
     else if (searchString == "if")              searchString = "if and if–else statements";
     else if (searchString == "else")            searchString = "if and if–else statements";
+    else if (searchString == "do")              searchString = "do–while statements";
+    else if (searchString == "while")           searchString = "while statements";    // this brings up both while and do-while statements, correctly
     else if (searchString == "for")             searchString = "for statements";
     else if (searchString == "in")              searchString = "for statements";
+    else if (searchString == "next")            searchString = "next statements";
+    else if (searchString == "break")           searchString = "break statements";
+    else if (searchString == "return")          searchString = "return statements";
     else if (searchString == "function")        searchString = "user-defined functions";
     // and SLiM substitutions; "initialize" is deliberately omitted here so that the initialize...() methods also come up
     else if (searchString == "first")			searchString = "Eidos events";
@@ -728,7 +748,7 @@ EidosFunctionMap *QtSLiMTextEdit::functionMapForScriptString(QString scriptStrin
 	// This returns a function map (owned by the caller) that reflects the best guess we can make, incorporating
 	// any functions known to our delegate, as well as all functions we can scrape from the script string.
 	std::string script_string = scriptString.toStdString();
-	EidosScript script(script_string, -1);
+	EidosScript script(script_string);
 	
 	// Tokenize
 	script.Tokenize(true, false);	// make bad tokens as needed, don't keep nonsignificant tokens
@@ -817,7 +837,7 @@ EidosCallSignature_CSP QtSLiMTextEdit::signatureForScriptSelection(QString &call
     if (scriptString.length())
 	{
 		std::string script_string = scriptString.toStdString();
-		EidosScript script(script_string, -1);
+		EidosScript script(script_string);
 		
 		// Tokenize
 		script.Tokenize(true, false);	// make bad tokens as needed, don't keep nonsignificant tokens
@@ -989,7 +1009,7 @@ void QtSLiMTextEdit::updateStatusFieldFromSelection(void)
             else if (callName == "recombination")
             {
                 static EidosCallSignature_CSP callbackSig = nullptr;
-                if (!callbackSig) callbackSig = EidosCallSignature_CSP((new EidosFunctionSignature("recombination", nullptr, kEidosValueMaskLogical | kEidosValueMaskSingleton))->AddObject_OS("subpop", gSLiM_Subpopulation_Class, gStaticEidosValueNULLInvisible));
+                if (!callbackSig) callbackSig = EidosCallSignature_CSP((new EidosFunctionSignature("recombination", nullptr, kEidosValueMaskLogical | kEidosValueMaskSingleton))->AddObject_OS("subpop", gSLiM_Subpopulation_Class, gStaticEidosValueNULLInvisible)->AddIntString_OSN("chromosome", gStaticEidosValueNULLInvisible));
                 signature = callbackSig;
             }
             else if (callName == "survival")
@@ -1190,6 +1210,16 @@ void QtSLiMTextEdit::autoindentAfterNewline(void)
                 tc.joinPreviousEditBlock();
                 tc.insertText(whitespace);
                 tc.endEditBlock();
+                
+                // BCH 5/24/2025: Fix an autoindent bug that I'm surprised I didn't notice before; if
+                // you're at the end of an indented line, and press return and then press up-arrow,
+                // you move to the wrong position in the previous line, as if the auto-indent had not
+                // occurred.  It's weird, because the cursor shows visibly at the correct position,
+                // but then up-arrow reveals that in some way it was actually not in that position.
+                // Anyhow, explicitly setting the text cursor here seems to fix it.  Maybe I didn't
+                // notice it before because this is a new bug in Qt 6?  If so, this workaround should
+                // be safe on Qt 5.
+                setTextCursor(tc);
             }
         }
     }
@@ -2127,8 +2157,8 @@ void QtSLiMTextEdit::slimSpecificCompletion(QString completionScriptString, NSRa
                             break;
                         case SLiMEidosBlockType::SLiMEidosRecombinationCallback:
                             (*typeTable)->SetTypeForSymbol(gID_individual,		EidosTypeSpecifier{kEidosValueMaskObject, gSLiM_Individual_Class});
-                            (*typeTable)->SetTypeForSymbol(gID_genome1,			EidosTypeSpecifier{kEidosValueMaskObject, gSLiM_Genome_Class});
-                            (*typeTable)->SetTypeForSymbol(gID_genome2,			EidosTypeSpecifier{kEidosValueMaskObject, gSLiM_Genome_Class});
+                            (*typeTable)->SetTypeForSymbol(gID_haplosome1,		EidosTypeSpecifier{kEidosValueMaskObject, gSLiM_Haplosome_Class});
+                            (*typeTable)->SetTypeForSymbol(gID_haplosome2,		EidosTypeSpecifier{kEidosValueMaskObject, gSLiM_Haplosome_Class});
                             (*typeTable)->SetTypeForSymbol(gID_subpop,			EidosTypeSpecifier{kEidosValueMaskObject, gSLiM_Subpopulation_Class});
                             (*typeTable)->SetTypeForSymbol(gID_breakpoints,		EidosTypeSpecifier{kEidosValueMaskInt, nullptr});
                             break;
@@ -2136,7 +2166,7 @@ void QtSLiMTextEdit::slimSpecificCompletion(QString completionScriptString, NSRa
                             (*typeTable)->SetTypeForSymbol(gID_mut,				EidosTypeSpecifier{kEidosValueMaskObject, gSLiM_Mutation_Class});
                             (*typeTable)->SetTypeForSymbol(gID_parent,			EidosTypeSpecifier{kEidosValueMaskObject, gSLiM_Individual_Class});
                             (*typeTable)->SetTypeForSymbol(gID_element,			EidosTypeSpecifier{kEidosValueMaskObject, gSLiM_GenomicElement_Class});
-                            (*typeTable)->SetTypeForSymbol(gID_genome,			EidosTypeSpecifier{kEidosValueMaskObject, gSLiM_Genome_Class});
+                            (*typeTable)->SetTypeForSymbol(gID_haplosome,			EidosTypeSpecifier{kEidosValueMaskObject, gSLiM_Haplosome_Class});
                             (*typeTable)->SetTypeForSymbol(gID_subpop,			EidosTypeSpecifier{kEidosValueMaskObject, gSLiM_Subpopulation_Class});
                             (*typeTable)->SetTypeForSymbol(gID_originalNuc,		EidosTypeSpecifier{kEidosValueMaskInt, nullptr});
                             break;
@@ -2315,7 +2345,7 @@ void QtSLiMTextEdit::_completionHandlerWithRangeForCompletion(NSRange *baseRange
 			delete definitive_function_map;
 			
 			// Next, add type table entries based on parsing and analysis of the user's code
-			EidosScript script(script_string, -1);
+			EidosScript script(script_string);
 			
 			script.Tokenize(true, false);					// make bad tokens as needed, do not keep nonsignificant tokens
 			script.ParseInterpreterBlockToAST(true, true);	// make bad nodes as needed (i.e. never raise, and produce a correct tree)
@@ -2326,7 +2356,7 @@ void QtSLiMTextEdit::_completionHandlerWithRangeForCompletion(NSRange *baseRange
 		}
 		
 		// Tokenize; we can't use the tokenization done above, as we want whitespace tokens here...
-		EidosScript script(script_string, -1);
+		EidosScript script(script_string);
 		script.Tokenize(true, true);	// make bad tokens as needed, keep nonsignificant tokens
 		
 		const std::vector<EidosToken> &tokens = script.Tokens();
@@ -2505,7 +2535,9 @@ public:
 protected:
     virtual bool event(QEvent *p_event) override;
     virtual void paintEvent(QPaintEvent *p_paintEvent) override { codeEditor->lineNumberAreaPaintEvent(p_paintEvent); }
-    virtual void mousePressEvent(QMouseEvent *p_mouseEvent) override { codeEditor->lineNumberAreaMouseEvent(p_mouseEvent); }
+    virtual void mousePressEvent(QMouseEvent *p_mouseEvent) override { codeEditor->lineNumberAreaMousePressEvent(p_mouseEvent); }
+    virtual void mouseMoveEvent(QMouseEvent *p_mouseEvent) override { codeEditor->lineNumberAreaMouseMoveEvent(p_mouseEvent); }
+    virtual void mouseReleaseEvent(QMouseEvent *p_mouseEvent) override { codeEditor->lineNumberAreaMouseReleaseEvent(p_mouseEvent); }
     virtual void contextMenuEvent(QContextMenuEvent *p_event) override { codeEditor->lineNumberAreaContextMenuEvent(p_event); }
     virtual void wheelEvent(QWheelEvent *p_wheelEvent) override { codeEditor->lineNumberAreaWheelEvent(p_wheelEvent); }
 
@@ -2548,6 +2580,11 @@ void QtSLiMScriptTextEdit::sharedInit(void)
     setCenterOnScroll(true);
     
     initializeLineNumbers();
+    
+    // set up to listen to changes to page guide prefs
+    QtSLiMPreferencesNotifier &prefsNotifier = QtSLiMPreferencesNotifier::instance();
+    
+    connect(&prefsNotifier, &QtSLiMPreferencesNotifier::pageGuidePrefsChanged, this, [this]() { viewport()->update(); });
 }
 
 void QtSLiMScriptTextEdit::initializeLineNumbers(void)
@@ -2558,8 +2595,10 @@ void QtSLiMScriptTextEdit::initializeLineNumbers(void)
     connect(this->document(), SIGNAL(blockCountChanged(int)), this, SLOT(updateLineNumberAreaWidth(int)));
     connect(this->verticalScrollBar(), SIGNAL(valueChanged(int)), this, SLOT(updateLineNumberArea(int)));
     connect(this, SIGNAL(textChanged()), this, SLOT(updateLineNumberArea()));
+    connect(this, SIGNAL(selectionChanged()), this, SLOT(updateLineNumberArea()));
     connect(this, SIGNAL(cursorPositionChanged()), this, SLOT(updateLineNumberArea()));
     
+    connect(this, &QtSLiMScriptTextEdit::selectionChanged, this, &QtSLiMScriptTextEdit::highlightCurrentLine);
     connect(this, &QtSLiMScriptTextEdit::cursorPositionChanged, this, &QtSLiMScriptTextEdit::highlightCurrentLine);
     connect(qtSLiMAppDelegate, &QtSLiMAppDelegate::applicationPaletteChanged, this, &QtSLiMScriptTextEdit::highlightCurrentLine);
     
@@ -2638,6 +2677,34 @@ void QtSLiMScriptTextEdit::copyAsHTML(void)
         mimeData->setHtml(html);
         mimeData->setText(html);
         clipboard->setMimeData(mimeData);
+    }
+}
+
+void QtSLiMScriptTextEdit::duplicateSelection(void)
+{
+    if (isEnabled() && !isReadOnly())
+    {
+        QTextCursor &&edit_cursor = textCursor();
+        QString selectedString = edit_cursor.selectedText();
+        int pasteStart = edit_cursor.selectionEnd();
+        
+        edit_cursor.beginEditBlock();
+        
+        edit_cursor.setPosition(pasteStart, QTextCursor::MoveAnchor);
+        edit_cursor.insertText(selectedString);
+        
+        int pasteEnd = edit_cursor.position();
+        
+        edit_cursor.setPosition(pasteStart, QTextCursor::MoveAnchor);
+        edit_cursor.setPosition(pasteEnd, QTextCursor::KeepAnchor);
+        
+        // end the editing block, producing one undo-able operation
+        edit_cursor.endEditBlock();
+        setTextCursor(edit_cursor);
+    }
+    else
+    {
+        qApp->beep();
     }
 }
 
@@ -2745,6 +2812,36 @@ void QtSLiMScriptTextEdit::commentUncommentSelection(void)
 	{
 		qApp->beep();
 	}
+}
+
+void QtSLiMScriptTextEdit::insertFromMimeData(const QMimeData *source)
+{
+    // if the data pasted is text, we want to convert weird line breaks into newlines
+    // note that the substitution done here strips off any other mime types in source,
+    // but that seems fine; if there's text, we're going to paste text, so whatever.
+    if (source && source->hasText())
+    {
+        QString text = source->text();
+        
+        // Unknown characters can be identified with https://www.babelstone.co.uk/Unicode/whatisit.html
+        //qDebug() << "pasted:" << text;
+        
+        // Unicode "U+2028 : LINE SEPARATOR" is the one presently causing me problems,
+        // but U+2029 should be replaced as well; we want vanilla non-unicode line ends.
+        text.replace(QChar::LineSeparator, '\n');
+        text.replace(QChar::ParagraphSeparator, '\n');
+        
+        //qDebug() << "substituted:" << text;
+        
+        QMimeData substitute;
+        substitute.setText(text);
+        
+        QPlainTextEdit::insertFromMimeData(&substitute);
+        return;
+    }
+    
+    // call to super to do the work
+    QPlainTextEdit::insertFromMimeData(source);
 }
 
 // From here down is the machinery for providing line numbers with LineNumberArea
@@ -2883,6 +2980,43 @@ void QtSLiMScriptTextEdit::toggleDebuggingForLine(int lineNumber)
     updateDebugPoints();
 }
 
+void QtSLiMScriptTextEdit::trackLineSelection(int lineNumber, int anchorLineNumber)
+{
+    QTextDocument *doc = document();
+    QTextBlock block = doc->findBlockByNumber(lineNumber);
+    QTextCursor block_tc(block);
+    QTextBlock anchor_block = doc->findBlockByNumber(anchorLineNumber);
+    QTextCursor anchor_tc(anchor_block);
+    
+    block_tc.movePosition(QTextCursor::EndOfBlock, QTextCursor::KeepAnchor, 1);
+    block_tc.movePosition(QTextCursor::NextCharacter, QTextCursor::KeepAnchor, 1);
+    
+    int block_start = block_tc.selectionStart();
+    int block_end = block_tc.selectionEnd();
+    
+    anchor_tc.movePosition(QTextCursor::EndOfBlock, QTextCursor::KeepAnchor, 1);
+    anchor_tc.movePosition(QTextCursor::NextCharacter, QTextCursor::KeepAnchor, 1);
+    
+    int anchor_start = anchor_tc.selectionStart();
+    int anchor_end = anchor_tc.selectionEnd();
+    
+    QTextCursor selection_tc(anchor_tc);
+    
+    if (anchor_start <= block_start)
+    {
+        // the anchor is above the final line, so select from the anchor start to the final end
+        selection_tc.setPosition(block_end, QTextCursor::KeepAnchor);
+    }
+    else
+    {
+        // the anchor is below the final line, so select from the anchor end to the final start
+        selection_tc.setPosition(anchor_end, QTextCursor::MoveAnchor);
+        selection_tc.setPosition(block_start, QTextCursor::KeepAnchor);
+    }
+    
+    setTextCursor(selection_tc);
+}
+
 void QtSLiMScriptTextEdit::updateDebugPoints(void)
 {
     // prevent re-entrancy
@@ -3011,7 +3145,22 @@ void QtSLiMScriptTextEdit::highlightCurrentLine()
         selection.format.setBackground(inDarkMode ? lineHighlightColor_DARK : lineHighlightColor);
         selection.format.setProperty(QTextFormat::FullWidthSelection, true);
         selection.cursor = textCursor();
-        selection.cursor.clearSelection();
+        
+        if (selection.cursor.hasSelection())
+        {
+            // with a selection, we want to try to highlight the appropriate range
+            // if the selection ends at a newline, we don't want to highlight the
+            // next line; want want to highlight the lines that contain visible text
+            int start = selection.cursor.selectionStart();
+            
+            selection.cursor.setPosition(start, QTextCursor::MoveAnchor);
+            
+            // still have a movement bug when the selection changes, the highlight doesn't update correctly in some cases
+            // check when/how the message is sent
+        }
+        
+        //qDebug() << "highlightCurrentLine() with position" << selection.cursor.selectionStart();
+        
         extra_selections.append(selection);
     }
     
@@ -3217,28 +3366,11 @@ void QtSLiMScriptTextEdit::lineNumberAreaPaintEvent(QPaintEvent *p_paintEvent)
     painter.restore();
 }
 
-void QtSLiMScriptTextEdit::lineNumberAreaMouseEvent(QMouseEvent *p_mouseEvent)
+int QtSLiMScriptTextEdit::_blockNumberForLocalY(QPointF localPos)
 {
-    if (lineNumberAreaBugWidth == 0)
-        return;
-    
-    // For some reason, Qt calls mousePressEvent() first for control-clicks and right-clicks,
-    // and *then* calls contextMenuEvent(), so we need to detect the context menu situation
-    // and return without doing anything.  Note that Qt::RightButton is set for control-clicks!
-    if (p_mouseEvent->button() == Qt::RightButton)
-        return;
-        
-#if (QT_VERSION < QT_VERSION_CHECK(6, 0, 0))
-    QPointF localPos = p_mouseEvent->localPos();
-#else
-    QPointF localPos = p_mouseEvent->position();
-#endif
     qreal localY = localPos.y();
     
     //qDebug() << "localY ==" << localY;
-    
-    if ((localPos.x() < 0) || (localPos.x() >= lineNumberAreaBugWidth + 2))     // +2 for a little slop
-            return;
     
     // Find the position of the click in the document.  We loop through the blocks manually.
     QTextBlock block = firstVisibleBlock();
@@ -3252,12 +3384,11 @@ void QtSLiMScriptTextEdit::lineNumberAreaMouseEvent(QMouseEvent *p_mouseEvent)
         {
             if ((localY >= top) && (localY <= bottom))
             {
-                toggleDebuggingForLine(blockNumber);
-                break;
+                return blockNumber;
             }
             else if (localY < top)
             {
-                break;
+                return -1;
             }
         }
         
@@ -3266,6 +3397,89 @@ void QtSLiMScriptTextEdit::lineNumberAreaMouseEvent(QMouseEvent *p_mouseEvent)
         bottom = top + qRound(blockBoundingRect(block).height());
         ++blockNumber;
     }
+    
+    return -1;
+}
+
+void QtSLiMScriptTextEdit::lineNumberAreaMousePressEvent(QMouseEvent *p_mouseEvent)
+{
+    if (lineNumberAreaBugWidth == 0)
+        return;
+    
+    // For some reason, Qt calls mousePressEvent() first for control-clicks and right-clicks,
+    // and *then* calls contextMenuEvent(), so we need to detect the context menu situation
+    // and return without doing anything.  Note that Qt::RightButton is set for control-clicks!
+    if (p_mouseEvent->button() == Qt::RightButton)
+        return;
+    
+#if (QT_VERSION < QT_VERSION_CHECK(6, 0, 0))
+    QPointF localPos = p_mouseEvent->localPos();
+#else
+    QPointF localPos = p_mouseEvent->position();
+#endif
+    
+    if (localPos.x() < 0)
+        return;
+    
+    int blockNumber = _blockNumberForLocalY(localPos);
+    
+    if (blockNumber != -1)
+    {
+        if (localPos.x() >= lineNumberAreaBugWidth)
+        {
+            // This is a click in the line number area, so select the line
+            trackingLineSelection = true;
+            trackingLineAnchor = blockNumber;
+            
+            trackLineSelection(blockNumber, trackingLineAnchor);
+        }
+        else
+        {
+            // This is a click in the debug point column, so toggle debugging
+            toggleDebuggingForLine(blockNumber);
+        }
+    }
+}
+
+void QtSLiMScriptTextEdit::lineNumberAreaMouseMoveEvent(QMouseEvent *p_mouseEvent)
+{
+    if (!trackingLineSelection)
+        return;
+
+#if (QT_VERSION < QT_VERSION_CHECK(6, 0, 0))
+    QPointF localPos = p_mouseEvent->localPos();
+#else
+    QPointF localPos = p_mouseEvent->position();
+#endif
+    
+    int blockNumber = _blockNumberForLocalY(localPos);
+    
+    if (blockNumber != -1)
+    {
+        trackLineSelection(blockNumber, trackingLineAnchor);
+    }
+}
+
+void QtSLiMScriptTextEdit::lineNumberAreaMouseReleaseEvent(QMouseEvent *p_mouseEvent)
+{
+    if (!trackingLineSelection)
+        return;
+
+#if (QT_VERSION < QT_VERSION_CHECK(6, 0, 0))
+    QPointF localPos = p_mouseEvent->localPos();
+#else
+    QPointF localPos = p_mouseEvent->position();
+#endif
+    
+    int blockNumber = _blockNumberForLocalY(localPos);
+    
+    if (blockNumber != -1)
+    {
+        trackLineSelection(blockNumber, trackingLineAnchor);
+    }
+    
+    trackingLineSelection = false;
+    trackingLineAnchor = -1;
 }
 
 void QtSLiMScriptTextEdit::lineNumberAreaContextMenuEvent(QContextMenuEvent *p_event)
@@ -3390,6 +3604,58 @@ QString QtSLiMScriptTextEdit::exportAsHtml(void)
     
     return html;
 }
+
+void QtSLiMScriptTextEdit::paintEvent(QPaintEvent *event)
+{
+    // If the user wants a "page guide", show a slightly dimmed margin beyond a threshold column
+    // Note that Qt has already cleared to the white background of the QTextEdit
+    QtSLiMPreferencesNotifier &prefs = QtSLiMPreferencesNotifier::instance();
+    bool showPageGuide = prefs.showPageGuidePref();
+    
+    if (showPageGuide)
+    {
+        QFont displayFont = prefs.displayFontPref();
+        QFontMetricsF fm(displayFont);
+        double marginStart;
+        QString marginString(prefs.pageGuideColumnPref(), ' ');
+        
+#if (QT_VERSION < QT_VERSION_CHECK(5, 11, 0))
+        marginStart = fm.width(marginString);                // deprecated in 5.11
+#else
+        marginStart = fm.horizontalAdvance(marginString);    // added in Qt 5.11
+#endif
+        
+        // adjust by the document margin, which is built into QTextDocument; this took a while to find!
+        // this is an inset of the QTextEdit's contents, on all four sides; it defaults to 4, which we do not change
+        QTextDocument *doc = document();
+        double docMargin = doc->documentMargin();
+        
+        marginStart += docMargin;
+        marginStart = round(marginStart);
+        
+        QRect bounds = rect();
+        
+        if (bounds.width() >= marginStart)
+        {
+            // Because QTextEdit's display lives inside a scrollable area, we use viewport()
+            QPainter painter(this->viewport());
+            
+            QRect margin = bounds.adjusted(marginStart, 0, 0, 0);
+            QRect marginEdge = margin;
+            
+            // draw a one-pixel darker line at the border
+            marginEdge.setWidth(1);
+            margin.adjust(1, 0, 0, 0);
+            
+            painter.fillRect(marginEdge, QtSLiMColorWithWhite(0.918, 1.0));
+            painter.fillRect(margin, QtSLiMColorWithWhite(0.980, 1.0));
+        }
+    }
+    
+    // call super to have it paint; this draws all the text and everything
+    QtSLiMTextEdit::paintEvent(event);
+}
+
 
 
 

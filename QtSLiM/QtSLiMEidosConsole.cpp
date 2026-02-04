@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 12/6/2019.
-//  Copyright (c) 2019-2024 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2019-2025 Benjamin C. Haller.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -200,9 +200,7 @@ void QtSLiMEidosConsole::showBrowserClicked(void)
         }
     }
     
-    variableBrowser_->show();
-    variableBrowser_->raise();
-    variableBrowser_->activateWindow();
+    QtSLiMMakeWindowVisibleAndExposed(variableBrowser_);
 }
 
 QStatusBar *QtSLiMEidosConsole::statusBar(void)
@@ -282,7 +280,7 @@ QString QtSLiMEidosConsole::_executeScriptString(QString scriptString, QString *
     scriptString.replace(QChar::LineSeparator, "\n");
     
     std::string script_string(scriptString.toStdString());
-	EidosScript script(script_string, -1);
+	EidosScript script(script_string);
 	std::string output;
 	
 	// Unfortunately, running readFromPopulationFile() is too much of a shock for SLiMgui.  It invalidates variables that are being displayed in
@@ -321,12 +319,34 @@ QString QtSLiMEidosConsole::_executeScriptString(QString scriptString, QString *
 		}
 	}
 	catch (...)
-	{
-		std::string &&error_string = Eidos_GetUntrimmedRaiseMessage();
-		*errorString = QString::fromStdString(error_string);
-		return nullptr;
-	}
-	
+    {
+        std::string &&error_string = Eidos_GetUntrimmedRaiseMessage();
+        *errorString = QString::fromStdString(error_string);
+        
+        // move the error outside of the currentScript context if possible; the ranges
+        // should have already been moved by TranslateErrorContextToUserScript()
+        if (gEidosErrorContext.currentScript == &script)
+        {
+#if EIDOS_DEBUG_ERROR_POSITIONS
+            std::cout << "-[EidosConsoleWindowController _executeScriptString:...]: clearing gEidosErrorContext.currentScript after error in tokenization." << std::endl;
+#endif
+            gEidosErrorContext.currentScript = nullptr;
+        }
+        else if (gEidosErrorContext.currentScript)
+        {
+            // The error got translated to a script we don't recognize; clear the error info,
+            // all we can do is show the error string to the user, with no position
+            errorString->insert(0, "A tokenization error occurred in a different script context, so the error position cannot be highlighted in the console:\n");
+            
+#if EIDOS_DEBUG_ERROR_POSITIONS
+            std::cout << "-[EidosConsoleWindowController _executeScriptString:...]: error in tokenization traced to a different script; clearing all error info." << std::endl;
+#endif
+            ClearErrorContext();
+        }
+        
+        return nullptr;
+    }
+    
 	// Parse, an "interpreter block" bounded by an EOF rather than a "script block" that requires braces
 	try
 	{
@@ -343,12 +363,34 @@ QString QtSLiMEidosConsole::_executeScriptString(QString scriptString, QString *
 		}
 	}
 	catch (...)
-	{
-		std::string &&error_string = Eidos_GetUntrimmedRaiseMessage();
-		*errorString = QString::fromStdString(error_string);
-		return nullptr;
-	}
-	
+    {
+        std::string &&error_string = Eidos_GetUntrimmedRaiseMessage();
+        *errorString = QString::fromStdString(error_string);
+        
+        // move the error outside of the currentScript context if possible; the ranges
+        // should have already been moved by TranslateErrorContextToUserScript()
+        if (gEidosErrorContext.currentScript == &script)
+        {
+#if EIDOS_DEBUG_ERROR_POSITIONS
+            std::cout << "-[EidosConsoleWindowController _executeScriptString:...]: clearing gEidosErrorContext.currentScript after error in parsing." << std::endl;
+#endif
+            gEidosErrorContext.currentScript = nullptr;
+        }
+        else if (gEidosErrorContext.currentScript)
+        {
+            // The error got translated to a script we don't recognize; clear the error info,
+            // all we can do is show the error string to the user, with no position
+            errorString->insert(0, "A parsing error occurred in a different script context, so the error position cannot be highlighted in the console:\n");
+            
+#if EIDOS_DEBUG_ERROR_POSITIONS
+            std::cout << "-[EidosConsoleWindowController _executeScriptString:...]: error in parsing traced to a different script; clearing all error info." << std::endl;
+#endif
+            ClearErrorContext();
+        }
+        
+        return nullptr;
+    }
+    
 	// Get a symbol table and let SLiM add symbols to it
 	if (!global_symbols)
 	{
@@ -404,7 +446,11 @@ QString QtSLiMEidosConsole::_executeScriptString(QString scriptString, QString *
     parentSLiMWindow->willExecuteScript();
 	
     std::ostringstream outstream;	// in the Eidos console, one output stream for both types of output
-	EidosInterpreter interpreter(script, *global_symbols, *global_function_map, eidos_context, outstream, outstream);
+	EidosInterpreter interpreter(script, *global_symbols, *global_function_map, eidos_context, outstream, outstream
+#ifdef SLIMGUI
+            , true
+#endif
+            );
 	
 	try
 	{
@@ -424,17 +470,38 @@ QString QtSLiMEidosConsole::_executeScriptString(QString scriptString, QString *
 		}
 	}
 	catch (...)
-	{
-		parentSLiMWindow->didExecuteScript();
-		
-		output = outstream.str();
-		
-		std::string &&error_string = Eidos_GetUntrimmedRaiseMessage();
-		*errorString = QString::fromStdString(error_string);
-		
-		return QString::fromStdString(output);
-	}
-	
+    {
+        parentSLiMWindow->didExecuteScript();
+        
+        output = outstream.str();
+        
+        std::string &&error_string = Eidos_GetUntrimmedRaiseMessage();
+        *errorString = QString::fromStdString(error_string);
+        
+        // move the error outside of the currentScript context if possible; the ranges
+        // should have already been moved by TranslateErrorContextToUserScript()
+        if (gEidosErrorContext.currentScript == &script)
+        {
+#if EIDOS_DEBUG_ERROR_POSITIONS
+            std::cout << "-[EidosConsoleWindowController _executeScriptString:...]: clearing gEidosErrorContext.currentScript after error in execution." << std::endl;
+#endif
+            gEidosErrorContext.currentScript = nullptr;
+        }
+        else if (gEidosErrorContext.currentScript)
+        {
+            // The error got translated to a script we don't recognize; clear the error info,
+            // all we can do is show the error string to the user, with no position
+            errorString->insert(0, "An execution error occurred in a different script context, so the error position cannot be highlighted in the console:\n");
+            
+#if EIDOS_DEBUG_ERROR_POSITIONS
+            std::cout << "-[EidosConsoleWindowController _executeScriptString:...]: error in execution traced to a different script; clearing all error info." << std::endl;
+#endif
+            ClearErrorContext();
+        }
+        
+        return QString::fromStdString(output);
+    }
+    
 	parentSLiMWindow->didExecuteScript();
 	
 	// See comment on safeguardReferences above

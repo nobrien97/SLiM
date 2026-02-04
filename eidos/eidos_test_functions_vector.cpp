@@ -3,7 +3,7 @@
 //  Eidos
 //
 //  Created by Ben Haller on 7/11/20.
-//  Copyright (c) 2020-2024 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2020-2025 Benjamin C. Haller.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -229,16 +229,16 @@ void _RunFunctionVectorConstructionTests_s_through_z(void)
 	EidosAssertScriptRaise("sample(5, 2, T, NAN);", 0, "requires all weights to be");
 	EidosAssertScriptRaise("sample(1:5, 2, T, c(1,2,NAN,4,5));", 0, "requires all weights to be");
 	EidosAssertScriptRaise("sample(5, 2, F);", 0, "insufficient elements");
-	EidosAssertScriptSuccess_IV("setSeed(0); sample(1:5, 5, T);", {1, 5, 3, 1, 2});
-	EidosAssertScriptSuccess_IV("setSeed(0); sample(1:5, 5, F);", {3, 5, 2, 4, 1});
-	EidosAssertScriptSuccess_IV("setSeed(0); sample(1:5, 6, T);", {1, 5, 3, 1, 2, 3});
+	EidosAssertScriptSuccess_IV("setSeed(0); sample(1:5, 5, T);", {1, 5, 2, 1, 3});
+	EidosAssertScriptSuccess_IV("setSeed(0); sample(1:5, 5, F);", {2, 3, 5, 4, 1});
+	EidosAssertScriptSuccess_IV("setSeed(0); sample(1:5, 6, T);", {1, 5, 2, 1, 3, 3});
 	EidosAssertScriptRaise("setSeed(0); sample(1:5, 6, F);", 12, "insufficient elements");
-	EidosAssertScriptSuccess_IV("setSeed(0); sample(1:5, 1, T, (1:5)*(1:5)*(1:5));", {4});
-	EidosAssertScriptSuccess_IV("setSeed(0); sample(1:5, 1, T, (1.0:5.0)^3);", {4});
-	EidosAssertScriptSuccess_IV("setSeed(0); sample(1:5, 1, F, (1:5)*(1:5)*(1:5));", {4});
-	EidosAssertScriptSuccess_IV("setSeed(0); sample(1:5, 1, F, (1.0:5.0)^3);", {4});
-	EidosAssertScriptSuccess_IV("setSeed(0); sample(1:5, 1, T, (0:4)*(0:4)*(0:4));", {4});
-	EidosAssertScriptSuccess_IV("setSeed(0); sample(1:5, 1, T, (0.0:4.0)^3);", {4});
+	EidosAssertScriptSuccess_IV("setSeed(0); sample(1:5, 1, T, (1:5)*(1:5)*(1:5));", {3});
+	EidosAssertScriptSuccess_IV("setSeed(0); sample(1:5, 1, T, (1.0:5.0)^3);", {3});
+	EidosAssertScriptSuccess_IV("setSeed(0); sample(1:5, 1, F, (1:5)*(1:5)*(1:5));", {3});
+	EidosAssertScriptSuccess_IV("setSeed(0); sample(1:5, 1, F, (1.0:5.0)^3);", {3});
+	EidosAssertScriptSuccess_IV("setSeed(0); sample(1:5, 1, T, (0:4)*(0:4)*(0:4));", {3});
+	EidosAssertScriptSuccess_IV("setSeed(0); sample(1:5, 1, T, (0.0:4.0)^3);", {3});
 	EidosAssertScriptSuccess_IV("setSeed(0); sample(1:5, 1, T, c(0,0,1,0,0));", {3});
 	EidosAssertScriptSuccess_IV("setSeed(0); sample(1:5, 1, T, c(0,0,1.0,0,0));", {3});
 	EidosAssertScriptSuccess_IV("setSeed(0); sample(1:5, 1, F, c(0,0,1,0,0));", {3});
@@ -251,14 +251,15 @@ void _RunFunctionVectorConstructionTests_s_through_z(void)
 	EidosAssertScriptSuccess_IV("setSeed(0); sum(sample(1:5, 2, T, c(1.0,0,100.0,0,0)));", {6});
 	EidosAssertScriptSuccess_IV("setSeed(0); sum(sample(1:5, 2, F, c(1,0,100,0,0)));", {4});
 	EidosAssertScriptSuccess_IV("setSeed(0); sum(sample(1:5, 2, F, c(1.0,0,100.0,0,0)));", {4});
-	EidosAssertScriptSuccess_IV("setSeed(0); sum(sample(1:5, 100, T, c(1,0,100,0,0)));", {298});
-	EidosAssertScriptSuccess_IV("setSeed(0); sum(sample(1:5, 100, T, c(1.0,0,100.0,0,0)));", {298});
-	EidosAssertScriptSuccess_IV("setSeed(0); sample(1:5, 5, T, (1:5)*(1:5)*(1:5));", {4, 5, 5, 3, 4});
-	EidosAssertScriptSuccess_IV("setSeed(0); sample(1:5, 5, T, (1.0:5.0)^3);", {4, 5, 5, 3, 4});
-	EidosAssertScriptSuccess_IV("setSeed(0); sample(1:5, 5, F, (1:5)*(1:5)*(1:5));", {4, 5, 3, 1, 2});
-	EidosAssertScriptSuccess_IV("setSeed(0); sample(1:5, 5, F, (1.0:5.0)^3);", {4, 5, 3, 1, 2});
-	EidosAssertScriptSuccess_IV("setSeed(0); sample(1:5, 5, T, (0:4)*(0:4)*(0:4));", {4, 5, 5, 3, 4});
-	EidosAssertScriptSuccess_IV("setSeed(0); sample(1:5, 5, T, (0.0:4.0)^3);", {4, 5, 5, 3, 4});
+	EidosAssertScriptSuccess_IV("setSeed(0); sum(sample(1:5, 100, T, c(1,0,100,0,0)));", {292});
+	EidosAssertScriptSuccess_IV("setSeed(0); sum(sample(1:5, 100, T, c(1.0,0,100.0,0,0)));", {292});
+	EidosAssertScriptSuccess_IV("setSeed(0); sample(1:5, 5, T, (1:5)*(1:5)*(1:5));", {3, 4, 4, 4, 3});
+	EidosAssertScriptSuccess_IV("setSeed(0); sample(1:5, 5, T, (1.0:5.0)^3);", {3, 4, 4, 4, 3});
+	EidosAssertScriptSuccess_IV("setSeed(0); sample(1:5, 5, F, (1:5)*(1:5)*(1:5));", {3, 4, 5, 2, 1});
+	EidosAssertScriptSuccess_IV("setSeed(0); sample(1:5, 5, F, (1.0:5.0)^3);", {3, 4, 5, 2, 1});
+	EidosAssertScriptSuccess_IV("setSeed(0); sample(1:5, 5, T, (0:4)*(0:4)*(0:4));", {3, 4, 4, 4, 4});
+	EidosAssertScriptSuccess_IV("setSeed(0); sample(1:5, 5, T, (0.0:4.0)^3);", {3, 4, 4, 4, 4});
+	EidosAssertScriptSuccess_IV("setSeed(0); tabulate(sample(1:5, 10000, T, (0:4)*(0:4)*(0:4)));", {0, 0, 93, 820, 2714, 6373});
 	EidosAssertScriptRaise("setSeed(1); sample(1:3, 3, F, c(2.0, 3.0, NAN));", 12, "requires all weights to be");
 	EidosAssertScriptRaise("setSeed(1); sample(1:5, 5, F, (0:4)^3);", 12, "weights summing to");
 	EidosAssertScriptRaise("setSeed(1); sample(1:5, 5, F, asInteger((0:4)^3));", 12, "weights summing to");
@@ -403,6 +404,70 @@ void _RunFunctionValueInspectionManipulationTests_a_through_f(void)
 	EidosAssertScriptSuccess_L("all(T,T,c(T,T,T,T),c(T,F,T,T));", false);
 	EidosAssertScriptSuccess_L("all(F,F,c(F,F,F,F),c(F,F,F,F));", false);
 	
+	// allClose()
+	EidosAssertScriptRaise("allClose(float(0), 1.0:3);", 0, "requires the lengths of x and y");
+	EidosAssertScriptRaise("allClose(1.0:2, 1.0:3);", 0, "requires the lengths of x and y");
+	EidosAssertScriptRaise("allClose(1.0, 1.0, rtol=-1.0);", 0, "requires rtol");
+	EidosAssertScriptRaise("allClose(1.0, 1.0, atol=-1.0);", 0, "requires atol");
+	
+	EidosAssertScriptSuccess_L("allClose(INF, -INF);", false);
+	EidosAssertScriptSuccess_L("allClose(INF, 0.0);", false);
+	EidosAssertScriptSuccess_L("allClose(INF, INF);", true);
+	EidosAssertScriptSuccess_L("allClose(INF, c(-INF, 0.0, INF));", false);
+	EidosAssertScriptSuccess_L("allClose(c(-INF, 0.0, INF), INF);", false);
+	EidosAssertScriptSuccess_L("allClose(c(INF, INF, INF), c(-INF, 0.0, INF));", false);
+	EidosAssertScriptSuccess_L("allClose(-INF, INF);", false);
+	EidosAssertScriptSuccess_L("allClose(-INF, 0.0);", false);
+	EidosAssertScriptSuccess_L("allClose(-INF, -INF);", true);
+	EidosAssertScriptSuccess_L("allClose(-INF, c(INF, 0.0, -INF));", false);
+	EidosAssertScriptSuccess_L("allClose(c(INF, 0.0, -INF), -INF);", false);
+	EidosAssertScriptSuccess_L("allClose(c(-INF, -INF, -INF), c(INF, 0.0, -INF));", false);
+	
+	EidosAssertScriptSuccess_L("allClose(NAN, 0.0, equalNAN=F);", false);
+	EidosAssertScriptSuccess_L("allClose(NAN, 0.0, equalNAN=T);", false);
+	EidosAssertScriptSuccess_L("allClose(NAN, INF, equalNAN=F);", false);
+	EidosAssertScriptSuccess_L("allClose(NAN, INF, equalNAN=T);", false);
+	EidosAssertScriptSuccess_L("allClose(0.0, NAN, equalNAN=F);", false);
+	EidosAssertScriptSuccess_L("allClose(0.0, NAN, equalNAN=T);", false);
+	EidosAssertScriptSuccess_L("allClose(INF, NAN, equalNAN=F);", false);
+	EidosAssertScriptSuccess_L("allClose(INF, NAN, equalNAN=T);", false);
+	EidosAssertScriptSuccess_L("allClose(NAN, NAN, equalNAN=F);", false);
+	EidosAssertScriptSuccess_L("allClose(NAN, NAN, equalNAN=T);", true);
+	EidosAssertScriptSuccess_L("allClose(NAN, c(0.0, INF, NAN), equalNAN=F);", false);
+	EidosAssertScriptSuccess_L("allClose(NAN, c(0.0, INF, NAN), equalNAN=T);", false);
+	EidosAssertScriptSuccess_L("allClose(c(NAN, NAN, NAN), c(0.0, INF, NAN), equalNAN=F);", false);
+	EidosAssertScriptSuccess_L("allClose(c(NAN, NAN, NAN), c(0.0, INF, NAN), equalNAN=T);", false);
+	EidosAssertScriptSuccess_L("allClose(c(0.0, INF, NAN), NAN, equalNAN=F);", false);
+	EidosAssertScriptSuccess_L("allClose(c(0.0, INF, NAN), NAN, equalNAN=T);", false);
+	EidosAssertScriptSuccess_L("allClose(c(0.0, INF, NAN), c(NAN, NAN, NAN), equalNAN=F);", false);
+	EidosAssertScriptSuccess_L("allClose(c(0.0, INF, NAN), c(NAN, NAN, NAN), equalNAN=T);", false);
+	
+	EidosAssertScriptSuccess_L("allClose(1.0, 1.0);", true);
+	EidosAssertScriptSuccess_L("allClose(0.0, 0.0);", true);
+	EidosAssertScriptSuccess_L("allClose(-1.0, -1.0);", true);
+	EidosAssertScriptSuccess_L("allClose(1.0, -1.0);", false);
+	EidosAssertScriptSuccess_L("allClose(-1.0, 1.0);", false);
+	EidosAssertScriptSuccess_L("allClose(c(1.0, 0.0, -1.0, 1.0, -1.0), c(1.0, 0.0, -1.0, -1.0, 1.0));", false);
+	
+	EidosAssertScriptSuccess_L("allClose(1.0, 1.0 + 0.9e-8, rtol=0.0);", true);
+	EidosAssertScriptSuccess_L("allClose(1.0, 1.0 + 1.1e-8, rtol=0.0);", false);
+	EidosAssertScriptSuccess_L("allClose(100.0, 100.0 + 0.9e-8, rtol=0.0);", true);
+	EidosAssertScriptSuccess_L("allClose(100.0, 100.0 + 1.1e-8, rtol=0.0);", false);
+	EidosAssertScriptSuccess_L("allClose(-100.0, -100.0 + 0.9e-8, rtol=0.0);", true);
+	EidosAssertScriptSuccess_L("allClose(-100.0, -100.0 + 1.1e-8, rtol=0.0);", false);
+	EidosAssertScriptSuccess_L("allClose(c(1.0, 1.0, 100.0, 100.0, -100.0, -100.0), c(1.0 + 0.9e-8, 1.0 + 1.1e-8, 100.0 + 0.9e-8, 100.0 + 1.1e-8, -100.0 + 0.9e-8, -100.0 + 1.1e-8), rtol=0.0);", false);
+	
+	EidosAssertScriptSuccess_L("allClose(1.0 + 0.9e-5, 1.0, atol=0.0);", true);
+	EidosAssertScriptSuccess_L("allClose(1.0 + 1.1e-5, 1.0, atol=0.0);", false);
+	EidosAssertScriptSuccess_L("allClose(10.0 + 0.9e-4, 10.0, atol=0.0);", true);
+	EidosAssertScriptSuccess_L("allClose(10.0 + 1.1e-4, 10.0, atol=0.0);", false);
+	EidosAssertScriptSuccess_L("allClose(100.0 + 0.9e-3, 100.0, atol=0.0);", true);
+	EidosAssertScriptSuccess_L("allClose(100.0 + 1.1e-3, 100.0, atol=0.0);", false);
+	EidosAssertScriptSuccess_L("allClose(-100.0 + 0.9e-3, -100.0, atol=0.0);", true);
+	EidosAssertScriptSuccess_L("allClose(-100.0 + 1.1e-3, -100.0, atol=0.0);", false);
+	
+	EidosAssertScriptSuccess_L("allClose(c(INF, -INF, NAN, 1.0, -1.0, 1.0), c(INF, -INF, NAN, 1.0, -1.0, 1.0 + 0.9e-8), equalNAN=T);", true);
+	
 	// any()
 	EidosAssertScriptRaise("any(NULL);", 0, "cannot be type");
 	EidosAssertScriptRaise("any(0);", 0, "cannot be type");
@@ -432,7 +497,7 @@ void _RunFunctionValueInspectionManipulationTests_a_through_f(void)
 	EidosAssertScriptSuccess_L("any(F,F,c(F,F,F,F),c(F,F,F,F));", false);
 	
 	// cat() – can't test the actual output, but we can make sure it executes...
-	EidosAssertScriptRaise("cat();", 0, "missing required argument x");
+	EidosAssertScriptRaise("cat();", 0, "missing required argument 'x'");
 	EidosAssertScriptSuccess_VOID("cat(NULL);");
 	EidosAssertScriptSuccess_VOID("cat(T);");
 	EidosAssertScriptSuccess_VOID("cat(5);");
@@ -765,6 +830,68 @@ void _RunFunctionValueInspectionManipulationTests_g_through_l(void)
 	EidosAssertScriptSuccess_L("identical(ifelse(matrix(c(F,F), ncol=1), 5:6, 2:3), matrix(c(2,3), ncol=1));", true);
 	EidosAssertScriptSuccess_L("identical(ifelse(array(c(T,F), c(1,2,1)), 5:6, 2:3), array(c(5,3), c(1,2,1)));", true);
 	EidosAssertScriptSuccess_L("identical(ifelse(matrix(c(T,F,F,T,F,T), nrow=2), 1:6, -6:-1), matrix(c(1,-5,-4,4,-2,6), nrow=2));", true);
+	
+	// isClose()
+	EidosAssertScriptRaise("isClose(float(0), 1.0:3);", 0, "requires the lengths of x and y");
+	EidosAssertScriptRaise("isClose(1.0:2, 1.0:3);", 0, "requires the lengths of x and y");
+	EidosAssertScriptRaise("isClose(1.0, 1.0, rtol=-1.0);", 0, "requires rtol");
+	EidosAssertScriptRaise("isClose(1.0, 1.0, atol=-1.0);", 0, "requires atol");
+	
+	EidosAssertScriptSuccess_L("isClose(INF, -INF);", false);
+	EidosAssertScriptSuccess_L("isClose(INF, 0.0);", false);
+	EidosAssertScriptSuccess_L("isClose(INF, INF);", true);
+	EidosAssertScriptSuccess_LV("isClose(INF, c(-INF, 0.0, INF));", {false, false, true});
+	EidosAssertScriptSuccess_LV("isClose(c(-INF, 0.0, INF), INF);", {false, false, true});
+	EidosAssertScriptSuccess_LV("isClose(c(INF, INF, INF), c(-INF, 0.0, INF));", {false, false, true});
+	EidosAssertScriptSuccess_L("isClose(-INF, INF);", false);
+	EidosAssertScriptSuccess_L("isClose(-INF, 0.0);", false);
+	EidosAssertScriptSuccess_L("isClose(-INF, -INF);", true);
+	EidosAssertScriptSuccess_LV("isClose(-INF, c(INF, 0.0, -INF));", {false, false, true});
+	EidosAssertScriptSuccess_LV("isClose(c(INF, 0.0, -INF), -INF);", {false, false, true});
+	EidosAssertScriptSuccess_LV("isClose(c(-INF, -INF, -INF), c(INF, 0.0, -INF));", {false, false, true});
+	
+	EidosAssertScriptSuccess_L("isClose(NAN, 0.0, equalNAN=F);", false);
+	EidosAssertScriptSuccess_L("isClose(NAN, 0.0, equalNAN=T);", false);
+	EidosAssertScriptSuccess_L("isClose(NAN, INF, equalNAN=F);", false);
+	EidosAssertScriptSuccess_L("isClose(NAN, INF, equalNAN=T);", false);
+	EidosAssertScriptSuccess_L("isClose(0.0, NAN, equalNAN=F);", false);
+	EidosAssertScriptSuccess_L("isClose(0.0, NAN, equalNAN=T);", false);
+	EidosAssertScriptSuccess_L("isClose(INF, NAN, equalNAN=F);", false);
+	EidosAssertScriptSuccess_L("isClose(INF, NAN, equalNAN=T);", false);
+	EidosAssertScriptSuccess_L("isClose(NAN, NAN, equalNAN=F);", false);
+	EidosAssertScriptSuccess_L("isClose(NAN, NAN, equalNAN=T);", true);
+	EidosAssertScriptSuccess_LV("isClose(NAN, c(0.0, INF, NAN), equalNAN=F);", {false, false, false});
+	EidosAssertScriptSuccess_LV("isClose(NAN, c(0.0, INF, NAN), equalNAN=T);", {false, false, true});
+	EidosAssertScriptSuccess_LV("isClose(c(NAN, NAN, NAN), c(0.0, INF, NAN), equalNAN=F);", {false, false, false});
+	EidosAssertScriptSuccess_LV("isClose(c(NAN, NAN, NAN), c(0.0, INF, NAN), equalNAN=T);", {false, false, true});
+	EidosAssertScriptSuccess_LV("isClose(c(0.0, INF, NAN), NAN, equalNAN=F);", {false, false, false});
+	EidosAssertScriptSuccess_LV("isClose(c(0.0, INF, NAN), NAN, equalNAN=T);", {false, false, true});
+	EidosAssertScriptSuccess_LV("isClose(c(0.0, INF, NAN), c(NAN, NAN, NAN), equalNAN=F);", {false, false, false});
+	EidosAssertScriptSuccess_LV("isClose(c(0.0, INF, NAN), c(NAN, NAN, NAN), equalNAN=T);", {false, false, true});
+	
+	EidosAssertScriptSuccess_L("isClose(1.0, 1.0);", true);
+	EidosAssertScriptSuccess_L("isClose(0.0, 0.0);", true);
+	EidosAssertScriptSuccess_L("isClose(-1.0, -1.0);", true);
+	EidosAssertScriptSuccess_L("isClose(1.0, -1.0);", false);
+	EidosAssertScriptSuccess_L("isClose(-1.0, 1.0);", false);
+	EidosAssertScriptSuccess_LV("isClose(c(1.0, 0.0, -1.0, 1.0, -1.0), c(1.0, 0.0, -1.0, -1.0, 1.0));", {true, true, true, false, false});
+	
+	EidosAssertScriptSuccess_L("isClose(1.0, 1.0 + 0.9e-8, rtol=0.0);", true);
+	EidosAssertScriptSuccess_L("isClose(1.0, 1.0 + 1.1e-8, rtol=0.0);", false);
+	EidosAssertScriptSuccess_L("isClose(100.0, 100.0 + 0.9e-8, rtol=0.0);", true);
+	EidosAssertScriptSuccess_L("isClose(100.0, 100.0 + 1.1e-8, rtol=0.0);", false);
+	EidosAssertScriptSuccess_L("isClose(-100.0, -100.0 + 0.9e-8, rtol=0.0);", true);
+	EidosAssertScriptSuccess_L("isClose(-100.0, -100.0 + 1.1e-8, rtol=0.0);", false);
+	EidosAssertScriptSuccess_LV("isClose(c(1.0, 1.0, 100.0, 100.0, -100.0, -100.0), c(1.0 + 0.9e-8, 1.0 + 1.1e-8, 100.0 + 0.9e-8, 100.0 + 1.1e-8, -100.0 + 0.9e-8, -100.0 + 1.1e-8), rtol=0.0);", {true, false, true, false, true, false});
+	
+	EidosAssertScriptSuccess_L("isClose(1.0 + 0.9e-5, 1.0, atol=0.0);", true);
+	EidosAssertScriptSuccess_L("isClose(1.0 + 1.1e-5, 1.0, atol=0.0);", false);
+	EidosAssertScriptSuccess_L("isClose(10.0 + 0.9e-4, 10.0, atol=0.0);", true);
+	EidosAssertScriptSuccess_L("isClose(10.0 + 1.1e-4, 10.0, atol=0.0);", false);
+	EidosAssertScriptSuccess_L("isClose(100.0 + 0.9e-3, 100.0, atol=0.0);", true);
+	EidosAssertScriptSuccess_L("isClose(100.0 + 1.1e-3, 100.0, atol=0.0);", false);
+	EidosAssertScriptSuccess_L("isClose(-100.0 + 0.9e-3, -100.0, atol=0.0);", true);
+	EidosAssertScriptSuccess_L("isClose(-100.0 + 1.1e-3, -100.0, atol=0.0);", false);
 }
 
 void _RunFunctionValueInspectionManipulationTests_m_through_r(void)

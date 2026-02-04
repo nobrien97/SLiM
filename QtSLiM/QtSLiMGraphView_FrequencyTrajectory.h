@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 4/1/2020.
-//  Copyright (c) 2020-2024 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2020-2025 Benjamin C. Haller.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -69,6 +69,7 @@ private:
     std::vector<MutationFrequencyHistory *> frequencyHistoryColdStorageLost_;                   // vector of MutationFrequencyHistory objects that have been lost
     std::vector<MutationFrequencyHistory *> frequencyHistoryColdStorageFixed_;                  // vector of MutationFrequencyHistory objects that have been fixed
     slim_tick_t lastTick_ = 0;                                                                  // the last tick data was gathered for; used to detect a backward move in time
+    bool justAddedToWindow_ = true;                                                             // true when the plot window has just been created
     
     // pop-up menu buttons
     QComboBox *subpopulationButton_ = nullptr;

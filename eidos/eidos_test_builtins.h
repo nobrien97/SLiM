@@ -110,7 +110,8 @@ for (iter in 1:100)
 	x = rnorm(10);		// float
 	xbuiltin = cumProduct(x);
 	xuserdef = cumProduct_func(x);
-	if (!identical(xbuiltin, xuserdef)) stop('Mismatch in test of cumProduct(f)');
+	// tolerance because product() can get a little roundoff error due to SIMD
+	if (!allClose(xbuiltin, xuserdef)) stop('Mismatch in test of cumProduct(f)');
 }
 
 // ***********************************************************************************************
@@ -135,7 +136,7 @@ for (iter in 1:100)
 	xbuiltin = cumSum(x);
 	xuserdef = cumSum_func(x);
 	// tolerance because sum() can get a little roundoff error due to SIMD
-	if (!all(abs(xbuiltin - xuserdef) < 1e-10)) stop('Mismatch in test of cumSum(f)');
+	if (!allClose(xbuiltin, xuserdef)) stop('Mismatch in test of cumSum(f)');
 }
 
 // ***********************************************************************************************
@@ -271,7 +272,7 @@ for (iter in 1:100)
 	xbuiltin = mean(x);
 	xuserdef = mean_func(x);
 	// tolerance because sum() can get a little roundoff error due to SIMD
-	if (!all(abs(xbuiltin - xuserdef) < 1e-10)) stop('Mismatch in test of mean(f)');
+	if (!allClose(xbuiltin, xuserdef)) stop('Mismatch in test of mean(f)');
 }
 
 // ***********************************************************************************************
@@ -418,7 +419,8 @@ for (iter in 1:100)
 	x = rnorm(10);		// float
 	xbuiltin = product(x);
 	xuserdef = product_func(x);
-	if (!identical(xbuiltin, xuserdef)) stop('Mismatch in test of product(f)');
+	// tolerance because product() can get a little roundoff error due to SIMD
+	if (!allClose(xbuiltin, xuserdef)) stop('Mismatch in test of product(f)');
 }
 
 // ***********************************************************************************************
@@ -793,7 +795,7 @@ for (iter in 1:100)
 	xbuiltin = sum(x);
 	xuserdef = sum_func(x);
 	// tolerance because sum() can get a little roundoff error due to SIMD
-	if (!all(abs(xbuiltin - xuserdef) < 1e-10)) stop('Mismatch in test of sum(f)');
+	if (!allClose(xbuiltin, xuserdef)) stop('Mismatch in test of sum(f)');
 }
 
 // ***********************************************************************************************
@@ -1198,6 +1200,13 @@ setSeed(asInteger(clock() * 100000));
 x = sample(-10:10, 210000, replace=T);
 x = sapply(-10:10, "sum(x == applyValue);");
 if (any(abs(x - 10000) > 500)) stop('Mismatch in expectation vs. realization of sample() - could be random chance (but very unlikely), rerun test');
+
+// ***********************************************************************************************
+
+setSeed(asInteger(clock() * 100000));
+m = mean(rztpois(10000, 3));
+expected = 3 / (1 - exp(-3));	// ~= 3.15719
+if (abs(m - expected) > 0.07) stop('Mismatch in expectation vs. realization of rztpois() - could be random chance (but very unlikely), rerun test');
 
 )V0G0N"
 

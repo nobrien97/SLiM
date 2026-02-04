@@ -3,7 +3,7 @@
 //  EidosScribe
 //
 //  Created by Ben Haller on 6/13/15.
-//  Copyright (c) 2015-2024 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2015-2025 Benjamin C. Haller.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -252,7 +252,7 @@ NSString *EidosDefaultsSuppressScriptCheckSuccessPanelKey = @"EidosSuppressScrip
 - (NSString *)_executeScriptString:(NSString *)scriptString tokenString:(NSString **)tokenString parseString:(NSString **)parseString executionString:(NSString **)executionString errorString:(NSString **)errorString withOptionalSemicolon:(BOOL)semicolonOptional
 {
 	std::string script_string([scriptString UTF8String]);
-	EidosScript script(script_string, -1);	// the position arguments are for debug points in QtSLiM, which are not supported here, so we can just pass -1
+	EidosScript script(script_string);
 	std::string output;
 	
 	// Unfortunately, running readFromPopulationFile() is too much of a shock for SLiMgui.  It invalidates variables that are being displayed in
@@ -325,6 +325,28 @@ NSString *EidosDefaultsSuppressScriptCheckSuccessPanelKey = @"EidosSuppressScrip
 	{
 		std::string &&error_string = Eidos_GetUntrimmedRaiseMessage();
 		*errorString = [NSString stringWithUTF8String:error_string.c_str()];
+		
+		// move the error outside of the currentScript context if possible; the ranges
+		// should have already been moved by TranslateErrorContextToUserScript()
+		if (gEidosErrorContext.currentScript == &script)
+		{
+#if EIDOS_DEBUG_ERROR_POSITIONS
+			std::cout << "-[EidosConsoleWindowController _executeScriptString:...]: clearing gEidosErrorContext.currentScript after error in tokenization." << std::endl;
+#endif
+			gEidosErrorContext.currentScript = nullptr;
+		}
+		else if (gEidosErrorContext.currentScript)
+		{
+			// The error got translated to a script we don't recognize; clear the error info,
+			// all we can do is show the error string to the user, with no position
+			*errorString = [@"A tokenization error occurred in a different script context, so the error position cannot be highlighted in the console:\n" stringByAppendingString:*errorString];
+			
+#if EIDOS_DEBUG_ERROR_POSITIONS
+			std::cout << "-[EidosConsoleWindowController _executeScriptString:...]: error in tokenization traced to a different script; clearing all error info." << std::endl;
+#endif
+			ClearErrorContext();
+		}
+		
 		return nil;
 	}
 	
@@ -347,6 +369,28 @@ NSString *EidosDefaultsSuppressScriptCheckSuccessPanelKey = @"EidosSuppressScrip
 	{
 		std::string &&error_string = Eidos_GetUntrimmedRaiseMessage();
 		*errorString = [NSString stringWithUTF8String:error_string.c_str()];
+		
+		// move the error outside of the currentScript context if possible; the ranges
+		// should have already been moved by TranslateErrorContextToUserScript()
+		if (gEidosErrorContext.currentScript == &script)
+		{
+#if EIDOS_DEBUG_ERROR_POSITIONS
+			std::cout << "-[EidosConsoleWindowController _executeScriptString:...]: clearing gEidosErrorContext.currentScript after error in parsing." << std::endl;
+#endif
+			gEidosErrorContext.currentScript = nullptr;
+		}
+		else if (gEidosErrorContext.currentScript)
+		{
+			// The error got translated to a script we don't recognize; clear the error info,
+			// all we can do is show the error string to the user, with no position
+			*errorString = [@"A parsing error occurred in a different script context, so the error position cannot be highlighted in the console:\n" stringByAppendingString:*errorString];
+			
+#if EIDOS_DEBUG_ERROR_POSITIONS
+			std::cout << "-[EidosConsoleWindowController _executeScriptString:...]: error in parsing traced to a different script; clearing all error info." << std::endl;
+#endif
+			ClearErrorContext();
+		}
+		
 		return nil;
 	}
 	
@@ -408,7 +452,11 @@ NSString *EidosDefaultsSuppressScriptCheckSuccessPanelKey = @"EidosSuppressScrip
 		[delegate eidosConsoleWindowControllerWillExecuteScript:self];
 	
 	std::ostringstream outstream;	// in SLiMguiLegacy, one output stream for both types of output
-	EidosInterpreter interpreter(script, *global_symbols, *global_function_map, eidos_context, outstream, outstream);
+	EidosInterpreter interpreter(script, *global_symbols, *global_function_map, eidos_context, outstream, outstream
+#ifdef SLIMGUI
+			, true
+#endif
+			);
 	
 	try
 	{
@@ -436,6 +484,27 @@ NSString *EidosDefaultsSuppressScriptCheckSuccessPanelKey = @"EidosSuppressScrip
 		
 		std::string &&error_string = Eidos_GetUntrimmedRaiseMessage();
 		*errorString = [NSString stringWithUTF8String:error_string.c_str()];
+		
+		// move the error outside of the currentScript context if possible; the ranges
+		// should have already been moved by TranslateErrorContextToUserScript()
+		if (gEidosErrorContext.currentScript == &script)
+		{
+#if EIDOS_DEBUG_ERROR_POSITIONS
+			std::cout << "-[EidosConsoleWindowController _executeScriptString:...]: clearing gEidosErrorContext.currentScript after error in execution." << std::endl;
+#endif
+			gEidosErrorContext.currentScript = nullptr;
+		}
+		else if (gEidosErrorContext.currentScript)
+		{
+			// The error got translated to a script we don't recognize; clear the error info,
+			// all we can do is show the error string to the user, with no position
+			*errorString = [@"An execution error occurred in a different script context, so the error position cannot be highlighted in the console:\n" stringByAppendingString:*errorString];
+			
+#if EIDOS_DEBUG_ERROR_POSITIONS
+			std::cout << "-[EidosConsoleWindowController _executeScriptString:...]: error in execution traced to a different script; clearing all error info." << std::endl;
+#endif
+			ClearErrorContext();
+		}
 		
 		return [NSString stringWithUTF8String:output.c_str()];
 	}
@@ -531,19 +600,37 @@ NSString *EidosDefaultsSuppressScriptCheckSuccessPanelKey = @"EidosSuppressScrip
 			[outputTextView appendSpacer];
 		}
 		
-		if (errorString && !gEidosErrorContext.executingRuntimeScript &&
-			(gEidosErrorContext.errorPosition.characterStartOfErrorUTF16 >= 0) &&
-			(gEidosErrorContext.errorPosition.characterEndOfErrorUTF16 >= gEidosErrorContext.errorPosition.characterStartOfErrorUTF16) &&
-			(scriptRange.location != NSNotFound))
+		// If we have an error, it is in the user script, and it has a valid position, then we can try to
+		// highlight it in the input.  Note that gEidosErrorContext.currentScript is nullptr in the console.
+		if (errorString)
 		{
-			// An error occurred, so let's try to highlight it in the input
-			int errorTokenStart = gEidosErrorContext.errorPosition.characterStartOfErrorUTF16 + (int)scriptRange.location;
-			int errorTokenEnd = gEidosErrorContext.errorPosition.characterEndOfErrorUTF16 + (int)scriptRange.location;
-			
-			NSRange charRange = NSMakeRange(errorTokenStart, errorTokenEnd - errorTokenStart + 1);
-			
-			[ts addAttribute:NSBackgroundColorAttributeName value:[NSColor redColor] range:charRange];
-			[ts addAttribute:NSForegroundColorAttributeName value:[NSColor whiteColor] range:charRange];
+			if (!gEidosErrorContext.currentScript || (gEidosErrorContext.currentScript->UserScriptUTF16Offset() == 0))
+			{
+				if ((gEidosErrorContext.errorPosition.characterStartOfErrorUTF16 >= 0) &&
+					(gEidosErrorContext.errorPosition.characterEndOfErrorUTF16 >= gEidosErrorContext.errorPosition.characterStartOfErrorUTF16) &&
+					(scriptRange.location != NSNotFound))
+				{
+					int errorTokenStart = gEidosErrorContext.errorPosition.characterStartOfErrorUTF16 + (int)scriptRange.location;
+					int errorTokenEnd = gEidosErrorContext.errorPosition.characterEndOfErrorUTF16 + (int)scriptRange.location;
+					
+					NSRange charRange = NSMakeRange(errorTokenStart, errorTokenEnd - errorTokenStart + 1);
+					
+					[ts addAttribute:NSBackgroundColorAttributeName value:[NSColor redColor] range:charRange];
+					[ts addAttribute:NSForegroundColorAttributeName value:[NSColor whiteColor] range:charRange];
+				}
+#if EIDOS_DEBUG_ERROR_POSITIONS
+				else
+				{
+					std::cout << "-[EidosConsoleWindowController executeScriptString:...]: an error occurred, but the error range is unusable" << std::endl;
+				}
+#endif
+			}
+#if EIDOS_DEBUG_ERROR_POSITIONS
+			else
+			{
+				std::cout << "-[EidosConsoleWindowController executeScriptString:...]: an error occurred, but the script context is unusable" << std::endl;
+			}
+#endif
 		}
 		
 		[ts endEditing];
@@ -592,8 +679,8 @@ NSString *EidosDefaultsSuppressScriptCheckSuccessPanelKey = @"EidosSuppressScrip
 - (BOOL)checkScriptSuppressSuccessResponse:(BOOL)suppressSuccessResponse
 {
 	NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-	NSString *currentScriptString = [scriptTextView string];
-	const char *cstr = [currentScriptString UTF8String];
+	NSString *scriptString = [scriptTextView string];
+	const char *cstr = [scriptString UTF8String];
 	NSString *errorDiagnostic = nil;
 	
 	if (!cstr)
@@ -602,7 +689,7 @@ NSString *EidosDefaultsSuppressScriptCheckSuccessPanelKey = @"EidosSuppressScrip
 	}
 	else
 	{
-		EidosScript script(cstr, -1);
+		EidosScript script(cstr);
 		
 		try {
 			script.Tokenize();
@@ -612,6 +699,25 @@ NSString *EidosDefaultsSuppressScriptCheckSuccessPanelKey = @"EidosSuppressScrip
 		{
 			std::string &&error_diagnostic = Eidos_GetTrimmedRaiseMessage();
 			errorDiagnostic = [[NSString stringWithUTF8String:error_diagnostic.c_str()] retain];
+			
+			// move the error outside of the currentScript context if possible; the ranges
+			// should have already been moved by TranslateErrorContextToUserScript()
+			if (gEidosErrorContext.currentScript == &script)
+			{
+#if EIDOS_DEBUG_ERROR_POSITIONS
+				std::cout << "-[EidosConsoleWindowController checkScriptSuppressSuccessResponse:]: clearing gEidosErrorContext.currentScript after error in script check." << std::endl;
+#endif
+				gEidosErrorContext.currentScript = nullptr;
+			}
+			else if (gEidosErrorContext.currentScript)
+			{
+				// The error got translated to a script we don't recognize; clear the error info,
+				// all we can do is show the error string to the user, with no position
+#if EIDOS_DEBUG_ERROR_POSITIONS
+				std::cout << "-[EidosConsoleWindowController _executeScriptString:...]: error in script check traced to a different script; clearing all error info." << std::endl;
+#endif
+				ClearErrorContext();
+			}
 		}
 	}
 	
@@ -685,9 +791,9 @@ NSString *EidosDefaultsSuppressScriptCheckSuccessPanelKey = @"EidosSuppressScrip
 		if ([self checkScriptSuppressSuccessResponse:YES])
 		{
 			// We know the script is syntactically correct, so we can tokenize and parse it without worries
-			NSString *currentScriptString = [scriptTextView string];
-			const char *cstr = [currentScriptString UTF8String];
-			EidosScript script(cstr, -1);
+			NSString *scriptString = [scriptTextView string];
+			const char *cstr = [scriptString UTF8String];
+			EidosScript script(cstr);
 			
 			script.Tokenize(false, true);	// get whitespace and comment tokens
 			

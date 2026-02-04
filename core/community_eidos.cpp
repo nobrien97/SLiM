@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 2/28/2022.
-//  Copyright (c) 2022-2024 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2022-2025 Benjamin C. Haller.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -20,7 +20,7 @@
 
 #include "community.h"
 
-#include "genome.h"
+#include "haplosome.h"
 #include "individual.h"
 #include "subpopulation.h"
 #include "polymorphism.h"
@@ -88,6 +88,7 @@ EidosValue_SP Community::ContextDefinedFunctionDispatch(const std::string &p_fun
 	else if (p_function_name.compare(gStr_initializeMutationType) == 0)			return active_species_->ExecuteContextFunction_initializeMutationType(p_function_name, p_arguments, p_interpreter);			// NOLINT(*-branch-clone) : intentional consecutive branches
 	else if (p_function_name.compare(gStr_initializeMutationTypeNuc) == 0)		return active_species_->ExecuteContextFunction_initializeMutationType(p_function_name, p_arguments, p_interpreter);
 	else if (p_function_name.compare(gStr_initializeRecombinationRate) == 0)	return active_species_->ExecuteContextFunction_initializeRecombinationRate(p_function_name, p_arguments, p_interpreter);
+	else if (p_function_name.compare(gStr_initializeChromosome) == 0)			return active_species_->ExecuteContextFunction_initializeChromosome(p_function_name, p_arguments, p_interpreter);
 	else if (p_function_name.compare(gStr_initializeGeneConversion) == 0)		return active_species_->ExecuteContextFunction_initializeGeneConversion(p_function_name, p_arguments, p_interpreter);
 	else if (p_function_name.compare(gStr_initializeMutationRate) == 0)			return active_species_->ExecuteContextFunction_initializeMutationRate(p_function_name, p_arguments, p_interpreter);
 	else if (p_function_name.compare(gStr_initializeHotspotMap) == 0)			return active_species_->ExecuteContextFunction_initializeHotspotMap(p_function_name, p_arguments, p_interpreter);
@@ -111,7 +112,7 @@ const std::vector<EidosFunctionSignature_CSP> *Community::ZeroTickFunctionSignat
 		sim_0_signatures_.emplace_back((EidosFunctionSignature *)(new EidosFunctionSignature(gStr_initializeAncestralNucleotides, nullptr, kEidosValueMaskInt | kEidosValueMaskSingleton, "SLiM"))
 									   ->AddIntString("sequence"));
 		sim_0_signatures_.emplace_back((EidosFunctionSignature *)(new EidosFunctionSignature(gStr_initializeGenomicElement, nullptr, kEidosValueMaskObject, gSLiM_GenomicElement_Class, "SLiM"))
-										->AddIntObject("genomicElementType", gSLiM_GenomicElementType_Class)->AddInt("start")->AddInt("end"));
+										->AddIntObject("genomicElementType", gSLiM_GenomicElementType_Class)->AddInt_ON("start", gStaticEidosValueNULL)->AddInt_ON("end", gStaticEidosValueNULL));
 		sim_0_signatures_.emplace_back((EidosFunctionSignature *)(new EidosFunctionSignature(gStr_initializeGenomicElementType, nullptr, kEidosValueMaskObject | kEidosValueMaskSingleton, gSLiM_GenomicElementType_Class, "SLiM"))
 										->AddIntString_S("id")->AddIntObject("mutationTypes", gSLiM_MutationType_Class)->AddNumeric("proportions")->AddFloat_ON("mutationMatrix", gStaticEidosValueNULL));
 		sim_0_signatures_.emplace_back((EidosFunctionSignature *)(new EidosFunctionSignature(gStr_initializeInteractionType, nullptr, kEidosValueMaskObject | kEidosValueMaskSingleton, gSLiM_InteractionType_Class, "SLiM"))
@@ -122,6 +123,7 @@ const std::vector<EidosFunctionSignature_CSP> *Community::ZeroTickFunctionSignat
 									   ->AddIntString_S("id")->AddNumeric_S("dominanceCoeff")->AddString_S("distributionType")->AddEllipsis());
 		sim_0_signatures_.emplace_back((EidosFunctionSignature *)(new EidosFunctionSignature(gStr_initializeRecombinationRate, nullptr, kEidosValueMaskVOID, "SLiM"))
 										->AddNumeric("rates")->AddInt_ON("ends", gStaticEidosValueNULL)->AddString_OS("sex", gStaticEidosValue_StringAsterisk));
+		sim_0_signatures_.emplace_back((EidosFunctionSignature *)(new EidosFunctionSignature(gStr_initializeChromosome, nullptr, kEidosValueMaskObject | kEidosValueMaskSingleton, gSLiM_Chromosome_Class, "SLiM"))->AddInt_S("id")->AddInt_OSN("length", gStaticEidosValueNULL)->AddString_OS("type", gStaticEidosValue_StringA)->AddString_OSN("symbol", gStaticEidosValueNULL)->AddString_OSN("name", gStaticEidosValueNULL)->AddInt_OS("mutationRuns", gStaticEidosValue_Integer0));
 		sim_0_signatures_.emplace_back((EidosFunctionSignature *)(new EidosFunctionSignature(gStr_initializeGeneConversion, nullptr, kEidosValueMaskVOID, "SLiM"))
 										->AddNumeric_S("nonCrossoverFraction")->AddNumeric_S("meanLength")->AddNumeric_S("simpleConversionFraction")->AddNumeric_OS("bias", gStaticEidosValue_Integer0)->AddLogical_OS("redrawLengthsOnFailure", gStaticEidosValue_LogicalF));
 		sim_0_signatures_.emplace_back((EidosFunctionSignature *)(new EidosFunctionSignature(gStr_initializeMutationRate, nullptr, kEidosValueMaskVOID, "SLiM"))
@@ -129,9 +131,9 @@ const std::vector<EidosFunctionSignature_CSP> *Community::ZeroTickFunctionSignat
 		sim_0_signatures_.emplace_back((EidosFunctionSignature *)(new EidosFunctionSignature(gStr_initializeHotspotMap, nullptr, kEidosValueMaskVOID, "SLiM"))
 									   ->AddNumeric("multipliers")->AddInt_ON("ends", gStaticEidosValueNULL)->AddString_OS("sex", gStaticEidosValue_StringAsterisk));
 		sim_0_signatures_.emplace_back((EidosFunctionSignature *)(new EidosFunctionSignature(gStr_initializeSex, nullptr, kEidosValueMaskVOID, "SLiM"))
-										->AddString_S("chromosomeType"));
+										->AddString_OSN("chromosomeType", gStaticEidosValueNULL));
 		sim_0_signatures_.emplace_back((EidosFunctionSignature *)(new EidosFunctionSignature(gStr_initializeSLiMOptions, nullptr, kEidosValueMaskVOID, "SLiM"))
-									   ->AddLogical_OS("keepPedigrees", gStaticEidosValue_LogicalF)->AddString_OS("dimensionality", gStaticEidosValue_StringEmpty)->AddString_OS("periodicity", gStaticEidosValue_StringEmpty)->AddInt_OS("mutationRuns", gStaticEidosValue_Integer0)->AddLogical_OS("preventIncidentalSelfing", gStaticEidosValue_LogicalF)->AddLogical_OS("nucleotideBased", gStaticEidosValue_LogicalF)->AddLogical_OS("randomizeCallbacks", gStaticEidosValue_LogicalT));
+									   ->AddLogical_OS("keepPedigrees", gStaticEidosValue_LogicalF)->AddString_OS("dimensionality", gStaticEidosValue_StringEmpty)->AddString_OS("periodicity", gStaticEidosValue_StringEmpty)->AddLogical_OS("doMutationRunExperiments", gStaticEidosValue_LogicalT)->AddLogical_OS("preventIncidentalSelfing", gStaticEidosValue_LogicalF)->AddLogical_OS("nucleotideBased", gStaticEidosValue_LogicalF)->AddLogical_OS("randomizeCallbacks", gStaticEidosValue_LogicalT)->AddLogical_OS("checkInfiniteLoops", gStaticEidosValue_LogicalT));
 		sim_0_signatures_.emplace_back((EidosFunctionSignature *)(new EidosFunctionSignature(gStr_initializeSpecies, nullptr, kEidosValueMaskVOID, "SLiM"))
 									   ->AddInt_OS("tickModulo", gStaticEidosValue_Integer1)->AddInt_OS("tickPhase", gStaticEidosValue_Integer1)->AddString_OS(gStr_avatar, gStaticEidosValue_StringEmpty)->AddString_OS("color", gStaticEidosValue_StringEmpty));
 		sim_0_signatures_.emplace_back((EidosFunctionSignature *)(new EidosFunctionSignature(gStr_initializeTreeSeq, nullptr, kEidosValueMaskVOID, "SLiM"))
@@ -311,7 +313,7 @@ const EidosClass *Community::Class(void) const
 
 void Community::Print(std::ostream &p_ostream) const
 {
-	p_ostream << Class()->ClassName();	// standard EidosObject behavior (not Dictionary behavior)
+	p_ostream << Class()->ClassNameForDisplay();	// standard EidosObject behavior (not Dictionary behavior)
 }
 
 EidosValue_SP Community::GetProperty(EidosGlobalStringID p_property_id)
@@ -569,7 +571,7 @@ EidosValue_SP Community::ExecuteInstanceMethod(EidosGlobalStringID p_method_id, 
 	}
 }
 
-//	*********************	– (object<LogFile>$)createLogFile(string$ filePath, [Ns initialContents = NULL], [logical$ append = F], [logical$ compress = F], [string$ sep = ","], [Ni$ logInterval = NULL], [Ni$ flushInterval = NULL])
+//	*********************	– (object<LogFile>$)createLogFile(string$ filePath, [Ns initialContents = NULL], [logical$ append = F], [logical$ compress = F], [string$ sep = ","], [Ni$ logInterval = NULL], [Ni$ flushInterval = NULL], [logical$ header = T])
 EidosValue_SP Community::ExecuteMethod_createLogFile(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter)
 {
 #pragma unused (p_method_id, p_arguments, p_interpreter)
@@ -582,6 +584,7 @@ EidosValue_SP Community::ExecuteMethod_createLogFile(EidosGlobalStringID p_metho
 	EidosValue_String *sep_value = (EidosValue_String *)p_arguments[4].get();
 	EidosValue *logInterval_value = p_arguments[5].get();
 	EidosValue *flushInterval_value = p_arguments[6].get();
+	EidosValue *header_value = p_arguments[7].get();
 	
 	// process parameters
 	const std::string &filePath = filePath_value->StringRefAtIndex_NOCAST(0, nullptr);
@@ -591,6 +594,7 @@ EidosValue_SP Community::ExecuteMethod_createLogFile(EidosGlobalStringID p_metho
 	const std::string &sep = sep_value->StringRefAtIndex_NOCAST(0, nullptr);
 	bool autologging = false, explicitFlushing = false;
 	int64_t logInterval = 0, flushInterval = 0;
+	bool emit_header = header_value->LogicalAtIndex_NOCAST(0, nullptr);
 	
 	if (initialContents_value->Type() != EidosValueType::kValueNULL)
 	{
@@ -635,7 +639,7 @@ EidosValue_SP Community::ExecuteMethod_createLogFile(EidosGlobalStringID p_metho
 	// Configure it
 	logfile->SetLogInterval(autologging, logInterval);
 	logfile->SetFlushInterval(explicitFlushing, flushInterval);
-	logfile->ConfigureFile(filePath, initialContents, append, do_compress, sep);
+	logfile->ConfigureFile(filePath, initialContents, append, emit_header, do_compress, sep);
 	
 	// Check for duplicate LogFiles using the same path; this is a common error so I'm making it illegal
 	const std::string &resolved_path = logfile->ResolvedFilePath();
@@ -790,7 +794,7 @@ EidosValue_SP Community::ExecuteMethod_mutationTypesWithIDs(EidosGlobalStringID 
 		MutationType *object = MutationTypeWithID(id);
 		
 		if (!object)
-			EIDOS_TERMINATION << "ERROR (Community::ExecuteMethod_mutationTypesWithIDs): mutationTypesWithIDs() did not find a genomic element type with id " << id << "." << EidosTerminate();
+			EIDOS_TERMINATION << "ERROR (Community::ExecuteMethod_mutationTypesWithIDs): mutationTypesWithIDs() did not find a mutation type with id " << id << "." << EidosTerminate();
 		
 		vec->set_object_element_no_check_NORR(object, id_index);
 	}
@@ -900,9 +904,12 @@ EidosValue_SP Community::ExecuteMethod_outputUsage(EidosGlobalStringID p_method_
 {
 #pragma unused (p_method_id, p_arguments, p_interpreter)
 	// BEWARE: See also the -usage() method, which must be maintained in parallel with this
-	std::ostream &out = p_interpreter.ExecutionOutputStream();
+	
+	// before writing anything, erase a progress line if we've got one up, to try to make a clean slate
+	Eidos_EraseProgress();
 	
 	// Save flags/precision and set to precision 1
+	std::ostream &out = p_interpreter.ExecutionOutputStream();
 	std::ios_base::fmtflags oldflags = out.flags();
 	std::streamsize oldprecision = out.precision();
 	out << std::fixed << std::setprecision(1);
@@ -932,11 +939,11 @@ EidosValue_SP Community::ExecuteMethod_outputUsage(EidosGlobalStringID p_method_
 	out << "      Recombination rate maps: " << PrintBytes(usage_all_species.chromosomeRecombinationRateMaps) << std::endl;
 	out << "      Ancestral nucleotides: " << PrintBytes(usage_all_species.chromosomeAncestralSequence) << std::endl;
 	
-	// Genome
-	out << "   Genome objects (" << usage_all_species.genomeObjects_count << "): " << PrintBytes(usage_all_species.genomeObjects) << std::endl;
-	out << "      External MutationRun* buffers: " << PrintBytes(usage_all_species.genomeExternalBuffers) << std::endl;
-	out << "      Unused pool space: " << PrintBytes(usage_all_species.genomeUnusedPoolSpace) << std::endl;
-	out << "      Unused pool buffers: " << PrintBytes(usage_all_species.genomeUnusedPoolBuffers) << std::endl;
+	// Haplosome
+	out << "   Haplosome objects (" << usage_all_species.haplosomeObjects_count << "): " << PrintBytes(usage_all_species.haplosomeObjects) << std::endl;
+	out << "      External MutationRun* buffers: " << PrintBytes(usage_all_species.haplosomeExternalBuffers) << std::endl;
+	out << "      Unused pool space: " << PrintBytes(usage_all_species.haplosomeUnusedPoolSpace) << std::endl;
+	out << "      Unused pool buffers: " << PrintBytes(usage_all_species.haplosomeUnusedPoolBuffers) << std::endl;
 	
 	// GenomicElement
 	out << "   GenomicElement objects (" << usage_all_species.genomicElementObjects_count << "): " << PrintBytes(usage_all_species.genomicElementObjects) << std::endl;
@@ -946,6 +953,8 @@ EidosValue_SP Community::ExecuteMethod_outputUsage(EidosGlobalStringID p_method_
 	
 	// Individual
 	out << "   Individual objects (" << usage_all_species.individualObjects_count << "): " << PrintBytes(usage_all_species.individualObjects) << std::endl;
+	out << "      External Haplosome* buffers: " << PrintBytes(usage_all_species.individualHaplosomeVectors) << std::endl;
+	out << "      Individuals awaiting reuse: " << PrintBytes(usage_all_species.individualJunkyardAndHaplosomes) << std::endl;
 	out << "      Unused pool space: " << PrintBytes(usage_all_species.individualUnusedPoolSpace) << std::endl;
 	
 	// InteractionType
@@ -1008,6 +1017,8 @@ EidosValue_SP Community::ExecuteMethod_outputUsage(EidosGlobalStringID p_method_
 
 void Community::CheckScheduling(slim_tick_t p_target_tick, SLiMCycleStage p_target_stage)
 {
+	// See also Community::IsPastOrPresent() for essentially the same logic, but handling
+	// the timing problem in a different way.
 	if (p_target_tick < tick_)
 		EIDOS_TERMINATION << "ERROR (Community::CheckScheduling): event/callback scheduled for a past tick would not run." << EidosTerminate();
 	if ((p_target_tick == tick_) && (p_target_stage < cycle_stage_))
@@ -1069,7 +1080,7 @@ EidosValue_SP Community::ExecuteMethod_registerFirstEarlyLateEvent(EidosGlobalSt
 	
 	CheckScheduling(start_tick, target_stage);
 	
-	SLiMEidosBlock *new_script_block = new SLiMEidosBlock(script_id, script_string, -1, target_type, start_tick, end_tick, nullptr, ticksSpec);
+	SLiMEidosBlock *new_script_block = new SLiMEidosBlock(script_id, script_string, target_type, start_tick, end_tick, nullptr, ticksSpec);
 	
 	AddScriptBlock(new_script_block, &p_interpreter, nullptr);		// takes ownership from us
 	
@@ -1106,7 +1117,7 @@ EidosValue_SP Community::ExecuteMethod_registerInteractionCallback(EidosGlobalSt
 	
 	CheckScheduling(start_tick, (model_type_ == SLiMModelType::kModelTypeWF) ? SLiMCycleStage::kWFStage7AdvanceTickCounter : SLiMCycleStage::kNonWFStage7AdvanceTickCounter);
 	
-	SLiMEidosBlock *new_script_block = new SLiMEidosBlock(script_id, script_string, -1, SLiMEidosBlockType::SLiMEidosInteractionCallback, start_tick, end_tick, nullptr, nullptr);
+	SLiMEidosBlock *new_script_block = new SLiMEidosBlock(script_id, script_string, SLiMEidosBlockType::SLiMEidosInteractionCallback, start_tick, end_tick, nullptr, nullptr);
 	
 	new_script_block->interaction_type_id_ = int_type_id;
 	new_script_block->subpopulation_id_ = subpop_id;
@@ -1138,55 +1149,7 @@ EidosValue_SP Community::ExecuteMethod_rescheduleScriptBlock(EidosGlobalStringID
 		EIDOS_TERMINATION << "ERROR (Community::ExecuteMethod_rescheduleScriptBlock): (internal error) rescheduleScriptBlock() cannot be called on user-defined function script blocks." << EidosTerminate();
 	}
 	
-	// Figure out what cycle stage the rescheduled block executes in; this is annoying, but necessary for the new scheduling check call
-	SLiMCycleStage stage = SLiMCycleStage::kStagePostCycle;	// unused below, just here to silence a warning
-	
-	// NOLINTBEGIN(*-branch-clone) : multiple internal tick stages map to the same user-level stage
-	if (model_type_ == SLiMModelType::kModelTypeWF)
-	{
-		switch (block->type_)
-		{
-			case SLiMEidosBlockType::SLiMEidosEventFirst:				stage = SLiMCycleStage::kWFStage0ExecuteFirstScripts; break;
-			case SLiMEidosBlockType::SLiMEidosEventEarly:				stage = SLiMCycleStage::kWFStage1ExecuteEarlyScripts; break;
-			case SLiMEidosBlockType::SLiMEidosEventLate:				stage = SLiMCycleStage::kWFStage5ExecuteLateScripts; break;
-			case SLiMEidosBlockType::SLiMEidosInitializeCallback:		stage = SLiMCycleStage::kStagePreCycle; break;
-			case SLiMEidosBlockType::SLiMEidosMutationEffectCallback:	stage = SLiMCycleStage::kWFStage6CalculateFitness; break;
-			case SLiMEidosBlockType::SLiMEidosFitnessEffectCallback:	stage = SLiMCycleStage::kWFStage6CalculateFitness; break;
-			case SLiMEidosBlockType::SLiMEidosInteractionCallback:		stage = SLiMCycleStage::kWFStage7AdvanceTickCounter; break;
-			case SLiMEidosBlockType::SLiMEidosMateChoiceCallback:		stage = SLiMCycleStage::kWFStage2GenerateOffspring; break;
-			case SLiMEidosBlockType::SLiMEidosModifyChildCallback:		stage = SLiMCycleStage::kWFStage2GenerateOffspring; break;
-			case SLiMEidosBlockType::SLiMEidosRecombinationCallback:	stage = SLiMCycleStage::kWFStage2GenerateOffspring; break;
-			case SLiMEidosBlockType::SLiMEidosMutationCallback:			stage = SLiMCycleStage::kWFStage2GenerateOffspring; break;
-			case SLiMEidosBlockType::SLiMEidosSurvivalCallback:			stage = SLiMCycleStage::kWFStage4SwapGenerations; break;				// never hit
-			case SLiMEidosBlockType::SLiMEidosReproductionCallback:		stage = SLiMCycleStage::kWFStage2GenerateOffspring; break;				// never hit
-			case SLiMEidosBlockType::SLiMEidosNoBlockType:
-			case SLiMEidosBlockType::SLiMEidosUserDefinedFunction:
-				EIDOS_TERMINATION << "ERROR (Community::ExecuteMethod_rescheduleScriptBlock): (internal error) rescheduleScriptBlock() cannot be called on this type of script block." << EidosTerminate();
-		}
-	}
-	else
-	{
-		switch (block->type_)
-		{
-			case SLiMEidosBlockType::SLiMEidosEventFirst:				stage = SLiMCycleStage::kNonWFStage0ExecuteFirstScripts; break;
-			case SLiMEidosBlockType::SLiMEidosEventEarly:				stage = SLiMCycleStage::kNonWFStage2ExecuteEarlyScripts; break;
-			case SLiMEidosBlockType::SLiMEidosEventLate:				stage = SLiMCycleStage::kNonWFStage6ExecuteLateScripts; break;
-			case SLiMEidosBlockType::SLiMEidosInitializeCallback:		stage = SLiMCycleStage::kStagePreCycle; break;
-			case SLiMEidosBlockType::SLiMEidosMutationEffectCallback:	stage = SLiMCycleStage::kNonWFStage3CalculateFitness; break;
-			case SLiMEidosBlockType::SLiMEidosFitnessEffectCallback:	stage = SLiMCycleStage::kNonWFStage3CalculateFitness; break;
-			case SLiMEidosBlockType::SLiMEidosInteractionCallback:		stage = SLiMCycleStage::kNonWFStage7AdvanceTickCounter; break;
-			case SLiMEidosBlockType::SLiMEidosMateChoiceCallback:		stage = SLiMCycleStage::kNonWFStage1GenerateOffspring; break;			// never hit
-			case SLiMEidosBlockType::SLiMEidosModifyChildCallback:		stage = SLiMCycleStage::kNonWFStage1GenerateOffspring; break;
-			case SLiMEidosBlockType::SLiMEidosRecombinationCallback:	stage = SLiMCycleStage::kNonWFStage1GenerateOffspring; break;
-			case SLiMEidosBlockType::SLiMEidosMutationCallback:			stage = SLiMCycleStage::kNonWFStage1GenerateOffspring; break;
-			case SLiMEidosBlockType::SLiMEidosSurvivalCallback:			stage = SLiMCycleStage::kNonWFStage4SurvivalSelection; break;
-			case SLiMEidosBlockType::SLiMEidosReproductionCallback:		stage = SLiMCycleStage::kNonWFStage1GenerateOffspring; break;
-			case SLiMEidosBlockType::SLiMEidosNoBlockType:
-			case SLiMEidosBlockType::SLiMEidosUserDefinedFunction:
-				EIDOS_TERMINATION << "ERROR (Community::ExecuteMethod_rescheduleScriptBlock): (internal error) rescheduleScriptBlock() cannot be called on this type of script block." << EidosTerminate();
-		}
-	}
-	// NOLINTEND(*-branch-clone)
+	SLiMCycleStage stage = CycleStageForScriptBlockType(block->type_);
 	
 	if ((!start_null || !end_null) && ticks_null)
 	{
@@ -1293,6 +1256,10 @@ EidosValue_SP Community::ExecuteMethod_rescheduleScriptBlock(EidosGlobalStringID
 				CheckScheduling(min_tick, stage);	// if the minimum tick is OK, they are all OK
 			}
 		}
+		
+		last_script_block_tick_cached_ = false;
+		script_block_types_cached_ = false;
+		scripts_changed_ = true;
 		
 #ifdef SLIMGUI
 		gSLiMScheduling << "\t\trescheduleScriptBlock() called (with a ticks schedule) for block: ";
@@ -1406,7 +1373,7 @@ const std::vector<EidosMethodSignature_CSP> *Community_Class::Methods(void) cons
 		
 		methods = new std::vector<EidosMethodSignature_CSP>(*super::Methods());
 		
-		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_createLogFile, kEidosValueMaskObject | kEidosValueMaskSingleton, gSLiM_LogFile_Class))->AddString_S(gEidosStr_filePath)->AddString_ON("initialContents", gStaticEidosValueNULL)->AddLogical_OS("append", gStaticEidosValue_LogicalF)->AddLogical_OS("compress", gStaticEidosValue_LogicalF)->AddString_OS("sep", gStaticEidosValue_StringComma)->AddInt_OSN("logInterval", gStaticEidosValueNULL)->AddInt_OSN("flushInterval", gStaticEidosValueNULL));
+		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_createLogFile, kEidosValueMaskObject | kEidosValueMaskSingleton, gSLiM_LogFile_Class))->AddString_S(gEidosStr_filePath)->AddString_ON("initialContents", gStaticEidosValueNULL)->AddLogical_OS("append", gStaticEidosValue_LogicalF)->AddLogical_OS("compress", gStaticEidosValue_LogicalF)->AddString_OS("sep", gStaticEidosValue_StringComma)->AddInt_OSN("logInterval", gStaticEidosValueNULL)->AddInt_OSN("flushInterval", gStaticEidosValueNULL)->AddLogical_OS("header", gStaticEidosValue_LogicalT));
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_estimatedLastTick, kEidosValueMaskInt | kEidosValueMaskSingleton)));
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_deregisterScriptBlock, kEidosValueMaskVOID))->AddIntObject("scriptBlocks", gSLiM_SLiMEidosBlock_Class));
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_genomicElementTypesWithIDs, kEidosValueMaskObject, gSLiM_GenomicElementType_Class))->AddInt("ids"));

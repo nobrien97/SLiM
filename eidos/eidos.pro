@@ -51,7 +51,8 @@ else:win32:CONFIG(debug, debug|release): LIBS += -L$$OUT_PWD/../gsl/debug/ -lgsl
 else:unix: LIBS += -L$$OUT_PWD/../gsl/ -lgsl
 INCLUDEPATH += $$PWD/../gsl $$PWD/../gsl/blas $$PWD/../gsl/block $$PWD/../gsl/cblas $$PWD/../gsl/cdf
 INCLUDEPATH += $$PWD/../gsl/complex $$PWD/../gsl/err $$PWD/../gsl/interpolation $$PWD/../gsl/linalg $$PWD/../gsl/matrix
-INCLUDEPATH += $$PWD/../gsl/randist $$PWD/../gsl/rng $$PWD/../gsl/specfunc $$PWD/../gsl/sys $$PWD/../gsl/vector
+INCLUDEPATH += $$PWD/../gsl/permutation $$PWD/../gsl/randist $$PWD/../gsl/rng $$PWD/../gsl/specfunc $$PWD/../gsl/sys
+INCLUDEPATH += $$PWD/../gsl/vector
 DEPENDPATH += $$PWD/../gsl
 win32-g++:CONFIG(release, debug|release): PRE_TARGETDEPS += $$OUT_PWD/../gsl/release/libgsl.a
 else:win32-g++:CONFIG(debug, debug|release): PRE_TARGETDEPS += $$OUT_PWD/../gsl/debug/libgsl.a
@@ -129,6 +130,7 @@ HEADERS += \
     eidos_property_signature.h \
     eidos_rng.h \
     eidos_script.h \
+	eidos_simd.h \
 	eidos_sorting.h \
     eidos_symbol_table.h \
     eidos_test_builtins.h \

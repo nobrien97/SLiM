@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 8/6/2019.
-//  Copyright (c) 2019-2024 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2019-2025 Benjamin C. Haller.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -180,7 +180,7 @@ void QtSLiMFindRecipe::updateMatchListWidget(void)
     
     matchList->clear();
     
-    for (const QString &match : qAsConst(matchRecipeFilenames))
+    for (const QString &match : static_cast<const QStringList &>(matchRecipeFilenames))
         matchList->addItem(displayStringForRecipeFilename(match));
 }
 

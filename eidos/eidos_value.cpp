@@ -3,7 +3,7 @@
 //  Eidos
 //
 //  Created by Ben Haller on 4/7/15.
-//  Copyright (c) 2015-2024 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2015-2025 Benjamin C. Haller.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -74,6 +74,7 @@ EidosValue_String_SP gStaticEidosValue_StringSpace;
 EidosValue_String_SP gStaticEidosValue_StringAsterisk;
 EidosValue_String_SP gStaticEidosValue_StringDoubleAsterisk;
 EidosValue_String_SP gStaticEidosValue_StringComma;
+EidosValue_String_SP gStaticEidosValue_StringTab;
 EidosValue_String_SP gStaticEidosValue_StringPeriod;
 EidosValue_String_SP gStaticEidosValue_StringDoubleQuote;
 EidosValue_String_SP gStaticEidosValue_String_ECMAScript;
@@ -148,7 +149,7 @@ std::string StringForEidosValueMask(const EidosValueMask p_mask, const EidosClas
 	if (p_object_class && (stripped_mask & kEidosValueMaskObject))
 	{
 		out_string += "<";
-		out_string += p_object_class->ClassName();
+		out_string += p_object_class->ClassNameForDisplay();
 		out_string += ">";
 	}
 	
@@ -1649,9 +1650,31 @@ void EidosValue_Float::Sort(bool p_ascending)
 	
 	// Unfortunately a custom comparator is needed to make the sort order with NANs match that of R
 	if (p_ascending)
-		Eidos_ParallelSort_Comparator(values_, count_, [](const double& a, const double& b) { return std::isnan(b) || (a < b); });
+		Eidos_ParallelSort_Comparator(values_, count_, [](const double& a, const double& b) {
+			// If a is NaN and b is not NaN, a should come after b
+			if (std::isnan(a) && !std::isnan(b))
+				return false;
+			
+			// If b is NaN and a is not NaN, b should come after a
+			if (!std::isnan(a) && std::isnan(b))
+				return true;
+			
+			// If both are NaN or both are non-NaN, sort numerically (ascending)
+			return a < b;
+		});
 	else
-		Eidos_ParallelSort_Comparator(values_, count_, [](const double& a, const double& b) { return std::isnan(b) || (a > b); });
+		Eidos_ParallelSort_Comparator(values_, count_, [](const double& a, const double& b) {
+			// If a is NaN and b is not NaN, a should come after b
+			if (std::isnan(a) && !std::isnan(b))
+				return false;
+			
+			// If b is NaN and a is not NaN, b should come after a
+			if (!std::isnan(a) && std::isnan(b))
+				return true;
+			
+			// If both are NaN or both are non-NaN, sort numerically (descending)
+			return a > b;
+		});
 }
 
 EidosValue_Float *EidosValue_Float::reserve(size_t p_reserved_size)
@@ -1900,7 +1923,7 @@ void EidosValue_Object::RaiseForClassMismatch(void) const
 
 const std::string &EidosValue_Object::ElementType(void) const
 {
-	return Class()->ClassName();
+	return Class()->ClassNameForDisplay();
 }
 
 EidosValue_SP EidosValue_Object::NewMatchingType(void) const
@@ -2179,7 +2202,8 @@ EidosValue_SP EidosValue_Object::GetPropertyOfElements(EidosGlobalStringID p_pro
 		
 		EIDOS_TERMINATION << "ERROR (EidosValue_Object::GetPropertyOfElements): property " << EidosStringRegistry::StringForGlobalStringID(p_property_id) << " does not specify an unambiguous value type, and thus cannot be accessed on a zero-length vector." << EidosTerminate(nullptr);
 	}
-	else if (values_size == 1)
+	
+	if (values_size == 1)
 	{
 		// The singleton case is very common, so it should be special-cased for speed
 		EidosObject *value = values_[0];
@@ -2195,23 +2219,33 @@ EidosValue_SP EidosValue_Object::GetPropertyOfElements(EidosGlobalStringID p_pro
 #endif
 		return result;
 	}
-	else if (signature->accelerated_get_)
+	
+	if (signature->accelerated_get_)
 	{
 		// Accelerated property access is enabled for this property, so the class will do all the work for us
 		// We put this case below the (values_size == 1) case so the accelerated getter can focus on the vectorized case
 		EidosValue_SP result = EidosValue_SP(signature->accelerated_getter(values_, values_size));
 		
-		// Access of singleton properties retains the matrix/array structure of the target
-		if (signature->value_mask_ & kEidosValueMaskSingleton)
-			result->CopyDimensionsFromValue(this);
-		
+		// BCH 4/16/2025: New in SLiM 5, an accelerated getter can return nullptr to say "I don't want to
+		// handle this case, send it down to GetProperty() and do it the slow way", so we fall through.
+		if (result)
+		{
+			// Access of singleton properties retains the matrix/array structure of the target
+			if (signature->value_mask_ & kEidosValueMaskSingleton)
+				result->CopyDimensionsFromValue(this);
+			
 #if DEBUG
-		// This is time-consuming, and will fail only due to internal bugs, so we should do it only in DEBUG
-		signature->CheckAggregateResultValue(*result, values_size);
+			// This is time-consuming, and will fail only due to internal bugs, so we should do it only in DEBUG
+			signature->CheckAggregateResultValue(*result, values_size);
 #endif
-		return result;
+			return result;
+		}
+		
+		// FALL THROUGH
 	}
-	else
+	
+	// Fall-through: this is reached for all cases not handled above, including if
+	// an accelerated getter returns nullptr to indicate it cannot handle the case
 	{
 		// get the value from all properties and collect the results
 		std::vector<EidosValue_SP> results;

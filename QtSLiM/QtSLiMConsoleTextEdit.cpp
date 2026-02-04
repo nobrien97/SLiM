@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 12/6/2019.
-//  Copyright (c) 2019-2024 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2019-2025 Benjamin C. Haller.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -99,17 +99,18 @@ void QtSLiMConsoleTextEdit::showWelcome(void)
     
     QString welcomeMessage;
     welcomeMessage = welcomeMessage + "Eidos version " + EIDOS_VERSION_STRING + NEWLINE + NEWLINE;		// EIDOS VERSION
-    welcomeMessage += "By Benjamin C. Haller (http://benhaller.com/)." + NEWLINE;
-    welcomeMessage += "Copyright (c) 2016–2024 P. Messer. All rights reserved." + NEWLINE + NEWLINE;
+    welcomeMessage += "By Benjamin C. Haller and Philipp W. Messer." + NEWLINE;
+    welcomeMessage += "Copyright (c) 2016–2025 Benjamin C. Haller." + NEWLINE;
+    welcomeMessage += "All rights reserved." + NEWLINE + NEWLINE;
     welcomeMessage += "Eidos is free software with ABSOLUTELY NO WARRANTY." + NEWLINE;
     welcomeMessage += "Type license() for license and distribution details." + NEWLINE + NEWLINE;
-    welcomeMessage += "Go to https://github.com/MesserLab/SLiM for source code," + NEWLINE;
-    welcomeMessage += "documentation, examples, and other information." + NEWLINE + NEWLINE;
+    welcomeMessage += "Go to https://github.com/MesserLab/SLiM for source" + NEWLINE;
+    welcomeMessage += "code, documentation, examples, and other information." + NEWLINE + NEWLINE;
     welcomeMessage += "Welcome to Eidos!" + NEWLINE + NEWLINE;
-    welcomeMessage += "---------------------------------------------------------" + NEWLINE + NEWLINE;
+    welcomeMessage += "-----------------------------------------------------" + NEWLINE + NEWLINE;
     welcomeMessage += "Connected to SLiMgui simulation." + NEWLINE;
     welcomeMessage = welcomeMessage + "SLiM version " + SLIM_VERSION_STRING + "." + NEWLINE + NEWLINE;      // SLIM VERSION
-    welcomeMessage += "---------------------------------------------------------" + NEWLINE + NEWLINE;
+    welcomeMessage += "-----------------------------------------------------" + NEWLINE + NEWLINE;
     
     insertPlainText(welcomeMessage);
 }
@@ -210,11 +211,12 @@ void QtSLiMConsoleTextEdit::appendExecution(QString result, QString errorString,
         textCursor().setBlockFormat(marginBlockFormat);
         insertPlainText(errorString);
         
-        if (!gEidosErrorContext.executingRuntimeScript &&
-                (gEidosErrorContext.errorPosition.characterStartOfErrorUTF16 >= 0) &&
-                (gEidosErrorContext.errorPosition.characterEndOfErrorUTF16 >= gEidosErrorContext.errorPosition.characterStartOfErrorUTF16))
+		// If we have an error, it is in the user script, and it has a valid position,
+		// then we can try to highlight it in the input
+        if ((!gEidosErrorContext.currentScript || (gEidosErrorContext.currentScript->UserScriptUTF16Offset() == 0)) &&
+            (gEidosErrorContext.errorPosition.characterStartOfErrorUTF16 >= 0) &&
+            (gEidosErrorContext.errorPosition.characterEndOfErrorUTF16 >= gEidosErrorContext.errorPosition.characterStartOfErrorUTF16))
 		{
-			// An error occurred, so let's try to highlight it in the input
             int promptEnd = lastPromptCursor.position();
 			int errorTokenStart = gEidosErrorContext.errorPosition.characterStartOfErrorUTF16 + promptEnd;
 			int errorTokenEnd = gEidosErrorContext.errorPosition.characterEndOfErrorUTF16 + promptEnd;

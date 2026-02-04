@@ -3,7 +3,7 @@
 //  Eidos
 //
 //  Created by Ben Haller on 4/6/15; split from eidos_functions.cpp 09/26/2022
-//  Copyright (c) 2015-2024 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2015-2025 Benjamin C. Haller.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -27,7 +27,9 @@
 #include <stdio.h>
 #include <dirent.h>
 #include <fstream>
+#include <iostream>
 #include <sys/stat.h>
+#include <unistd.h>
 
 #include "../eidos_zlib/zlib.h"
 
@@ -220,6 +222,37 @@ EidosValue_SP Eidos_ExecuteFunction_readFile(const std::vector<EidosValue_SP> &p
 	return result_SP;
 }
 
+//	(string$)readLine(void)
+EidosValue_SP Eidos_ExecuteFunction_readLine(const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter)
+{
+#pragma unused (p_arguments, p_interpreter)
+	
+	// This function was implemented by Chris Talbot 11/19/25 for use in reinforcement learning environments.
+	// Associated with issue #576.
+	
+#ifdef EIDOS_GUI
+	// Cannot be called inside a GUI since there is (presumably) no stdin set up for the script to read.
+	EIDOS_TERMINATION << "ERROR (Eidos_ExecuteFunction_readLine): function readLine() is not available in GUI environments (SLiMgui, SLiMguiLegacy, or EidosScribe)." << EidosTerminate(nullptr);
+#else
+	// Read a single line from stdin (command-line mode with interactive terminal)
+	std::string line;
+	
+	if (std::getline(std::cin, line))
+	{
+		// Control for CRLF vs. LF line endings
+		if (!line.empty() && line[line.size() - 1] == '\r')
+			line.pop_back();
+		
+		return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String(line));
+	}
+	else
+	{
+		// EOF or error reading from stdin; return empty string
+		return gStaticEidosValue_StringEmpty;
+	}
+#endif
+}
+
 //	(string$)setwd(string$ path)
 EidosValue_SP Eidos_ExecuteFunction_setwd(const std::vector<EidosValue_SP> &p_arguments, __attribute__((unused)) EidosInterpreter &p_interpreter)
 {
@@ -309,8 +342,10 @@ EidosValue_SP Eidos_ExecuteFunction_writeFile(const std::vector<EidosValue_SP> &
 #ifdef SLIMGUI
 	// we need to provide SLiMgui with information about the file write we just did; this is gross, but it wants to know
 	// we make a separate buffer for this purpose, with string copies, to donate to Community with &&
+	EidosContext *context = p_interpreter.Context();
+	
+	if (context)
 	{
-		EidosContext *context = p_interpreter.Context();
 		std::vector<std::string> slimgui_buffer;
 		
 		slimgui_buffer.reserve(contents_count);
@@ -318,10 +353,7 @@ EidosValue_SP Eidos_ExecuteFunction_writeFile(const std::vector<EidosValue_SP> &
 		for (int value_index = 0; value_index < contents_count; ++value_index)
 			slimgui_buffer.emplace_back(contents_value->StringRefAtIndex_NOCAST(value_index, nullptr));
 		
-		if (context)
-			context->FileWriteNotification(file_path, std::move(slimgui_buffer), append);
-		else
-			EIDOS_TERMINATION << "ERROR (Eidos_ExecuteFunction_writeFile): (internal error) no Context in Eidos_ExecuteFunction_writeFile()." << EidosTerminate(nullptr);
+		context->FileWriteNotification(file_path, std::move(slimgui_buffer), append);
 	}
 #endif
 	
@@ -373,8 +405,10 @@ EidosValue_SP Eidos_ExecuteFunction_writeTempFile(const std::vector<EidosValue_S
 #ifdef SLIMGUI
 	// we need to provide SLiMgui with information about the file write we just did; this is gross, but it wants to know
 	// we make a separate buffer for this purpose, with string copies, to donate to Community with &&
+	EidosContext *context = p_interpreter.Context();
+	
+	if (context)
 	{
-		EidosContext *context = p_interpreter.Context();
 		std::string file_path(file_path_cstr);
 		std::vector<std::string> slimgui_buffer;
 		
@@ -383,10 +417,7 @@ EidosValue_SP Eidos_ExecuteFunction_writeTempFile(const std::vector<EidosValue_S
 		for (int value_index = 0; value_index < contents_count; ++value_index)
 			slimgui_buffer.emplace_back(contents_value->StringRefAtIndex_NOCAST(value_index, nullptr));
 		
-		if (context)
-			context->FileWriteNotification(file_path, std::move(slimgui_buffer), false);
-		else
-			EIDOS_TERMINATION << "ERROR (Eidos_ExecuteFunction_writeTempFile): (internal error) no Context in Eidos_ExecuteFunction_writeTempFile()." << EidosTerminate(nullptr);
+		context->FileWriteNotification(file_path, std::move(slimgui_buffer), false);
 	}
 #endif
 	

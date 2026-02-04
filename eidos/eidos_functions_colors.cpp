@@ -3,7 +3,7 @@
 //  Eidos
 //
 //  Created by Ben Haller on 4/6/15; split from eidos_functions.cpp 09/26/2022
-//  Copyright (c) 2015-2024 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2015-2025 Benjamin C. Haller.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -71,23 +71,10 @@ EidosValue_SP Eidos_ExecuteFunction_colors(const std::vector<EidosValue_SP> &p_a
 	EidosValue *x_value = p_arguments[0].get();
 	EidosValue_String *name_value = (EidosValue_String *)p_arguments[1].get();
 	const std::string &name = name_value->StringRefAtIndex_NOCAST(0, nullptr);
-	EidosColorPalette palette;
+	EidosColorPalette palette = Eidos_PaletteForName(name);
 	char hex_chars[8];
 	
-	if (name == "cm")				palette = EidosColorPalette::kPalette_cm;
-	else if (name == "heat")		palette = EidosColorPalette::kPalette_heat;
-	else if (name == "terrain")		palette = EidosColorPalette::kPalette_terrain;
-	else if (name == "parula")		palette = EidosColorPalette::kPalette_parula;
-	else if (name == "hot")			palette = EidosColorPalette::kPalette_hot;
-	else if (name == "jet")			palette = EidosColorPalette::kPalette_jet;
-	else if (name == "turbo")		palette = EidosColorPalette::kPalette_turbo;
-	else if (name == "gray")		palette = EidosColorPalette::kPalette_gray;
-	else if (name == "magma")		palette = EidosColorPalette::kPalette_magma;
-	else if (name == "inferno")		palette = EidosColorPalette::kPalette_inferno;
-	else if (name == "plasma")		palette = EidosColorPalette::kPalette_plasma;
-	else if (name == "viridis")		palette = EidosColorPalette::kPalette_viridis;
-	else if (name == "cividis")		palette = EidosColorPalette::kPalette_cividis;
-	else
+	if (palette == EidosColorPalette::kPalette_INVALID)
 		EIDOS_TERMINATION << "ERROR (Eidos_ExecuteFunction_colors): unrecognized color palette name in colors()." << EidosTerminate(nullptr);
 	
 	if (x_value->Type() == EidosValueType::kValueInt)

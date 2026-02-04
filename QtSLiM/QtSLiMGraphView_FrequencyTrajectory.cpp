@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 4/1/2020.
-//  Copyright (c) 2020-2024 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2020-2025 Benjamin C. Haller.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -72,6 +72,9 @@ void QtSLiMGraphView_FrequencyTrajectory::addedToWindow(void)
         addSubpopulationsToMenu(subpopulationButton_, selectedSubpopulationID_);
         addMutationTypesToMenu(mutationTypeButton_, selectedMutationTypeIndex_);
     }
+    
+    // We want to display a "recycle to start gathering data at the start of the run" message
+    justAddedToWindow_ = true;
 }
 
 QtSLiMGraphView_FrequencyTrajectory::~QtSLiMGraphView_FrequencyTrajectory()
@@ -96,6 +99,8 @@ void QtSLiMGraphView_FrequencyTrajectory::invalidateCachedData(void)
     frequencyHistoryDict_.clear();
     frequencyHistoryColdStorageLost_.clear();
     frequencyHistoryColdStorageFixed_.clear();
+    
+    justAddedToWindow_ = true;
 }
 
 void QtSLiMGraphView_FrequencyTrajectory::fetchDataForFinishedTick(void)
@@ -110,12 +115,6 @@ void QtSLiMGraphView_FrequencyTrajectory::fetchDataForFinishedTick(void)
     int registry_size;
     const MutationIndex *registry = population.MutationRegistry(&registry_size);
     const MutationIndex *registry_iter_end = registry + registry_size;
-    
-    if (population.child_generation_valid_)
-    {
-        qDebug() << "child_generation_valid_ set in fetchDataForFinishedTick";
-        return;
-    }
     
     // Check that the subpop and muttype we're supposed to be surveying exists; if not, bail.
     bool hasSubpop = true, hasMuttype = true;
@@ -132,10 +131,10 @@ void QtSLiMGraphView_FrequencyTrajectory::fetchDataForFinishedTick(void)
         pair_ref.second->updated = false;
     
     // Tally reference counts within selectedSubpopulationID_
-    size_t subpop_total_genome_count = tallyGUIMutationReferences(selectedSubpopulationID_, selectedMutationTypeIndex_);
+    size_t subpop_total_haplosome_count = tallyGUIMutationReferences(selectedSubpopulationID_, selectedMutationTypeIndex_);
     
-    if (subpop_total_genome_count == 0)
-        subpop_total_genome_count = 1;  // refcounts will all be zero; prevent NAN values below, make them 0 instead
+    if (subpop_total_haplosome_count == 0)
+        subpop_total_haplosome_count = 1;  // refcounts will all be zero; prevent NAN values below, make them 0 instead
     
     // Now we can run through the mutations and use the tallies in gui_scratch_reference_count to update our histories
     Mutation *mut_block_ptr = gSLiM_Mutation_Block;
@@ -147,7 +146,7 @@ void QtSLiMGraphView_FrequencyTrajectory::fetchDataForFinishedTick(void)
         
         if (refcount)
         {
-            uint16_t value = static_cast<uint16_t>((static_cast<size_t>(refcount) * static_cast<size_t>(UINT16_MAX)) / subpop_total_genome_count);
+            uint16_t value = static_cast<uint16_t>((static_cast<size_t>(refcount) * static_cast<size_t>(UINT16_MAX)) / subpop_total_haplosome_count);
             slim_mutationid_t mutationID = mutation->mutation_id_;
             auto history_iter = frequencyHistoryDict_.find(mutationID);
             
@@ -249,6 +248,7 @@ void QtSLiMGraphView_FrequencyTrajectory::fetchDataForFinishedTick(void)
     //NSLog(@"frequencyHistoryDict has %lld entries, frequencyHistoryColdStorageLost has %lld entries, frequencyHistoryColdStorageFixed has %lld entries", (long long int)[frequencyHistoryDict count], (long long int)[frequencyHistoryColdStorageLost count], (long long int)[frequencyHistoryColdStorageFixed count]);
     
     lastTick_ = community->Tick();
+    justAddedToWindow_ = false;
 }
 
 void QtSLiMGraphView_FrequencyTrajectory::subpopulationPopupChanged(int /* index */)
@@ -293,6 +293,9 @@ void QtSLiMGraphView_FrequencyTrajectory::controllerRecycled(void)
 	invalidateCachedData();
 	addSubpopulationsToMenu(subpopulationButton_, selectedSubpopulationID_);
 	addMutationTypesToMenu(mutationTypeButton_, selectedMutationTypeIndex_);
+    
+    // We do not want to display our "recycle to start gathering at the start" message after a recycle
+    justAddedToWindow_ = false;
     
 	QtSLiMGraphView::controllerRecycled();
 }
@@ -353,6 +356,7 @@ QString QtSLiMGraphView_FrequencyTrajectory::disableMessage(void)
     
     if (graphSpecies)
     {
+        // check that we have a valid subpop and muttype
         bool hasSubpop = true, hasMuttype = true;
         
         if (!graphSpecies->SubpopulationWithID(selectedSubpopulationID_))
@@ -361,6 +365,12 @@ QString QtSLiMGraphView_FrequencyTrajectory::disableMessage(void)
             hasMuttype = addMutationTypesToMenu(mutationTypeButton_, selectedMutationTypeIndex_);
         if (!hasSubpop || !hasMuttype)
             return "no\ndata";
+        
+        // check that we have some history recorded
+        qDebug() << "justAddedToWindow_ ==" << justAddedToWindow_;
+        
+        if (justAddedToWindow_)
+            return "initiating data collection;\nrecycle and run to\ncollect data from the\nstart of the simulation";
     }
     
     return "";

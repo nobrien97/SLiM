@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 11/24/2019.
-//  Copyright (c) 2019-2024 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2019-2025 Benjamin C. Haller.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -197,8 +197,11 @@ public:
     
     QString exportAsHtml(void);
     
+    virtual void insertFromMimeData(const QMimeData *source) override;
+    
 public slots:
     void copyAsHTML(void);
+    void duplicateSelection(void);
     void shiftSelectionLeft(void);
     void shiftSelectionRight(void);
     void commentUncommentSelection(void);
@@ -206,13 +209,16 @@ public slots:
     
 protected:
     QStringList linesForRoundedSelection(QTextCursor &cursor, bool &movedBack);
+    int _blockNumberForLocalY(QPointF localPos);
     
     // From here down is the machinery for providing line numbers
     // This code is adapted from https://doc.qt.io/qt-5/qtwidgets-widgets-codeeditor-example.html
 public:
     void lineNumberAreaToolTipEvent(QHelpEvent *p_helpEvent);
     void lineNumberAreaPaintEvent(QPaintEvent *p_paintEvent);
-    void lineNumberAreaMouseEvent(QMouseEvent *p_mouseEvent);
+    void lineNumberAreaMousePressEvent(QMouseEvent *p_mouseEvent);
+    void lineNumberAreaMouseMoveEvent(QMouseEvent *p_mouseEvent);
+    void lineNumberAreaMouseReleaseEvent(QMouseEvent *p_mouseEvent);
     void lineNumberAreaContextMenuEvent(QContextMenuEvent *p_event);
     void lineNumberAreaWheelEvent(QWheelEvent *p_wheelEvent);
     int lineNumberAreaWidth(void);
@@ -221,6 +227,7 @@ protected:
     void sharedInit(void);
     void initializeLineNumbers(void);
     virtual void resizeEvent(QResizeEvent *p_event) override;
+    virtual void paintEvent(QPaintEvent *event) override;
 
 protected slots:
     virtual void displayFontPrefChanged() override;
@@ -247,6 +254,12 @@ private:
     bool coloringDebugPointCursors = false;             // a flag to prevent re-entrancy
     
     void toggleDebuggingForLine(int lineNumber);
+    
+    // Line selection by clicking in the line area
+    void trackLineSelection(int lineNumber, int anchorLineNumber);
+    
+    bool trackingLineSelection = false;
+    int trackingLineAnchor = 0;
     
     // Species coloring
     std::vector<QTextCursor> blockCursors;              // we use QTextCursor to maintain the positions of script blocks across edits

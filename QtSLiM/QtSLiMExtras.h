@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 7/28/2019.
-//  Copyright (c) 2019-2024 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2019-2025 Benjamin C. Haller.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -36,6 +36,7 @@
 #include <QStatusBar>
 #include <QPlainTextEdit>
 #include <QLabel>
+#include <QStaticText>
 
 #include <cmath>
 #include <algorithm>
@@ -54,6 +55,14 @@ typedef enum {
     kBottomRight
 } QtSLiM_LegendPosition;
 
+// Utility helpers for window visibility/relocation
+bool QtSLiMIsMostlyOnScreen(QWidget *window);
+void QtSLiMRelocateQuietly(QWidget *window);
+
+void QtSLiMMakeWindowVisibleAndExposed(QWidget *window);
+
+void QtSLiMClearLayout(QLayout *layout, bool deleteWidgets = true);
+
 void QtSLiMFrameRect(const QRect &p_rect, const QColor &p_color, QPainter &p_painter);
 void QtSLiMFrameRect(const QRectF &p_rect, const QColor &p_color, QPainter &p_painter, double p_lineWidth);
 
@@ -64,6 +73,16 @@ QColor QtSLiMColorWithHSV(double p_hue, double p_saturation, double p_value, dou
 void RGBForFitness(double fitness, float *colorRed, float *colorGreen, float *colorBlue, double scalingFactor);
 void RGBForSelectionCoeff(double selectionCoeff, float *colorRed, float *colorGreen, float *colorBlue, double scalingFactor);
 
+// A color scale widget that shows the color scales for fitness and selection coefficients
+class QtSLiMColorScaleWidget : public QWidget
+{
+public:
+    QtSLiMColorScaleWidget(QWidget *p_parent);
+protected:
+    virtual void paintEvent(QPaintEvent *p_paintEvent) override;
+private:
+    std::vector<QString> fitnessTicks, effectTicks;
+};
 
 // Whether we're in "dark mode" for user interface rendering
 bool QtSLiMInDarkMode(void);    

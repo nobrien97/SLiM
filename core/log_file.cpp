@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 11/2/20.
-//  Copyright (c) 2020-2024 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2020-2025 Benjamin C. Haller.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -51,7 +51,7 @@ void LogFile::Raise_UsesStringKeys(void) const
 	EIDOS_TERMINATION << "ERROR (LogFile::Raise_UsesStringKeys): cannot use an integer key with the target LogFile object; LogFile always uses string keys." << EidosTerminate(nullptr);
 }
 
-void LogFile::ConfigureFile(const std::string &p_filePath, std::vector<const std::string *> &p_initialContents, bool p_append, bool p_compress, const std::string &p_sep)
+void LogFile::ConfigureFile(const std::string &p_filePath, std::vector<const std::string *> &p_initialContents, bool p_append, bool p_emitHeader, bool p_compress, const std::string &p_sep)
 {
 	user_file_path_ = p_filePath;
 	
@@ -64,6 +64,7 @@ void LogFile::ConfigureFile(const std::string &p_filePath, std::vector<const std
 	
 	compress_ = p_compress;
 	sep_ = p_sep;
+	emit_header_ = p_emitHeader;
 	
 	// We always open the file for writing (or appending) synchronously and write out the initial contents, if any
 	Eidos_WriteToFile(resolved_file_path_, p_initialContents, p_append, p_compress, EidosFileFlush::kForceFlush);
@@ -118,8 +119,8 @@ EidosValue_SP LogFile::_GeneratedValue_PopulationSexRatio(const LogFileGenerator
 		for (auto &subpop_iter : species->population_.subpops_)
 		{
 			Subpopulation *subpop = subpop_iter.second;
-			slim_popsize_t subpop_size = subpop->CurrentSubpopSize();
-			slim_popsize_t first_male_index = subpop->CurrentFirstMaleIndex();
+			slim_popsize_t subpop_size = subpop->parent_subpop_size_;
+			slim_popsize_t first_male_index = subpop->parent_first_male_index_;
 			
 			total_individuals += subpop_size;
 			total_males += (subpop_size - first_male_index);
@@ -143,7 +144,7 @@ EidosValue_SP LogFile::_GeneratedValue_PopulationSize(const LogFileGeneratorInfo
 	slim_popsize_t total_individuals = 0;
 	
 	for (auto &subpop_iter : species->population_.subpops_)
-		total_individuals += (subpop_iter.second)->CurrentSubpopSize();
+		total_individuals += (subpop_iter.second)->parent_subpop_size_;
 	
 	return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Int(total_individuals));
 }
@@ -154,8 +155,8 @@ EidosValue_SP LogFile::_GeneratedValue_SubpopulationSexRatio(const LogFileGenera
 	
 	if (subpop && subpop->species_.SexEnabled())
 	{
-		slim_popsize_t subpop_size = subpop->CurrentSubpopSize();
-		slim_popsize_t first_male_index = subpop->CurrentFirstMaleIndex();
+		slim_popsize_t subpop_size = subpop->parent_subpop_size_;
+		slim_popsize_t first_male_index = subpop->parent_first_male_index_;
 		double sex_ratio = (subpop_size == 0) ? 0.0 : ((subpop_size - first_male_index) / (double)subpop_size);
 		return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float(sex_ratio));
 	}
@@ -172,7 +173,7 @@ EidosValue_SP LogFile::_GeneratedValue_SubpopulationSize(const LogFileGeneratorI
 	
 	if (subpop)
 	{
-		slim_popsize_t subpop_size = subpop->CurrentSubpopSize();
+		slim_popsize_t subpop_size = subpop->parent_subpop_size_;
 		return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Int(subpop_size));
 	}
 	else
@@ -197,7 +198,7 @@ EidosValue_SP LogFile::_GeneratedValue_CustomScript(const LogFileGeneratorInfo &
 	
 	EidosScript *generator_script = p_generator_info.script_;
 	EidosErrorContext error_context_save = gEidosErrorContext;
-	gEidosErrorContext = EidosErrorContext{{-1, -1, -1, -1}, generator_script, true};
+	gEidosErrorContext = EidosErrorContext{{-1, -1, -1, -1}, generator_script};
 	
 	EidosValue_SP result_SP;
 	
@@ -206,8 +207,13 @@ EidosValue_SP LogFile::_GeneratedValue_CustomScript(const LogFileGeneratorInfo &
 		EidosSymbolTable callback_symbols(EidosSymbolTableType::kContextConstantsTable, &community_.SymbolTable());
 		EidosSymbolTable client_symbols(EidosSymbolTableType::kLocalVariablesTable, &callback_symbols);
 		EidosFunctionMap &function_map = community_.FunctionMap();
-		EidosInterpreter interpreter(*generator_script, client_symbols, function_map, &community_, SLIM_OUTSTREAM, SLIM_ERRSTREAM);
+		EidosInterpreter interpreter(*generator_script, client_symbols, function_map, &community_, SLIM_OUTSTREAM, SLIM_ERRSTREAM
+#ifdef SLIMGUI
+			, community_.check_infinite_loops_
+#endif
+			);
 		
+		// BCH 11/7/2025: note this symbol is now protected in SLiM_ConfigureContext()
 		callback_symbols.InitializeConstantSymbolEntry(gID_context, p_generator_info.context_);
 		
 		result_SP = interpreter.EvaluateInterpreterBlock(false, true);	// do not print output, return the last statement value
@@ -220,7 +226,16 @@ EidosValue_SP LogFile::_GeneratedValue_CustomScript(const LogFileGeneratorInfo &
 	catch (...)
 	{
 		if (gEidosTerminateThrows)
-			gEidosErrorContext = error_context_save;
+		{
+			// In some cases, such as if the error occurred in a derived user-defined function, we can
+			// actually get a user script error context at this point, and don't need to intervene.
+			if (!gEidosErrorContext.currentScript || (gEidosErrorContext.currentScript->UserScriptUTF16Offset() == -1))
+			{
+				gEidosErrorContext = error_context_save;
+				TranslateErrorContextToUserScript("_GeneratedValue_CustomScript()");
+			}
+		}
+		
 		throw;
 	}
 	
@@ -236,7 +251,7 @@ void LogFile::_GeneratedValues_CustomMeanAndSD(const LogFileGeneratorInfo &p_gen
 	
 	EidosScript *generator_script = p_generator_info.script_;
 	EidosErrorContext error_context_save = gEidosErrorContext;
-	gEidosErrorContext = EidosErrorContext{{-1, -1, -1, -1}, generator_script, true};
+	gEidosErrorContext = EidosErrorContext{{-1, -1, -1, -1}, generator_script};
 	
 	EidosValue_SP result_SP;
 	
@@ -245,8 +260,13 @@ void LogFile::_GeneratedValues_CustomMeanAndSD(const LogFileGeneratorInfo &p_gen
 		EidosSymbolTable callback_symbols(EidosSymbolTableType::kContextConstantsTable, &community_.SymbolTable());
 		EidosSymbolTable client_symbols(EidosSymbolTableType::kLocalVariablesTable, &callback_symbols);
 		EidosFunctionMap &function_map = community_.FunctionMap();
-		EidosInterpreter interpreter(*generator_script, client_symbols, function_map, nullptr, SLIM_OUTSTREAM, SLIM_ERRSTREAM);
+		EidosInterpreter interpreter(*generator_script, client_symbols, function_map, nullptr, SLIM_OUTSTREAM, SLIM_ERRSTREAM
+#ifdef SLIMGUI
+			, community_.check_infinite_loops_
+#endif
+			);
 		
+		// BCH 11/7/2025: note this symbol is now protected in SLiM_ConfigureContext()
 		callback_symbols.InitializeConstantSymbolEntry(gID_context, p_generator_info.context_);
 		
 		result_SP = interpreter.EvaluateInterpreterBlock(false, true);	// do not print output, return the last statement value
@@ -283,7 +303,16 @@ void LogFile::_GeneratedValues_CustomMeanAndSD(const LogFileGeneratorInfo &p_gen
 	catch (...)
 	{
 		if (gEidosTerminateThrows)
-			gEidosErrorContext = error_context_save;
+		{
+			// In some cases, such as if the error occurred in a derived user-defined function, we can
+			// actually get a user script error context at this point, and don't need to intervene.
+			if (!gEidosErrorContext.currentScript || (gEidosErrorContext.currentScript->UserScriptUTF16Offset() == -1))
+			{
+				gEidosErrorContext = error_context_save;
+				TranslateErrorContextToUserScript("_GeneratedValues_CustomMeanAndSD()");
+			}
+		}
+		
 		throw;
 	}
 	
@@ -316,6 +345,13 @@ void LogFile::AppendNewRow(void)
 {
 	THREAD_SAFETY_IN_ACTIVE_PARALLEL("LogFile::AppendNewRow(): filesystem write");
 	
+	// Guarantee that we are in the parent generation for all generators, so they don't need to worry
+	const std::vector<Species *> &all_species = community_.AllSpecies();
+	
+	for (Species *species : all_species)
+		if (species->population_.child_generation_valid_)
+			EIDOS_TERMINATION << "ERROR (LogFile::AppendNewRow): (internal error) generating logfile entry with child generation active!" << EidosTerminate();
+	
 	std::vector<const std::string *> line_vec;
 	std::string header_line;
 	std::string row_line;
@@ -326,33 +362,37 @@ void LogFile::AppendNewRow(void)
 	// Generate the header row if needed
 	if (!header_logged_)
 	{
-		std::ostringstream ss;
-		bool first_column = true;
-		
-#ifdef SLIMGUI
-		std::vector<std::string> gui_line;
-#endif
-		
-		for (const std::string &column_name : column_names_)
+		// skip emitting the header line if the user has requested that
+		if (emit_header_)
 		{
-			if (!first_column)
-				ss << sep_;
-			first_column = false;
-			ss << column_name;
+			std::ostringstream ss;
+			bool first_column = true;
 			
 #ifdef SLIMGUI
-			std::ostringstream gui_ss;
-			gui_ss << column_name;
-			gui_line.emplace_back(gui_ss.str());
+			std::vector<std::string> gui_line;
+#endif
+			
+			for (const std::string &column_name : column_names_)
+			{
+				if (!first_column)
+					ss << sep_;
+				first_column = false;
+				ss << column_name;
+				
+#ifdef SLIMGUI
+				std::ostringstream gui_ss;
+				gui_ss << column_name;
+				gui_line.emplace_back(gui_ss.str());
+#endif
+			}
+			
+			header_line = ss.str();
+			line_vec.emplace_back(&header_line);
+			
+#ifdef SLIMGUI
+			emitted_lines_.emplace_back(std::move(gui_line));
 #endif
 		}
-		
-		header_line = ss.str();
-		line_vec.emplace_back(&header_line);
-		
-#ifdef SLIMGUI
-		emitted_lines_.emplace_back(std::move(gui_line));
-#endif
 		
 		// Having emitted the header line, we lock ourselves to prevent inconsistencies in the emitted table
 		header_logged_ = true;
@@ -515,7 +555,7 @@ const EidosClass *LogFile::Class(void) const
 
 void LogFile::Print(std::ostream &p_ostream) const
 {
-	p_ostream << Class()->ClassName() << "<" << user_file_path_ << ">";
+	p_ostream << Class()->ClassNameForDisplay() << "<" << user_file_path_ << ">";
 }
 
 EidosValue_SP LogFile::GetProperty(EidosGlobalStringID p_property_id)
@@ -632,9 +672,9 @@ EidosValue_SP LogFile::ExecuteMethod_addCustomColumn(EidosGlobalStringID p_metho
 	
 	// See, e.g., Subpopulation::ApplyFitnessEffectCallbacks() for comments on parsing/running script blocks
 	EidosErrorContext error_context_save = gEidosErrorContext;
-	EidosScript *source_script = new EidosScript(source, -1);
+	EidosScript *source_script = new EidosScript(source);
 	
-	gEidosErrorContext = EidosErrorContext{{-1, -1, -1, -1}, source_script, true};
+	gEidosErrorContext = EidosErrorContext{{-1, -1, -1, -1}, source_script};
 	
 	try {
 		source_script->Tokenize();
@@ -643,7 +683,10 @@ EidosValue_SP LogFile::ExecuteMethod_addCustomColumn(EidosGlobalStringID p_metho
 	catch (...)
 	{
 		if (gEidosTerminateThrows)
+		{
 			gEidosErrorContext = error_context_save;
+			TranslateErrorContextToUserScript("ExecuteMethod_addCustomColumn()");
+		}
 		
 		delete source_script;
 		source_script = nullptr;
@@ -652,6 +695,19 @@ EidosValue_SP LogFile::ExecuteMethod_addCustomColumn(EidosGlobalStringID p_metho
 	}
 	
 	gEidosErrorContext = error_context_save;
+	
+	// Check contextValue for validity and make a copy of it.  Copying is needed to
+	// ensure that the value is not changed underneath us externally, for example
+	// by a for loop; see https://github.com/MesserLab/SLiM/issues/496.
+	if (context_value->Type() == EidosValueType::kValueObject)
+	{
+		EidosValue_Object *context_object = (EidosValue_Object *)context_value.get();
+		
+		if (!context_object->Class()->UsesRetainRelease())
+			EIDOS_TERMINATION << "ERROR (LogFile::ExecuteMethod_addCustomColumn): the context parameter to addCustomColumn() cannot be an object of a class that is not under retain-release, since the lifetime of such objects cannot be guaranteed.  See the documentation for addCustomColumn() for discussion of this limitation." << EidosTerminate();
+	}
+	
+	context_value = context_value->CopyValues();
 	
 	generator_info_.emplace_back(LogFileGeneratorType::kGenerator_CustomScript, source_script, -1, std::move(context_value));
 	column_names_.emplace_back(column_name);
@@ -714,9 +770,9 @@ EidosValue_SP LogFile::ExecuteMethod_addMeanSDColumns(EidosGlobalStringID p_meth
 	const std::string &source = source_value->StringRefAtIndex_NOCAST(0, nullptr);
 	
 	EidosErrorContext error_context_save = gEidosErrorContext;
-	EidosScript *source_script = new EidosScript(source, -1);
+	EidosScript *source_script = new EidosScript(source);
 	
-	gEidosErrorContext = EidosErrorContext{{-1, -1, -1, -1}, source_script, true};
+	gEidosErrorContext = EidosErrorContext{{-1, -1, -1, -1}, source_script};
 	
 	try {
 		source_script->Tokenize();
@@ -725,7 +781,10 @@ EidosValue_SP LogFile::ExecuteMethod_addMeanSDColumns(EidosGlobalStringID p_meth
 	catch (...)
 	{
 		if (gEidosTerminateThrows)
+		{
 			gEidosErrorContext = error_context_save;
+			TranslateErrorContextToUserScript("ExecuteMethod_addMeanSDColumns()");
+		}
 		
 		delete source_script;
 		source_script = nullptr;
@@ -734,6 +793,19 @@ EidosValue_SP LogFile::ExecuteMethod_addMeanSDColumns(EidosGlobalStringID p_meth
 	}
 	
 	gEidosErrorContext = error_context_save;
+	
+	// Check contextValue for validity and make a copy of it.  Copying is needed to
+	// ensure that the value is not changed underneath us externally, for example
+	// by a for loop; see https://github.com/MesserLab/SLiM/issues/496.
+	if (context_value->Type() == EidosValueType::kValueObject)
+	{
+		EidosValue_Object *context_object = (EidosValue_Object *)context_value.get();
+		
+		if (!context_object->Class()->UsesRetainRelease())
+			EIDOS_TERMINATION << "ERROR (LogFile::ExecuteMethod_addMeanSDColumns): the context parameter to addMeanSDColumns() cannot be an object of a class that is not under retain-release, since the lifetime of such objects cannot be guaranteed.  See the documentation for addCustomColumn() for discussion of this limitation." << EidosTerminate();
+	}
+	
+	context_value = context_value->CopyValues();
 	
 	generator_info_.emplace_back(LogFileGeneratorType::kGenerator_CustomMeanAndSD, source_script, -1, std::move(context_value));
 	column_names_.emplace_back(column_name + "_mean");
@@ -813,13 +885,7 @@ EidosValue_SP LogFile::ExecuteMethod_addSubpopulationSexRatio(EidosGlobalStringI
 	}
 	else
 	{
-#if DEBUG
-		// Use dynamic_cast<> only in DEBUG since it is hella slow
-		// the class of the object here should be guaranteed by the caller anyway
-		Subpopulation *subpop = dynamic_cast<Subpopulation *>(subpop_value->ObjectElementAtIndex_NOCAST(0, nullptr));
-#else
 		Subpopulation *subpop = (Subpopulation *)(subpop_value->ObjectElementAtIndex_NOCAST(0, nullptr));
-#endif
 		
 		subpop_id = subpop->subpopulation_id_;
 	}
@@ -847,13 +913,7 @@ EidosValue_SP LogFile::ExecuteMethod_addSubpopulationSize(EidosGlobalStringID p_
 	}
 	else
 	{
-#if DEBUG
-		// Use dynamic_cast<> only in DEBUG since it is hella slow
-		// the class of the object here should be guaranteed by the caller anyway
-		Subpopulation *subpop = dynamic_cast<Subpopulation *>(subpop_value->ObjectElementAtIndex_NOCAST(0, nullptr));
-#else
 		Subpopulation *subpop = (Subpopulation *)(subpop_value->ObjectElementAtIndex_NOCAST(0, nullptr));
-#endif
 		
 		subpop_id = subpop->subpopulation_id_;
 	}
@@ -938,7 +998,7 @@ EidosValue_SP LogFile::ExecuteMethod_setLogInterval(EidosGlobalStringID p_method
 	return gStaticEidosValueVOID;
 }
 
-//	*********************	- (void)setFilePath(string$ filePath, [Ns initialContents = NULL], [logical$ append = F], [Nl$ compress = NULL], [Ns$ sep = NULL])
+//	*********************	- (void)setFilePath(string$ filePath, [Ns initialContents = NULL], [logical$ append = F], [Nl$ compress = NULL], [Ns$ sep = NULL], [Nl$ header = NULL])
 EidosValue_SP LogFile::ExecuteMethod_setFilePath(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter)
 {
 #pragma unused (p_method_id, p_interpreter)
@@ -947,6 +1007,15 @@ EidosValue_SP LogFile::ExecuteMethod_setFilePath(EidosGlobalStringID p_method_id
 	EidosValue *append_value = p_arguments[2].get();
 	EidosValue *compress_value = p_arguments[3].get();
 	EidosValue_String *sep_value = (EidosValue_String *)p_arguments[4].get();
+	EidosValue *header_value = p_arguments[5].get();
+	
+	// BCH 5/23/2025: The documentation has always said "Any rows that have been buffered but not flushed
+	// will be written to the previous file first, as if flush() had been called."  It looks to me like
+	// that was not happening.  It seems best to just be explicit about it here, and maybe this fixes a bug.
+	// Note that in the present design, flushing only affects compressed output; without compression, output
+	// is always flushed immediately.  See Eidos_WriteToFile().
+	Eidos_FlushFile(resolved_file_path_);
+	unflushed_row_count_ = 0;
 	
 	// Note that the parameters and their interpretation is different from Community::ExecuteMethod_createLogFile();
 	// in particular, NULL here means "keep the existing value"
@@ -955,6 +1024,7 @@ EidosValue_SP LogFile::ExecuteMethod_setFilePath(EidosGlobalStringID p_method_id
 	bool append = append_value->LogicalAtIndex_NOCAST(0, nullptr);
 	bool do_compress = compress_;
 	std::string sep = sep_;
+	bool emit_header = emit_header_;
 	
 	if (initialContents_value->Type() != EidosValueType::kValueNULL)
 	{
@@ -971,7 +1041,16 @@ EidosValue_SP LogFile::ExecuteMethod_setFilePath(EidosGlobalStringID p_method_id
 	if (sep_value->Type() != EidosValueType::kValueNULL)
 		sep = sep_value->StringRefAtIndex_NOCAST(0, nullptr);
 	
-	ConfigureFile(filePath, initialContents, append, do_compress, sep);
+	if (header_value->Type() != EidosValueType::kValueNULL)
+		emit_header = header_value->LogicalAtIndex_NOCAST(0, nullptr);
+	
+	ConfigureFile(filePath, initialContents, append, emit_header, do_compress, sep);
+	
+	// BCH 5/23/2025: I think there was probably a bug here before, that a new header line wouldn't be
+	// emitted into the new target file when using this method. By setting header_logged_ back to false,
+	// we not only cause a new header line to be emitted, but also again allow changes to the columns;
+	// I think that's OK, since we're going to a new file, why not?
+	header_logged_ = false;
 	
 	return gStaticEidosValueVOID;
 }
@@ -1101,15 +1180,17 @@ const std::vector<EidosMethodSignature_CSP> *LogFile_Class::Methods(void) const
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_flush, kEidosValueMaskVOID)));
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_logRow, kEidosValueMaskVOID)));
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_setLogInterval, kEidosValueMaskVOID))->AddInt_OSN("logInterval", gStaticEidosValueNULL));
-		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_setFilePath, kEidosValueMaskVOID))->AddString_S(gEidosStr_filePath)->AddString_ON("initialContents", gStaticEidosValueNULL)->AddLogical_OS("append", gStaticEidosValue_LogicalF)->AddLogical_OSN("compress", gStaticEidosValueNULL)->AddString_OSN("sep", gStaticEidosValueNULL));
+		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_setFilePath, kEidosValueMaskVOID))->AddString_S(gEidosStr_filePath)->AddString_ON("initialContents", gStaticEidosValueNULL)->AddLogical_OS("append", gStaticEidosValue_LogicalF)->AddLogical_OSN("compress", gStaticEidosValueNULL)->AddString_OSN("sep", gStaticEidosValueNULL)->AddLogical_OSN("header", gStaticEidosValueNULL));
 		methods->emplace_back(((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_setSuppliedValue, kEidosValueMaskVOID))->AddString_S("columnName")->AddAnyBase_S("value")));
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_willAutolog, kEidosValueMaskLogical | kEidosValueMaskSingleton)));
 		
 		// overrides of Dictionary methods; these should not be declared again, to avoid a duplicate in the methods table
-		//methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gEidosStr_addKeysAndValuesFrom, kEidosValueMaskVOID))->AddObject_S(gEidosStr_source, nullptr));
-		//methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gEidosStr_appendKeysAndValuesFrom, kEidosValueMaskVOID))->AddObject(gEidosStr_source, nullptr));
+		//methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gEidosStr_addKeysAndValuesFrom, kEidosValueMaskVOID))->AddObject_S(gEidosStr_source, gEidosDictionaryUnretained_Class));
+		//methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gEidosStr_appendKeysAndValuesFrom, kEidosValueMaskVOID))->AddObject(gEidosStr_source, gEidosDictionaryUnretained_Class));
 		//methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gEidosStr_clearKeysAndValues, kEidosValueMaskVOID)));
 		//methods->emplace_back(((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gEidosStr_setValue, kEidosValueMaskVOID))->AddArg(kEidosValueMaskInt | kEidosValueMaskString | kEidosValueMaskSingleton, "key", nullptr)->AddAny("value")));
+		
+		//methods->emplace_back(((EidosInstanceMethodSignature *)(new EidosClassMethodSignature(gEidosStr_setValuesVectorized, kEidosValueMaskVOID))->AddArg(kEidosValueMaskInt | kEidosValueMaskString | kEidosValueMaskSingleton, "key", nullptr)->AddAny("value")));
 		
 		std::sort(methods->begin(), methods->end(), CompareEidosCallSignatures);
 	}
@@ -1117,6 +1198,22 @@ const std::vector<EidosMethodSignature_CSP> *LogFile_Class::Methods(void) const
 	return methods;
 }
 
+EidosValue_SP LogFile_Class::ExecuteClassMethod(EidosGlobalStringID p_method_id, EidosValue_Object *p_target, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter) const
+{
+	switch (p_method_id)
+	{
+		case gEidosID_setValuesVectorized:	return ExecuteMethod_setValuesVectorized(p_method_id, p_target, p_arguments, p_interpreter);
+		default:							return super::ExecuteClassMethod(p_method_id, p_target, p_arguments, p_interpreter);
+	}
+}
+
+//	*********************	+ (void)setValuesVectorized(is$ key, * values)
+//
+EidosValue_SP LogFile_Class::ExecuteMethod_setValuesVectorized(EidosGlobalStringID p_method_id, EidosValue_Object *p_target, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter) const
+{
+#pragma unused (p_method_id, p_target, p_arguments, p_interpreter)
+	EIDOS_TERMINATION << "ERROR (LogFile::ExecuteMethod_setValuesVectorized): LogFile manages its dictionary entries; they cannot be modified by the user." << EidosTerminate(nullptr);
+}
 
 
 

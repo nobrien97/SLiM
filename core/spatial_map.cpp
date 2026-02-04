@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 9/4/23.
-//  Copyright (c) 2023-2024 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2023-2025 Benjamin C. Haller.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -22,6 +22,7 @@
 #include "spatial_kernel.h"
 #include "subpopulation.h"
 #include "eidos_class_Image.h"
+#include "eidos_simd.h"
 
 #include "gsl_math.h"
 #include "gsl_spline.h"
@@ -206,6 +207,14 @@ SpatialMap::~SpatialMap(void)
 #if defined(SLIMGUI)
 	if (display_buffer_)
 		free(display_buffer_);
+	
+	if (image_)
+	{
+		if (image_deleter_)
+			image_deleter_(image_);
+		else
+			std::cout << "Missing SpatialMap image_deleter_; leaking memory" << std::endl;
+	}
 #endif
 }
 
@@ -217,6 +226,16 @@ void SpatialMap::_ValuesChanged(void)
 	{
 		free(display_buffer_);
 		display_buffer_ = nullptr;
+	}
+	if (image_)
+	{
+		if (image_deleter_)
+			image_deleter_(image_);
+		else
+			std::cout << "Missing SpatialMap image_deleter_; leaking memory" << std::endl;
+		
+		image_ = nullptr;
+		image_deleter_ = nullptr;
 	}
 #endif
 	
@@ -769,6 +788,8 @@ void SpatialMap::ColorForValue(double p_value, float *p_rgb_ptr)
 	}
 }
 
+// SIMD-accelerated convolution for 1D spatial maps
+// Uses vectorized dot products with loop reordering for contiguous memory access
 void SpatialMap::Convolve_S1(SpatialKernel &kernel)
 {
 	if (spatiality_ != 1)
@@ -787,46 +808,62 @@ void SpatialMap::Convolve_S1(SpatialKernel &kernel)
 	if (!new_values)
 		EIDOS_TERMINATION << "ERROR (SpatialMap::Convolve_S1): allocation failed; you may need to raise the memory limit for SLiM." << EidosTerminate(nullptr);
 	
-	// this assumes the kernel's dimensions are symmetrical around its center, and relies on rounding (which is guaranteed)
 	int64_t kernel_a_offset = -(kernel_dim_a / 2);
 	double *kernel_values = kernel.values_;
 	double *new_values_ptr = new_values;
 	
-	// FIXME: TO BE PARALLELIZED
 	for (int64_t a = 0; a < dim_a; ++a)
 	{
 		double coverage = (!periodic_a_ && ((a == 0) || (a == dim_a - 1))) ? 0.5 : 1.0;
 		
-		// calculate the kernel's effect at point (a)
 		double kernel_total = 0.0;
 		double conv_total = 0.0;
 		
-		for (int64_t kernel_a = 0; kernel_a < kernel_dim_a; kernel_a++)
+		// Calculate valid kernel range for non-periodic boundaries
+		int64_t kernel_a_first = 0;
+		int64_t kernel_a_last = kernel_dim_a - 1;
+		
+		if (!periodic_a_)
 		{
-			int64_t conv_a = a + kernel_a + kernel_a_offset;
-			
-			// clip/wrap to bounds
-			if ((conv_a < 0) || (conv_a >= dim_a))
+			// Clamp to valid range
+			kernel_a_first = std::max((int64_t)0, -(a + kernel_a_offset));
+			kernel_a_last = std::min(kernel_dim_a - 1, (dim_a - 1) - (a + kernel_a_offset));
+		}
+		
+		// Non-periodic: clamping above guarantees bounds, use SIMD
+		int64_t conv_a_first = a + kernel_a_first + kernel_a_offset;
+		
+		if (!periodic_a_)
+		{
+			int64_t count = kernel_a_last - kernel_a_first + 1;
+			Eidos_SIMD::convolve_dot_product_scaled_float64(
+				&kernel_values[kernel_a_first],
+				&values_[conv_a_first],
+				count, coverage,
+				kernel_total, conv_total);
+		}
+		else
+		{
+			// Handle periodic boundaries element by element
+			for (int64_t kernel_a = 0; kernel_a < kernel_dim_a; kernel_a++)
 			{
-				if (!periodic_a_)
-					continue;
+				int64_t conv_a = a + kernel_a + kernel_a_offset;
 				
-				// periodicity: assume the two edges have identical values, skip over the edge value on the opposite side
-				while (conv_a < 0)
-					conv_a += (dim_a - 1);	// move -1 to dim - 2
-				while (conv_a >= dim_a)
-					conv_a -= (dim_a - 1);	// move dim to 1
+				// Wrap around periodic boundaries if out of range
+				if ((conv_a < 0) || (conv_a >= dim_a))
+				{
+					while (conv_a < 0)
+						conv_a += (dim_a - 1);
+					while (conv_a >= dim_a)
+						conv_a -= (dim_a - 1);
+				}
+				
+				double kernel_value = kernel_values[kernel_a] * coverage;
+				double pixel_value = values_[conv_a];
+				
+				kernel_total += kernel_value;
+				conv_total += kernel_value * pixel_value;
 			}
-			
-			// this point is within bounds; add it in to the totals
-			double kernel_value = kernel_values[kernel_a] * coverage;
-			double pixel_value = values_[conv_a];
-			
-			// we keep a total of the kernel values that were within bounds, for this point
-			kernel_total += kernel_value;
-			
-			// and we keep a total of the convolution - kernel values times pixel values
-			conv_total += kernel_value * pixel_value;
 		}
 		
 		*(new_values_ptr++) = ((kernel_total > 0) ? (conv_total / kernel_total) : 0);
@@ -835,6 +872,8 @@ void SpatialMap::Convolve_S1(SpatialKernel &kernel)
 	TakeOverMallocedValues(new_values, 1, grid_size_);	// takes new_values from us
 }
 
+// SIMD-accelerated convolution for 2D spatial maps
+// Uses vectorized dot products with loop reordering for contiguous memory access
 void SpatialMap::Convolve_S2(SpatialKernel &kernel)
 {
 	if (spatiality_ != 2)
@@ -855,78 +894,172 @@ void SpatialMap::Convolve_S2(SpatialKernel &kernel)
 	if (!new_values)
 		EIDOS_TERMINATION << "ERROR (SpatialMap::Convolve_S2): allocation failed; you may need to raise the memory limit for SLiM." << EidosTerminate(nullptr);
 	
-	// this assumes the kernel's dimensions are symmetrical around its center, and relies on rounding (which is guaranteed)
 	int64_t kernel_a_offset = -(kernel_dim_a / 2), kernel_b_offset = -(kernel_dim_b / 2);
 	double *kernel_values = kernel.values_;
 	double *new_values_ptr = new_values;
 	
-	// FIXME: TO BE PARALLELIZED
-	for (int64_t b = 0; b < dim_b; ++b)
+	if (!periodic_a_ && !periodic_b_)
 	{
-		double coverage_b = (!periodic_b_ && ((b == 0) || (b == dim_b - 1))) ? 0.5 : 1.0;
-		
-		for (int64_t a = 0; a < dim_a; ++a)
+		// Optimized non-periodic case with SIMD
+		for (int64_t b = 0; b < dim_b; ++b)
 		{
-			double coverage_a = (!periodic_a_ && ((a == 0) || (a == dim_a - 1))) ? 0.5 : 1.0;
-			double coverage = coverage_a * coverage_b;					// handles partial coverage at the edges of the spatial map
+			double coverage_b = ((b == 0) || (b == dim_b - 1)) ? 0.5 : 1.0;
 			
-			// calculate the kernel's effect at point (a,b)
-			double kernel_total = 0.0;
-			double conv_total = 0.0;
+			int64_t kernel_b_first = std::max((int64_t)0, -(b + kernel_b_offset));
+			int64_t kernel_b_last = std::min(kernel_dim_b - 1, (kernel_dim_b - 1) + (((dim_b - 1) - b) + kernel_b_offset));
 			
-			for (int64_t kernel_a = 0; kernel_a < kernel_dim_a; kernel_a++)
+			for (int64_t a = 0; a < dim_a; ++a)
 			{
-				int64_t conv_a = a + kernel_a + kernel_a_offset;
+				double coverage_a = ((a == 0) || (a == dim_a - 1)) ? 0.5 : 1.0;
+				double coverage = coverage_a * coverage_b;
 				
-				// handle bounds: either clip or wrap
-				if ((conv_a < 0) || (conv_a >= dim_a))
+				int64_t kernel_a_first = std::max((int64_t)0, -(a + kernel_a_offset));
+				int64_t kernel_a_last = std::min(kernel_dim_a - 1, (kernel_dim_a - 1) + (((dim_a - 1) - a) + kernel_a_offset));
+				
+				double kernel_total = 0.0;
+				double conv_total = 0.0;
+				
+				// Loop over b first (outer), then vectorize over a (inner, contiguous)
+				for (int64_t kernel_b = kernel_b_first; kernel_b <= kernel_b_last; kernel_b++)
 				{
-					if (!periodic_a_)
-						continue;
+					int64_t conv_b = b + kernel_b + kernel_b_offset;
+					int64_t conv_a_start = a + kernel_a_first + kernel_a_offset;
+					int64_t count = kernel_a_last - kernel_a_first + 1;
 					
-					// periodicity: assume the two edges have identical values, skip over the edge value on the opposite side
-					while (conv_a < 0)
-						conv_a += (dim_a - 1);	// move -1 to dim - 2
-					while (conv_a >= dim_a)
-						conv_a -= (dim_a - 1);	// move dim to 1
+					// Use SIMD dot product for the contiguous a dimension
+					Eidos_SIMD::convolve_dot_product_scaled_float64(
+						&kernel_values[kernel_a_first + kernel_b * kernel_dim_a],
+						&values_[conv_a_start + conv_b * dim_a],
+						count, coverage,
+						kernel_total, conv_total);
 				}
+				
+				*(new_values_ptr++) = ((kernel_total > 0) ? (conv_total / kernel_total) : 0);
+			}
+		}
+	}
+	else
+	{
+		// General periodic case - element by element
+		for (int64_t b = 0; b < dim_b; ++b)
+		{
+			double coverage_b = (!periodic_b_ && ((b == 0) || (b == dim_b - 1))) ? 0.5 : 1.0;
+			
+			for (int64_t a = 0; a < dim_a; ++a)
+			{
+				double coverage_a = (!periodic_a_ && ((a == 0) || (a == dim_a - 1))) ? 0.5 : 1.0;
+				double coverage = coverage_a * coverage_b;
+				
+				double kernel_total = 0.0;
+				double conv_total = 0.0;
 				
 				for (int64_t kernel_b = 0; kernel_b < kernel_dim_b; kernel_b++)
 				{
 					int64_t conv_b = b + kernel_b + kernel_b_offset;
 					
-					// handle bounds: either clip or wrap
 					if ((conv_b < 0) || (conv_b >= dim_b))
 					{
 						if (!periodic_b_)
 							continue;
 						
-						// periodicity: assume the two edges have identical values, skip over the edge value on the opposite side
 						while (conv_b < 0)
-							conv_b += (dim_b - 1);	// move -1 to dim - 2
+							conv_b += (dim_b - 1);
 						while (conv_b >= dim_b)
-							conv_b -= (dim_b - 1);	// move dim to 1
+							conv_b -= (dim_b - 1);
 					}
 					
-					// this point is within bounds; add it in to the totals
-					double kernel_value = kernel_values[kernel_a + kernel_b * kernel_dim_a] * coverage;
-					double pixel_value = values_[conv_a + conv_b * dim_a];
-					
-					// we keep a total of the kernel values that were within bounds, for this point
-					kernel_total += kernel_value;
-					
-					// and we keep a total of the convolution - kernel values times pixel values
-					conv_total += kernel_value * pixel_value;
+					for (int64_t kernel_a = 0; kernel_a < kernel_dim_a; kernel_a++)
+					{
+						int64_t conv_a = a + kernel_a + kernel_a_offset;
+						
+						if ((conv_a < 0) || (conv_a >= dim_a))
+						{
+							if (!periodic_a_)
+								continue;
+							
+							while (conv_a < 0)
+								conv_a += (dim_a - 1);
+							while (conv_a >= dim_a)
+								conv_a -= (dim_a - 1);
+						}
+						
+						double kernel_value = kernel_values[kernel_a + kernel_b * kernel_dim_a] * coverage;
+						double pixel_value = values_[conv_a + conv_b * dim_a];
+						
+						kernel_total += kernel_value;
+						conv_total += kernel_value * pixel_value;
+					}
 				}
+				
+				*(new_values_ptr++) = ((kernel_total > 0) ? (conv_total / kernel_total) : 0);
 			}
-			
-			*(new_values_ptr++) = ((kernel_total > 0) ? (conv_total / kernel_total) : 0);
 		}
 	}
+	
+#if 0
+	// Check the values computed above by the optimized algorithm against the simple algorithm
+	// test_smooth2D.slim is a test file that can be used with this validation code
+	// NOTE: due to SIMD, results may differ slightly; needs tolerance check with allClose()
+	new_values_ptr = new_values;
+	
+	if (!periodic_a_ && !periodic_b_)
+	{
+		for (int64_t b = 0; b < dim_b; ++b)
+		{
+			double coverage_b = (!periodic_b_ && ((b == 0) || (b == dim_b - 1))) ? 0.5 : 1.0;
+			
+			for (int64_t a = 0; a < dim_a; ++a)
+			{
+				double coverage_a = (!periodic_a_ && ((a == 0) || (a == dim_a - 1))) ? 0.5 : 1.0;
+				double coverage = coverage_a * coverage_b;					// handles partial coverage at the edges of the spatial map
+				
+				// calculate the kernel's effect at point (a,b)
+				double kernel_total = 0.0;
+				double conv_total = 0.0;
+				
+				for (int64_t kernel_a = 0; kernel_a < kernel_dim_a; kernel_a++)
+				{
+					int64_t conv_a = a + kernel_a + kernel_a_offset;
+					
+					// handle bounds: either clip or wrap
+					if ((conv_a < 0) || (conv_a >= dim_a))
+						continue;
+					
+					for (int64_t kernel_b = 0; kernel_b < kernel_dim_b; kernel_b++)
+					{
+						int64_t conv_b = b + kernel_b + kernel_b_offset;
+						
+						// handle bounds: either clip or wrap
+						if ((conv_b < 0) || (conv_b >= dim_b))
+							continue;
+						
+						// this point is within bounds; add it in to the totals
+						double kernel_value = kernel_values[kernel_a + kernel_b * kernel_dim_a] * coverage;
+						double pixel_value = values_[conv_a + conv_b * dim_a];
+						
+						// we keep a total of the kernel values that were within bounds, for this point
+						kernel_total += kernel_value;
+						
+						// and we keep a total of the convolution - kernel values times pixel values
+						conv_total += kernel_value * pixel_value;
+					}
+				}
+				
+				double check_value = ((kernel_total > 0) ? (conv_total / kernel_total) : 0);
+				double calculated_value = *(new_values_ptr++);
+				
+				if (check_value != calculated_value)
+					std::cout << "Convolve_S2 optimization mismatch: " << check_value << " versus " << calculated_value << std::endl;
+			}
+		}
+	}
+#endif
 	
 	TakeOverMallocedValues(new_values, 2, grid_size_);	// takes new_values from us
 }
 
+// SIMD-accelerated convolution for 3D spatial maps
+// Uses vectorized dot products with loop reordering for contiguous memory access
 void SpatialMap::Convolve_S3(SpatialKernel &kernel)
 {
 	if (spatiality_ != 3)
@@ -949,99 +1082,228 @@ void SpatialMap::Convolve_S3(SpatialKernel &kernel)
 	if (!new_values)
 		EIDOS_TERMINATION << "ERROR (SpatialMap::Convolve_S3): allocation failed; you may need to raise the memory limit for SLiM." << EidosTerminate(nullptr);
 	
-	// this assumes the kernel's dimensions are symmetrical around its center, and relies on rounding (which is guaranteed)
 	int64_t kernel_a_offset = -(kernel_dim_a / 2), kernel_b_offset = -(kernel_dim_b / 2), kernel_c_offset = -(kernel_dim_c / 2);
 	double *kernel_values = kernel.values_;
 	double *new_values_ptr = new_values;
 	
-	// FIXME: TO BE PARALLELIZED
-	for (int64_t c = 0; c < dim_c; ++c)
+	if (!periodic_a_ && !periodic_b_ && !periodic_c_)
 	{
-		double coverage_c = (!periodic_c_ && ((c == 0) || (c == dim_c - 1))) ? 0.5 : 1.0;
-		
-		for (int64_t b = 0; b < dim_b; ++b)
+		// Optimized non-periodic case with SIMD
+		for (int64_t c = 0; c < dim_c; ++c)
 		{
-			double coverage_b = (!periodic_b_ && ((b == 0) || (b == dim_b - 1))) ? 0.5 : 1.0;
+			double coverage_c = ((c == 0) || (c == dim_c - 1)) ? 0.5 : 1.0;
 			
-			for (int64_t a = 0; a < dim_a; ++a)
+			int64_t kernel_c_first = std::max((int64_t)0, -(c + kernel_c_offset));
+			int64_t kernel_c_last = std::min(kernel_dim_c - 1, (kernel_dim_c - 1) + (((dim_c - 1) - c) + kernel_c_offset));
+			
+			for (int64_t b = 0; b < dim_b; ++b)
 			{
-				double coverage_a = (!periodic_a_ && ((a == 0) || (a == dim_a - 1))) ? 0.5 : 1.0;
-				double coverage = coverage_a * coverage_b * coverage_c;			// handles partial coverage at the edges of the spatial map
+				double coverage_b = ((b == 0) || (b == dim_b - 1)) ? 0.5 : 1.0;
 				
-				// calculate the kernel's effect at point (a,b,c)
-				double kernel_total = 0.0;
-				double conv_total = 0.0;
+				int64_t kernel_b_first = std::max((int64_t)0, -(b + kernel_b_offset));
+				int64_t kernel_b_last = std::min(kernel_dim_b - 1, (kernel_dim_b - 1) + (((dim_b - 1) - b) + kernel_b_offset));
 				
-				for (int64_t kernel_a = 0; kernel_a < kernel_dim_a; kernel_a++)
+				for (int64_t a = 0; a < dim_a; ++a)
 				{
-					int64_t conv_a = a + kernel_a + kernel_a_offset;
+					double coverage_a = ((a == 0) || (a == dim_a - 1)) ? 0.5 : 1.0;
+					double coverage = coverage_a * coverage_b * coverage_c;
 					
-					// handle bounds: either clip or wrap
-					if ((conv_a < 0) || (conv_a >= dim_a))
+					int64_t kernel_a_first = std::max((int64_t)0, -(a + kernel_a_offset));
+					int64_t kernel_a_last = std::min(kernel_dim_a - 1, (kernel_dim_a - 1) + (((dim_a - 1) - a) + kernel_a_offset));
+					
+					double kernel_total = 0.0;
+					double conv_total = 0.0;
+					
+					// Loop over c and b (outer), then vectorize over a (inner, contiguous)
+					for (int64_t kernel_c = kernel_c_first; kernel_c <= kernel_c_last; kernel_c++)
 					{
-						if (!periodic_a_)
-							continue;
+						int64_t conv_c = c + kernel_c + kernel_c_offset;
 						
-						// periodicity: assume the two edges have identical values, skip over the edge value on the opposite side
-						while (conv_a < 0)
-							conv_a += (dim_a - 1);	// move -1 to dim - 2
-						while (conv_a >= dim_a)
-							conv_a -= (dim_a - 1);	// move dim to 1
+						for (int64_t kernel_b = kernel_b_first; kernel_b <= kernel_b_last; kernel_b++)
+						{
+							int64_t conv_b = b + kernel_b + kernel_b_offset;
+							int64_t conv_a_start = a + kernel_a_first + kernel_a_offset;
+							int64_t count = kernel_a_last - kernel_a_first + 1;
+							
+							// Use SIMD dot product for the contiguous a dimension
+							Eidos_SIMD::convolve_dot_product_scaled_float64(
+								&kernel_values[kernel_a_first + kernel_b * kernel_dim_a + kernel_c * kernel_dim_a * kernel_dim_b],
+								&values_[conv_a_start + conv_b * dim_a + conv_c * dim_a * dim_b],
+								count, coverage,
+								kernel_total, conv_total);
+						}
 					}
 					
-					for (int64_t kernel_b = 0; kernel_b < kernel_dim_b; kernel_b++)
+					*(new_values_ptr++) = ((kernel_total > 0) ? (conv_total / kernel_total) : 0);
+				}
+			}
+		}
+	}
+	else
+	{
+		// General periodic case - element by element
+		for (int64_t c = 0; c < dim_c; ++c)
+		{
+			double coverage_c = (!periodic_c_ && ((c == 0) || (c == dim_c - 1))) ? 0.5 : 1.0;
+			
+			for (int64_t b = 0; b < dim_b; ++b)
+			{
+				double coverage_b = (!periodic_b_ && ((b == 0) || (b == dim_b - 1))) ? 0.5 : 1.0;
+				
+				for (int64_t a = 0; a < dim_a; ++a)
+				{
+					double coverage_a = (!periodic_a_ && ((a == 0) || (a == dim_a - 1))) ? 0.5 : 1.0;
+					double coverage = coverage_a * coverage_b * coverage_c;
+					
+					double kernel_total = 0.0;
+					double conv_total = 0.0;
+					
+					for (int64_t kernel_c = 0; kernel_c < kernel_dim_c; kernel_c++)
 					{
-						int64_t conv_b = b + kernel_b + kernel_b_offset;
+						int64_t conv_c = c + kernel_c + kernel_c_offset;
 						
-						// handle bounds: either clip or wrap
-						if ((conv_b < 0) || (conv_b >= dim_b))
+						if ((conv_c < 0) || (conv_c >= dim_c))
 						{
-							if (!periodic_b_)
+							if (!periodic_c_)
 								continue;
 							
-							// periodicity: assume the two edges have identical values, skip over the edge value on the opposite side
-							while (conv_b < 0)
-								conv_b += (dim_b - 1);	// move -1 to dim - 2
-							while (conv_b >= dim_b)
-								conv_b -= (dim_b - 1);	// move dim to 1
+							while (conv_c < 0)
+								conv_c += (dim_c - 1);
+							while (conv_c >= dim_c)
+								conv_c -= (dim_c - 1);
 						}
 						
-						for (int64_t kernel_c = 0; kernel_c < kernel_dim_c; kernel_c++)
+						for (int64_t kernel_b = 0; kernel_b < kernel_dim_b; kernel_b++)
 						{
-							int64_t conv_c = c + kernel_c + kernel_c_offset;
+							int64_t conv_b = b + kernel_b + kernel_b_offset;
 							
-							// handle bounds: either clip or wrap
-							if ((conv_c < 0) || (conv_c >= dim_c))
+							if ((conv_b < 0) || (conv_b >= dim_b))
 							{
-								if (!periodic_c_)
+								if (!periodic_b_)
 									continue;
 								
-								// periodicity: assume the two edges have identical values, skip over the edge value on the opposite side
-								while (conv_c < 0)
-									conv_c += (dim_c - 1);	// move -1 to dim - 2
-								while (conv_c >= dim_c)
-									conv_c -= (dim_c - 1);	// move dim to 1
+								while (conv_b < 0)
+									conv_b += (dim_b - 1);
+								while (conv_b >= dim_b)
+									conv_b -= (dim_b - 1);
 							}
 							
-							// this point is within bounds; add it in to the totals
-							double kernel_value = kernel_values[kernel_a + kernel_b * kernel_dim_a + kernel_c * kernel_dim_a * kernel_dim_b] * coverage;
-							double pixel_value = values_[conv_a + conv_b * dim_a + conv_c * dim_a * dim_b];
-							
-							// we keep a total of the kernel values that were within bounds, for this point
-							kernel_total += kernel_value;
-							
-							// and we keep a total of the convolution - kernel values times pixel values
-							conv_total += kernel_value * pixel_value;
+							for (int64_t kernel_a = 0; kernel_a < kernel_dim_a; kernel_a++)
+							{
+								int64_t conv_a = a + kernel_a + kernel_a_offset;
+								
+								if ((conv_a < 0) || (conv_a >= dim_a))
+								{
+									if (!periodic_a_)
+										continue;
+									
+									while (conv_a < 0)
+										conv_a += (dim_a - 1);
+									while (conv_a >= dim_a)
+										conv_a -= (dim_a - 1);
+								}
+								
+								double kernel_value = kernel_values[kernel_a + kernel_b * kernel_dim_a + kernel_c * kernel_dim_a * kernel_dim_b] * coverage;
+								double pixel_value = values_[conv_a + conv_b * dim_a + conv_c * dim_a * dim_b];
+								
+								kernel_total += kernel_value;
+								conv_total += kernel_value * pixel_value;
+							}
 						}
 					}
+					
+					*(new_values_ptr++) = ((kernel_total > 0) ? (conv_total / kernel_total) : 0);
 				}
-				
-				*(new_values_ptr++) = ((kernel_total > 0) ? (conv_total / kernel_total) : 0);
 			}
 		}
 	}
 	
 	TakeOverMallocedValues(new_values, 3, grid_size_);	// takes new_values from us
+}
+
+void SpatialMap::FillRGBBuffer(uint8_t *buffer, int64_t width, int64_t height, bool flipped, bool no_interpolation)
+{
+    // This method requires spatiality 2; we just return otherwise
+    if (spatiality_ != 2)
+        return;
+    
+    int64_t xsize = grid_size_[0];
+    int64_t ysize = grid_size_[1];
+    double *values = values_;
+    bool interpolate = interpolate_ && !no_interpolation;	// no_interpolation==true forces interpolation off
+    
+	if (interpolate)
+	{
+		for (int yc = 0; yc < height; yc++)
+		{
+			double y_fraction = (flipped ? (((height - 1) - yc) + 0.5) / height : (yc + 0.5) / height);		// pixel center
+			
+			for (int xc = 0; xc < width; xc++)
+			{
+				// Look up the nearest map point and get its value; interpolate if requested
+				double x_fraction = (xc + 0.5) / width;		// pixel center
+				double value;
+				
+				// interpolation
+				double x_map = x_fraction * (xsize - 1);
+				double y_map = y_fraction * (ysize - 1);
+				int x1_map = static_cast<int>(floor(x_map));
+				int y1_map = static_cast<int>(floor(y_map));
+				int x2_map = static_cast<int>(ceil(x_map));
+				int y2_map = static_cast<int>(ceil(y_map));
+				double fraction_x2 = x_map - x1_map;
+				double fraction_x1 = 1.0 - fraction_x2;
+				double fraction_y2 = y_map - y1_map;
+				double fraction_y1 = 1.0 - fraction_y2;
+				double value_x1_y1 = values[x1_map + y1_map * xsize] * fraction_x1 * fraction_y1;
+				double value_x2_y1 = values[x2_map + y1_map * xsize] * fraction_x2 * fraction_y1;
+				double value_x1_y2 = values[x1_map + y2_map * xsize] * fraction_x1 * fraction_y2;
+				double value_x2_y2 = values[x2_map + y2_map * xsize] * fraction_x2 * fraction_y2;
+				
+				value = value_x1_y1 + value_x2_y1 + value_x1_y2 + value_x2_y2;
+				
+				// Given the interpolated value, look up the color, interpolating that if necessary
+				double rgb[3];
+				
+				ColorForValue(value, rgb);
+				
+				// Write the color values to the buffer
+				*(buffer++) = static_cast<uint8_t>(round(rgb[0] * 255.0));
+				*(buffer++) = static_cast<uint8_t>(round(rgb[1] * 255.0));
+				*(buffer++) = static_cast<uint8_t>(round(rgb[2] * 255.0));
+			}
+		}
+	}
+	else
+	{
+		for (int yc = 0; yc < height; yc++)
+		{
+			double y_fraction = (flipped ? (((height - 1) - yc) + 0.5) / height : (yc + 0.5) / height);		// pixel center
+			
+			for (int xc = 0; xc < width; xc++)
+			{
+				// Look up the nearest map point and get its value; interpolate if requested
+				double x_fraction = (xc + 0.5) / width;		// pixel center
+				double value;
+				
+				// no interpolation
+				int x_map = (int)std::round(x_fraction * (xsize - 1));
+				int y_map = (int)std::round(y_fraction * (ysize - 1));
+				
+				value = values[x_map + y_map * xsize];
+				
+				// Given the un-interpolated value, look up the color, interpolating that if necessary
+				double rgb[3];
+				
+				ColorForValue(value, rgb);
+				
+				// Write the color values to the buffer
+				*(buffer++) = static_cast<uint8_t>(round(rgb[0] * 255.0));
+				*(buffer++) = static_cast<uint8_t>(round(rgb[1] * 255.0));
+				*(buffer++) = static_cast<uint8_t>(round(rgb[2] * 255.0));
+			}
+		}
+	}
 }
 
 
@@ -1059,7 +1321,7 @@ const EidosClass *SpatialMap::Class(void) const
 
 void SpatialMap::Print(std::ostream &p_ostream) const
 {
-	p_ostream << Class()->ClassName() << "<\'" << name_ << "\'>";
+	p_ostream << Class()->ClassNameForDisplay() << "<\'" << name_ << "\'>";
 }
 
 EidosValue_SP SpatialMap::GetProperty(EidosGlobalStringID p_property_id)
@@ -1137,6 +1399,7 @@ void SpatialMap::SetProperty(EidosGlobalStringID p_property_id, const EidosValue
 				free(display_buffer_);
 				display_buffer_ = nullptr;
 			}
+			// image_ does not have interpolated data, so it is not invalidated here
 #endif
 			
 			return;
@@ -1433,8 +1696,7 @@ EidosValue_SP SpatialMap::ExecuteMethod_power(EidosGlobalStringID p_method_id, c
 		double power_scalar = x_value->NumericAtIndex_NOCAST(0, nullptr);
 		
 		// FIXME: TO BE PARALLELIZED
-		for (int64_t i = 0; i < values_size_; ++i)
-			values_[i] = pow(values_[i], power_scalar);
+		Eidos_SIMD::pow_float64_scalar_exp(values_, power_scalar, values_, values_size_);
 	}
 	else
 	{
@@ -1445,8 +1707,7 @@ EidosValue_SP SpatialMap::ExecuteMethod_power(EidosGlobalStringID p_method_id, c
 			EIDOS_TERMINATION << "ERROR (SpatialMap::ExecuteMethod_power): power() requires the target SpatialMap to be compatible with the SpatialMap supplied in x (using the same spatiality and bounds, and having the same grid resolution)." << EidosTerminate();
 		
 		// FIXME: TO BE PARALLELIZED
-		for (int64_t i = 0; i < values_size_; ++i)
-			values_[i] = pow(values_[i], power_map_values[i]);
+		Eidos_SIMD::pow_float64(values_, power_map_values, values_, values_size_);
 	}
 	
 	_ValuesChanged();
@@ -1460,8 +1721,7 @@ EidosValue_SP SpatialMap::ExecuteMethod_exp(EidosGlobalStringID p_method_id, con
 {
 #pragma unused (p_method_id, p_arguments, p_interpreter)
 	// FIXME: TO BE PARALLELIZED
-	for (int64_t i = 0; i < values_size_; ++i)
-		values_[i] = exp(values_[i]);
+	Eidos_SIMD::exp_float64(values_, values_, values_size_);
 	
 	_ValuesChanged();
 	
@@ -2384,7 +2644,7 @@ EidosValue_SP SpatialMap::ExecuteMethod_sampleImprovedNearbyPoint(EidosGlobalStr
 	
 	EidosValue_Float *float_result = (new (gEidosValuePool->AllocateChunk()) EidosValue_Float())->resize_no_initialize(coordinate_count);
 	double *result_ptr = float_result->data_mutable();
-	gsl_rng *rng = EIDOS_GSL_RNG(omp_get_thread_num());
+	EidosRNG_64_bit &rng_64 = EIDOS_64BIT_RNG(omp_get_thread_num());
 	
 	if (spatiality_ == 1)
 	{
@@ -2429,7 +2689,7 @@ EidosValue_SP SpatialMap::ExecuteMethod_sampleImprovedNearbyPoint(EidosGlobalStr
 			double original_map_value = ValueAtPoint_S1(rescaled_point);
 			double map_value = ValueAtPoint_S1(rescaled_displaced);
 			
-			if ((map_value > original_map_value) || (map_value > original_map_value * Eidos_rng_uniform(rng)))
+			if ((map_value > original_map_value) || (map_value > original_map_value * Eidos_rng_uniform_doubleCO(rng_64)))
 				*(result_ptr++) = displaced_point[0];
 			else
 				*(result_ptr++) = point_a;
@@ -2489,7 +2749,7 @@ EidosValue_SP SpatialMap::ExecuteMethod_sampleImprovedNearbyPoint(EidosGlobalStr
 			double original_map_value = ValueAtPoint_S2(rescaled_point);
 			double map_value = ValueAtPoint_S2(rescaled_displaced);
 			
-			if ((map_value > original_map_value) || (map_value > original_map_value * Eidos_rng_uniform(rng)))
+			if ((map_value > original_map_value) || (map_value > original_map_value * Eidos_rng_uniform_doubleCO(rng_64)))
 			{
 				*(result_ptr++) = displaced_point[0];
 				*(result_ptr++) = displaced_point[1];
@@ -2566,7 +2826,7 @@ EidosValue_SP SpatialMap::ExecuteMethod_sampleImprovedNearbyPoint(EidosGlobalStr
 			double original_map_value = ValueAtPoint_S3(rescaled_point);
 			double map_value = ValueAtPoint_S3(rescaled_displaced);
 			
-			if ((map_value > original_map_value) || (map_value > original_map_value * Eidos_rng_uniform(rng)))
+			if ((map_value > original_map_value) || (map_value > original_map_value * Eidos_rng_uniform_doubleCO(rng_64)))
 			{
 				*(result_ptr++) = displaced_point[0];
 				*(result_ptr++) = displaced_point[1];
@@ -2625,7 +2885,7 @@ EidosValue_SP SpatialMap::ExecuteMethod_sampleNearbyPoint(EidosGlobalStringID p_
 	
 	EidosValue_Float *float_result = (new (gEidosValuePool->AllocateChunk()) EidosValue_Float())->resize_no_initialize(coordinate_count);
 	double *result_ptr = float_result->data_mutable();
-	gsl_rng *rng = EIDOS_GSL_RNG(omp_get_thread_num());
+	EidosRNG_64_bit &rng_64 = EIDOS_64BIT_RNG(omp_get_thread_num());
 	
 	if (spatiality_ == 1)
 	{
@@ -2672,7 +2932,7 @@ EidosValue_SP SpatialMap::ExecuteMethod_sampleNearbyPoint(EidosGlobalStringID p_
 				rescaled_point[0] = (displaced_point[0] - bounds_a0_) / (bounds_a1_ - bounds_a0_);
 				map_value = ValueAtPoint_S1(rescaled_point);
 			}
-			while (values_max_ * Eidos_rng_uniform(rng) > map_value);
+			while (values_max_ * Eidos_rng_uniform_doubleCO(rng_64) > map_value);
 			
 			*(result_ptr++) = displaced_point[0];
 		}
@@ -2732,7 +2992,7 @@ EidosValue_SP SpatialMap::ExecuteMethod_sampleNearbyPoint(EidosGlobalStringID p_
 				rescaled_point[1] = (displaced_point[1] - bounds_b0_) / (bounds_b1_ - bounds_b0_);
 				map_value = ValueAtPoint_S2(rescaled_point);
 			}
-			while (values_max_ * Eidos_rng_uniform(rng) > map_value);
+			while (values_max_ * Eidos_rng_uniform_doubleCO(rng_64) > map_value);
 			
 			*(result_ptr++) = displaced_point[0];
 			*(result_ptr++) = displaced_point[1];
@@ -2803,7 +3063,7 @@ EidosValue_SP SpatialMap::ExecuteMethod_sampleNearbyPoint(EidosGlobalStringID p_
 				rescaled_point[2] = (displaced_point[2] - bounds_c0_) / (bounds_c1_ - bounds_c0_);
 				map_value = ValueAtPoint_S3(rescaled_point);
 			}
-			while (values_max_ * Eidos_rng_uniform(rng) > map_value);
+			while (values_max_ * Eidos_rng_uniform_doubleCO(rng_64) > map_value);
 			
 			*(result_ptr++) = displaced_point[0];
 			*(result_ptr++) = displaced_point[1];
@@ -2856,7 +3116,6 @@ EidosValue_SP SpatialMap::ExecuteMethod_smooth(EidosGlobalStringID p_method_id, 
 	
 	return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Object(this, gSLiM_SpatialMap_Class));
 }
-
 
 
 //

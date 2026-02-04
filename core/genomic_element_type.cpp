@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 12/13/14.
-//  Copyright (c) 2014-2024 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2014-2025 Benjamin C. Haller.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -105,8 +105,8 @@ MutationType *GenomicElementType::DrawMutationType(void) const
 	if (!lookup_mutation_type_)
 		EIDOS_TERMINATION << "ERROR (GenomicElementType::DrawMutationType): empty mutation type vector for genomic element type." << EidosTerminate();
 	
-	gsl_rng *rng = EIDOS_GSL_RNG(omp_get_thread_num());
-	return mutation_type_ptrs_[gsl_ran_discrete(rng, lookup_mutation_type_)];
+	gsl_rng *rng_gsl = EIDOS_GSL_RNG(omp_get_thread_num());
+	return mutation_type_ptrs_[gsl_ran_discrete(rng_gsl, lookup_mutation_type_)];
 }
 
 void GenomicElementType::SetNucleotideMutationMatrix(const EidosValue_Float_SP &p_mutation_matrix)
@@ -242,7 +242,7 @@ const EidosClass *GenomicElementType::Class(void) const
 
 void GenomicElementType::Print(std::ostream &p_ostream) const
 {
-	p_ostream << Class()->ClassName() << "<g" << genomic_element_type_id_ << ">";
+	p_ostream << Class()->ClassNameForDisplay() << "<g" << genomic_element_type_id_ << ">";
 }
 
 EidosValue_SP GenomicElementType::GetProperty(EidosGlobalStringID p_property_id)
@@ -435,9 +435,7 @@ EidosValue_SP GenomicElementType::ExecuteMethod_setMutationMatrix(EidosGlobalStr
 	SetNucleotideMutationMatrix(EidosValue_Float_SP((EidosValue_Float *)(mutationMatrix_value)));
 	
 	// the change to the mutation matrix means everything downstream has to be recached
-	species_.CacheNucleotideMatrices();
-	species_.CreateNucleotideMutationRateMap();
-	species_.TheChromosome().InitializeDraws();
+	species_.MaxNucleotideMutationRateChanged();
 	
 	return gStaticEidosValueVOID;
 }

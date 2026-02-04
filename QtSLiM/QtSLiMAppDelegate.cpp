@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 7/13/2019.
-//  Copyright (c) 2019-2024 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2019-2025 Benjamin C. Haller.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -37,6 +37,8 @@
 #include "QtSLiMExtras.h"
 
 #include <QApplication>
+#include <QGuiApplication>
+#include <QScreen>
 #include <QOpenGLWidget>
 #include <QSurfaceFormat>
 #include <QMenu>
@@ -123,6 +125,18 @@ void QtSLiM_MessageHandler(QtMsgType type, const QMessageLogContext &context, co
     //if (msg.contains("Using QCharRef with an index"))
     //    qDebug() << "HIT WATCH MESSAGE; SET A BREAKPOINT HERE!";
     
+    // Filter known benign Windows QPA spam when displays change
+#ifdef _WIN32
+    {
+        QByteArray category = context.category ? QByteArray(context.category) : QByteArray();
+        if (category == "qwindows")
+        {
+            if (msg.startsWith("Unable to get device information for"))
+                return;
+        }
+    }
+#endif
+    
     // useful behavior, from https://doc.qt.io/qt-5/qtglobal.html#qInstallMessageHandler
     {
         QByteArray localMsg = msg.toLocal8Bit();
@@ -175,6 +189,7 @@ QtSLiMAppDelegate::QtSLiMAppDelegate(QObject *p_parent) : QObject(p_parent)
     QCoreApplication::setApplicationVersion(SLIM_VERSION_STRING);
     
     // Warm up our back ends before anything else happens, including our own class objects
+    SLiM_ConfigureContext();
     Eidos_WarmUp();
     SLiM_WarmUp();
     
@@ -224,6 +239,49 @@ QtSLiMAppDelegate::QtSLiMAppDelegate(QObject *p_parent) : QObject(p_parent)
     
     // We assume we are the global instance; FIXME singleton pattern would be good
     qtSLiMAppDelegate = this;
+
+    // Ensure windows stay on-screen when displays change (added, removed, or modified)
+#if (QT_VERSION >= QT_VERSION_CHECK(5, 10, 0))
+
+    // This lambda (1) ensures that visible top-level windows remain on screen;
+    // (2) raises the active window to the front on the appropriate screen, if appropriate.
+    auto ensureOnScreen = [this]() {
+        const auto topLevels = QApplication::topLevelWidgets();
+        QWidget *active = qApp->activeWindow();
+        for (QWidget *w : topLevels)
+        {
+            if (!w || !w->isWindow())
+                continue;
+            // Do not affect hidden or minimized windows; only adjust currently visible ones
+            if (!w->isVisible())
+                continue;
+            if (w->windowState() & Qt::WindowMinimized)
+                continue;
+
+            // If the window is largely off-screen after a display change, move it without forcing it to the front
+            if (QtSLiMIsMostlyOnScreen(w))
+                continue;
+
+            if (w == active)
+            {
+                // For the active window, fully expose it (bring to front)
+                QtSLiMMakeWindowVisibleAndExposed(w);
+            }
+            else
+            {
+                // For other visible windows, adjust quietly without raising
+                QtSLiMRelocateQuietly(w);
+            }
+        }
+    };
+
+    // Connect to the screenAdded, screenRemoved, and geometryChanged signals
+    // to ensure that all top-level windows are visible and exposed
+    connect(app, &QGuiApplication::screenAdded,   this, [ensureOnScreen](QScreen *) { ensureOnScreen(); });
+    connect(app, &QGuiApplication::screenRemoved, this, [ensureOnScreen](QScreen *) { ensureOnScreen(); });
+    for (QScreen *screen : QGuiApplication::screens())
+        connect(screen, &QScreen::geometryChanged, this, [ensureOnScreen](const QRect &) { ensureOnScreen(); });
+#endif
     
     // Cache app-wide icons
     slimDocumentIcon_.addFile(":/icons/DocIcon16.png");
@@ -348,11 +406,7 @@ QtSLiMWindow *QtSLiMAppDelegate::openFile(const QString &fileName, QtSLiMWindow 
             QWidget *imageWindow = requester->imageWindowWithPath(fileName);
             
             if (imageWindow)
-            {
-                imageWindow->show();
-                imageWindow->raise();
-                imageWindow->activateWindow();
-            }
+                QtSLiMMakeWindowVisibleAndExposed(imageWindow);
             
             return requester;
         }
@@ -367,9 +421,7 @@ QtSLiMWindow *QtSLiMAppDelegate::openFile(const QString &fileName, QtSLiMWindow 
         // Should be a .slim or .txt file; look for an existing window for the file, otherwise open a new window (or reuse a reuseable window)
         QtSLiMWindow *existing = findMainWindow(fileName);
         if (existing) {
-            existing->show();
-            existing->raise();
-            existing->activateWindow();
+            QtSLiMMakeWindowVisibleAndExposed(existing);
             return existing;
         }
         
@@ -472,9 +524,9 @@ void QtSLiMAppDelegate::setUpRecipesMenu(QMenu *openRecipesMenu, QAction *findRe
                 {
                     case 4: chapterName = "Getting started: Neutral evolution in a panmictic population";		break;
                     case 5: chapterName = "Demography and population structure";								break;
-                    case 6: chapterName = "Sexual reproduction";												break;
-                    case 7: chapterName = "Mutation types, genomic elements, and chromosome structure";         break;
-                    case 8: chapterName = "SLiMgui visualizations for polymorphism patterns";					break;
+                    case 6: chapterName = "Mutation types, genomic elements, and chromosome structure";			break;
+                    case 7: chapterName = "SLiMgui visualizations for polymorphism patterns";         			break;
+                    case 8: chapterName = "Reproduction, meiosis, and multiple chromosomes";					break;
                     case 9:	chapterName = "Selective sweeps";													break;
                     case 10:chapterName = "Context-dependent selection using mutationEffect() callbacks";		break;
                     case 11:chapterName = "Complex mating schemes using mateChoice() callbacks";				break;
@@ -482,11 +534,12 @@ void QtSLiMAppDelegate::setUpRecipesMenu(QMenu *openRecipesMenu, QAction *findRe
                     case 13:chapterName = "Phenotypes, fitness functions, quantitative traits, and QTLs";		break;
                     case 14:chapterName = "Advanced WF models";													break;
                     case 15:chapterName = "Going beyond Wright-Fisher models: nonWF model recipes";             break;
-                    case 16:chapterName = "Continuous-space models, interactions, and spatial maps";			break;
-                    case 17:chapterName = "Tree-sequence recording: tracking population history";				break;
-                    case 18:chapterName = "Modeling explicit nucleotides";										break;
-                    case 19:chapterName = "Multispecies modeling";                                              break;
-                    case 22:chapterName = "Parallel SLiM: Running SLiM multithreaded";                          break;
+                    case 16:chapterName = "Advanced nonWF techniques for managing reproduction";             	break;
+                    case 17:chapterName = "Continuous-space models, interactions, and spatial maps";			break;
+                    case 18:chapterName = "Tree-sequence recording: tracking population history";				break;
+                    case 19:chapterName = "Modeling explicit nucleotides";										break;
+                    case 20:chapterName = "Multispecies modeling";                                              break;
+                    case 23:chapterName = "Parallel SLiM: Running SLiM multithreaded";                          break;
                     default: break;
                 }
                 
@@ -855,27 +908,45 @@ void QtSLiMAppDelegate::addActionsForGlobalMenuItems(QWidget *window)
     }
     {
         QAction *actionShowCycle_WF = new QAction("Show WF Tick Cycle", this);
-        //actionAbout->setShortcut(flagsAndKey(Qt::ControlModifier, Qt::Key_Comma));
+        //actionShowCycle_WF->setShortcut(flagsAndKey(Qt::ControlModifier, Qt::Key_Comma));
         connect(actionShowCycle_WF, &QAction::triggered, qtSLiMAppDelegate, &QtSLiMAppDelegate::dispatch_showCycle_WF);
         window->addAction(actionShowCycle_WF);
     }
     {
         QAction *actionShowCycle_nonWF = new QAction("Show nonWF Tick Cycle", this);
-        //actionAbout->setShortcut(flagsAndKey(Qt::ControlModifier, Qt::Key_Comma));
+        //actionShowCycle_nonWF->setShortcut(flagsAndKey(Qt::ControlModifier, Qt::Key_Comma));
         connect(actionShowCycle_nonWF, &QAction::triggered, qtSLiMAppDelegate, &QtSLiMAppDelegate::dispatch_showCycle_nonWF);
         window->addAction(actionShowCycle_nonWF);
     }
     {
         QAction *actionShowCycle_WF_MS = new QAction("Show WF Tick Cycle (Multispecies)", this);
-        //actionAbout->setShortcut(flagsAndKey(Qt::ControlModifier, Qt::Key_Comma));
+        //actionShowCycle_WF_MS->setShortcut(flagsAndKey(Qt::ControlModifier, Qt::Key_Comma));
         connect(actionShowCycle_WF_MS, &QAction::triggered, qtSLiMAppDelegate, &QtSLiMAppDelegate::dispatch_showCycle_WF_MS);
         window->addAction(actionShowCycle_WF_MS);
     }
     {
         QAction *actionShowCycle_nonWF_MS = new QAction("Show nonWF Tick Cycle (Multispecies)", this);
-        //actionAbout->setShortcut(flagsAndKey(Qt::ControlModifier, Qt::Key_Comma));
+        //actionShowCycle_nonWF_MS->setShortcut(flagsAndKey(Qt::ControlModifier, Qt::Key_Comma));
         connect(actionShowCycle_nonWF_MS, &QAction::triggered, qtSLiMAppDelegate, &QtSLiMAppDelegate::dispatch_showCycle_nonWF_MS);
         window->addAction(actionShowCycle_nonWF_MS);
+    }
+    {
+        QAction *actionShowColorChart = new QAction("Show Color Chart", this);
+        //actionShowColorChart->setShortcut(flagsAndKey(Qt::ControlModifier, Qt::Key_Comma));
+        connect(actionShowColorChart, &QAction::triggered, qtSLiMAppDelegate, &QtSLiMAppDelegate::dispatch_showColorChart);
+        window->addAction(actionShowColorChart);
+    }
+    {
+        QAction *actionShowPlotSymbols = new QAction("Show Plot Symbols", this);
+        //actionShowPlotSymbols->setShortcut(flagsAndKey(Qt::ControlModifier, Qt::Key_Comma));
+        connect(actionShowPlotSymbols, &QAction::triggered, qtSLiMAppDelegate, &QtSLiMAppDelegate::dispatch_showPlotSymbols);
+        window->addAction(actionShowPlotSymbols);
+    }
+    {
+        QAction *actionShowColorScales = new QAction("Show SLiMgui Color Scales", this);
+        //actionShowColorScales->setShortcut(flagsAndKey(Qt::ControlModifier, Qt::Key_Comma));
+        connect(actionShowColorScales, &QAction::triggered, qtSLiMAppDelegate, &QtSLiMAppDelegate::dispatch_showColorScales);
+        window->addAction(actionShowColorScales);
     }
     {
         QAction *actionHelp = new QAction("Help", this);
@@ -1001,7 +1072,7 @@ void QtSLiMAppDelegate::addActionsForGlobalMenuItems(QWidget *window)
     }
     {
         QAction *actionShowDebuggingOutput = new QAction("Show Debugging Output", this);
-        actionShowDebuggingOutput->setShortcut(flagsAndKey(Qt::ControlModifier, Qt::Key_D));
+        actionShowDebuggingOutput->setShortcut(flagsAndKey(Qt::ControlModifier | Qt::ShiftModifier, Qt::Key_D));
         connect(actionShowDebuggingOutput, &QAction::triggered, qtSLiMAppDelegate, &QtSLiMAppDelegate::dispatch_showDebuggingOutput);
         window->addAction(actionShowDebuggingOutput);
     }
@@ -1072,6 +1143,12 @@ void QtSLiMAppDelegate::addActionsForGlobalMenuItems(QWidget *window)
         actionPaste->setShortcut(flagsAndKey(Qt::ControlModifier, Qt::Key_V));
         connect(actionPaste, &QAction::triggered, qtSLiMAppDelegate, &QtSLiMAppDelegate::dispatch_paste);
         window->addAction(actionPaste);
+    }
+    {
+        QAction *actionDuplicate = new QAction("Duplicate", this);
+        actionDuplicate->setShortcut(flagsAndKey(Qt::ControlModifier, Qt::Key_D));
+        connect(actionDuplicate, &QAction::triggered, qtSLiMAppDelegate, &QtSLiMAppDelegate::dispatch_duplicate);
+        window->addAction(actionDuplicate);
     }
     {
         QAction *actionDelete = new QAction("Delete", this);
@@ -1188,20 +1265,16 @@ void QtSLiMAppDelegate::dispatch_preferences(void)
 {
     QtSLiMPreferences &prefsWindow = QtSLiMPreferences::instance();
     
-    prefsWindow.show();
-    prefsWindow.raise();
-    prefsWindow.activateWindow();
+    QtSLiMMakeWindowVisibleAndExposed(&prefsWindow);
 }
 
 void QtSLiMAppDelegate::dispatch_about(void)
 {
     QtSLiMAbout *aboutWindow = new QtSLiMAbout(nullptr);
     
-    aboutWindow->setAttribute(Qt::WA_DeleteOnClose);    
+    aboutWindow->setAttribute(Qt::WA_DeleteOnClose);
     
-    aboutWindow->show();
-    aboutWindow->raise();
-    aboutWindow->activateWindow();
+    QtSLiMMakeWindowVisibleAndExposed(aboutWindow);
 }
 
 QWidget *QtSLiMAppDelegate::globalImageWindowWithPath(const QString &path, const QString &title, double scaleFactor)
@@ -1259,11 +1332,7 @@ void QtSLiMAppDelegate::dispatch_showCycle_WF(void)
     QWidget *imageWindow = globalImageWindowWithPath(":/help/TickCycle_WF.png", "WF Cycle", 0.32);
     
     if (imageWindow)
-    {
-        imageWindow->show();
-        imageWindow->raise();
-        imageWindow->activateWindow();
-    }
+        QtSLiMMakeWindowVisibleAndExposed(imageWindow);
 }
 
 void QtSLiMAppDelegate::dispatch_showCycle_nonWF(void)
@@ -1271,11 +1340,7 @@ void QtSLiMAppDelegate::dispatch_showCycle_nonWF(void)
     QWidget *imageWindow = globalImageWindowWithPath(":/help/TickCycle_nonWF.png", "nonWF Cycle", 0.32);
     
     if (imageWindow)
-    {
-        imageWindow->show();
-        imageWindow->raise();
-        imageWindow->activateWindow();
-    }
+        QtSLiMMakeWindowVisibleAndExposed(imageWindow);
 }
 
 void QtSLiMAppDelegate::dispatch_showCycle_WF_MS(void)
@@ -1283,11 +1348,7 @@ void QtSLiMAppDelegate::dispatch_showCycle_WF_MS(void)
     QWidget *imageWindow = globalImageWindowWithPath(":/help/TickCycle_WF_MS.png", "WF Cycle (Multispecies)", 0.32);
     
     if (imageWindow)
-    {
-        imageWindow->show();
-        imageWindow->raise();
-        imageWindow->activateWindow();
-    }
+        QtSLiMMakeWindowVisibleAndExposed(imageWindow);
 }
 
 void QtSLiMAppDelegate::dispatch_showCycle_nonWF_MS(void)
@@ -1295,20 +1356,67 @@ void QtSLiMAppDelegate::dispatch_showCycle_nonWF_MS(void)
     QWidget *imageWindow = globalImageWindowWithPath(":/help/TickCycle_nonWF_MS.png", "nonWF Cycle (Multispecies)", 0.32);
     
     if (imageWindow)
-    {
-        imageWindow->show();
-        imageWindow->raise();
-        imageWindow->activateWindow();
-    }
+        QtSLiMMakeWindowVisibleAndExposed(imageWindow);
+}
+
+void QtSLiMAppDelegate::dispatch_showColorChart(void)
+{
+    QWidget *imageWindow = globalImageWindowWithPath(":/help/ColorChart.png", "Eidos Color Chart", 0.5);
+    
+    if (imageWindow)
+        QtSLiMMakeWindowVisibleAndExposed(imageWindow);
+}
+
+void QtSLiMAppDelegate::dispatch_showPlotSymbols(void)
+{
+    QWidget *imageWindow = globalImageWindowWithPath(":/help/PlotSymbols.png", "Plot Symbols", 0.32);
+    
+    if (imageWindow)
+        QtSLiMMakeWindowVisibleAndExposed(imageWindow);
+}
+
+void QtSLiMAppDelegate::dispatch_showColorScales(void)
+{
+    // This shows a global window that displays SLiMgui's color scales.  Unlike the above global image
+    // windows shown by globalImageWindowWithPath(), this window is drawn dynamically by a custom widget.
+    // This code is based on the code in globalImageWindowWithPath(), with that custom widget.
+    int window_width = round(301);
+    int window_height = round(197);
+    
+    QWidget *image_window = new QWidget(nullptr, Qt::Window | Qt::Tool);    // a parentless standalone window
+    
+    image_window->setWindowTitle("SLiMgui Color Scales");
+    image_window->setFixedSize(window_width, window_height);
+    
+    // Make the custom widget
+    QtSLiMColorScaleWidget *colorScaleView = new QtSLiMColorScaleWidget(image_window);
+    
+    // Install imageView in the window
+    QVBoxLayout *topLayout = new QVBoxLayout;
+    
+    image_window->setLayout(topLayout);
+    topLayout->setContentsMargins(0, 0, 0, 0);
+    topLayout->setSpacing(0);
+    topLayout->addWidget(colorScaleView);
+    
+    // Position the window nicely
+    //positionNewSubsidiaryWindow(image_window);
+    
+    // make window actions for all global menu items
+    // this does not seem to be necessary on macOS, but maybe it is on Linux; will need testing FIXME
+    //qtSLiMAppDelegate->addActionsForGlobalMenuItems(this);
+    
+    image_window->setAttribute(Qt::WA_DeleteOnClose, true);
+    
+    if (image_window)
+        QtSLiMMakeWindowVisibleAndExposed(image_window);
 }
 
 void QtSLiMAppDelegate::dispatch_help(void)
 {
     QtSLiMHelpWindow &helpWindow = QtSLiMHelpWindow::instance();
     
-    helpWindow.show();
-    helpWindow.raise();
-    helpWindow.activateWindow();
+    QtSLiMMakeWindowVisibleAndExposed(&helpWindow);
 }
 
 void QtSLiMAppDelegate::dispatch_biggerFont(void)
@@ -1492,6 +1600,15 @@ void QtSLiMAppDelegate::dispatch_paste(void)
         textEdit->paste();
     else if (plainTextEdit && plainTextEdit->isEnabled() && !plainTextEdit->isReadOnly())
         plainTextEdit->paste();
+}
+
+void QtSLiMAppDelegate::dispatch_duplicate(void)
+{
+    QWidget *focusWidget = QApplication::focusWidget();
+    QtSLiMScriptTextEdit *scriptEdit = dynamic_cast<QtSLiMScriptTextEdit*>(focusWidget);
+    
+    if (scriptEdit && scriptEdit->isEnabled() && !scriptEdit->isReadOnly())
+        scriptEdit->duplicateSelection();
 }
 
 void QtSLiMAppDelegate::dispatch_delete(void)

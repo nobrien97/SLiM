@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (c) 2019-2022 Tskit Developers
+ * Copyright (c) 2019-2025 Tskit Developers
  * Copyright (c) 2016-2018 University of Oxford
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -27,6 +27,7 @@
 #include <string.h>
 #include <stdbool.h>
 #include <stdlib.h>
+#include <math.h>
 
 #include <tskit/genotypes.h>
 
@@ -74,7 +75,7 @@ tsk_variant_copy_alleles(tsk_variant_t *self, const char **alleles)
     }
     self->user_alleles_mem = tsk_malloc(total_len * sizeof(char *));
     if (self->user_alleles_mem == NULL) {
-        ret = TSK_ERR_NO_MEMORY;
+        ret = tsk_trace_error(TSK_ERR_NO_MEMORY);
         goto out;
     }
     offset = 0;
@@ -90,12 +91,10 @@ out:
 static int
 variant_init_samples_and_index_map(tsk_variant_t *self,
     const tsk_treeseq_t *tree_sequence, const tsk_id_t *samples, tsk_size_t num_samples,
-    size_t num_samples_alloc, tsk_flags_t options)
+    size_t num_samples_alloc, tsk_flags_t TSK_UNUSED(options))
 {
     int ret = 0;
-    const tsk_flags_t *flags = tree_sequence->tables->nodes.flags;
     tsk_size_t j, num_nodes;
-    bool impute_missing = !!(options & TSK_ISOLATED_NOT_MISSING);
     tsk_id_t u;
 
     num_nodes = tsk_treeseq_get_num_nodes(tree_sequence);
@@ -103,7 +102,7 @@ variant_init_samples_and_index_map(tsk_variant_t *self,
     self->alt_sample_index_map
         = tsk_malloc(num_nodes * sizeof(*self->alt_sample_index_map));
     if (self->alt_samples == NULL || self->alt_sample_index_map == NULL) {
-        ret = TSK_ERR_NO_MEMORY;
+        ret = tsk_trace_error(TSK_ERR_NO_MEMORY);
         goto out;
     }
     tsk_memcpy(self->alt_samples, samples, num_samples * sizeof(*samples));
@@ -113,16 +112,11 @@ variant_init_samples_and_index_map(tsk_variant_t *self,
     for (j = 0; j < num_samples; j++) {
         u = samples[j];
         if (u < 0 || u >= (tsk_id_t) num_nodes) {
-            ret = TSK_ERR_NODE_OUT_OF_BOUNDS;
+            ret = tsk_trace_error(TSK_ERR_NODE_OUT_OF_BOUNDS);
             goto out;
         }
         if (self->alt_sample_index_map[u] != TSK_NULL) {
-            ret = TSK_ERR_DUPLICATE_SAMPLE;
-            goto out;
-        }
-        /* We can only detect missing data for samples */
-        if (!impute_missing && !(flags[u] & TSK_NODE_IS_SAMPLE)) {
-            ret = TSK_ERR_MUST_IMPUTE_NON_SAMPLES;
+            ret = tsk_trace_error(TSK_ERR_DUPLICATE_SAMPLE);
             goto out;
         }
         self->alt_sample_index_map[samples[j]] = (tsk_id_t) j;
@@ -156,7 +150,7 @@ tsk_variant_init(tsk_variant_t *self, const tsk_treeseq_t *tree_sequence,
         /* Take a copy of the samples so we don't have to manage the lifecycle*/
         self->samples = tsk_malloc(num_samples * sizeof(*samples));
         if (self->samples == NULL) {
-            ret = TSK_ERR_NO_MEMORY;
+            ret = tsk_trace_error(TSK_ERR_NO_MEMORY);
             goto out;
         }
         tsk_memcpy(self->samples, samples, num_samples * sizeof(*samples));
@@ -176,11 +170,11 @@ tsk_variant_init(tsk_variant_t *self, const tsk_treeseq_t *tree_sequence,
         for (max_alleles = 0; alleles[max_alleles] != NULL; max_alleles++)
             ;
         if (max_alleles > max_alleles_limit) {
-            ret = TSK_ERR_TOO_MANY_ALLELES;
+            ret = tsk_trace_error(TSK_ERR_TOO_MANY_ALLELES);
             goto out;
         }
         if (max_alleles == 0) {
-            ret = TSK_ERR_ZERO_ALLELES;
+            ret = tsk_trace_error(TSK_ERR_ZERO_ALLELES);
             goto out;
         }
     }
@@ -188,7 +182,7 @@ tsk_variant_init(tsk_variant_t *self, const tsk_treeseq_t *tree_sequence,
     self->alleles = tsk_calloc(max_alleles, sizeof(*self->alleles));
     self->allele_lengths = tsk_malloc(max_alleles * sizeof(*self->allele_lengths));
     if (self->alleles == NULL || self->allele_lengths == NULL) {
-        ret = TSK_ERR_NO_MEMORY;
+        ret = tsk_trace_error(TSK_ERR_NO_MEMORY);
         goto out;
     }
     if (self->user_alleles) {
@@ -201,7 +195,7 @@ tsk_variant_init(tsk_variant_t *self, const tsk_treeseq_t *tree_sequence,
         self->num_samples = tsk_treeseq_get_num_samples(tree_sequence);
         self->samples = tsk_malloc(self->num_samples * sizeof(*self->samples));
         if (self->samples == NULL) {
-            ret = TSK_ERR_NO_MEMORY;
+            ret = tsk_trace_error(TSK_ERR_NO_MEMORY);
             goto out;
         }
         tsk_memcpy(self->samples, tsk_treeseq_get_samples(tree_sequence),
@@ -224,7 +218,7 @@ tsk_variant_init(tsk_variant_t *self, const tsk_treeseq_t *tree_sequence,
         self->traversal_stack = tsk_malloc(
             tsk_treeseq_get_num_nodes(tree_sequence) * sizeof(*self->traversal_stack));
         if (self->traversal_stack == NULL) {
-            ret = TSK_ERR_NO_MEMORY;
+            ret = tsk_trace_error(TSK_ERR_NO_MEMORY);
             goto out;
         }
     }
@@ -232,7 +226,7 @@ tsk_variant_init(tsk_variant_t *self, const tsk_treeseq_t *tree_sequence,
     self->genotypes = tsk_malloc(num_samples_alloc * sizeof(*self->genotypes));
     if (self->genotypes == NULL || self->alleles == NULL
         || self->allele_lengths == NULL) {
-        ret = TSK_ERR_NO_MEMORY;
+        ret = tsk_trace_error(TSK_ERR_NO_MEMORY);
         goto out;
     }
 
@@ -293,20 +287,20 @@ tsk_variant_expand_alleles(tsk_variant_t *self)
     tsk_size_t hard_limit = INT32_MAX;
 
     if (self->max_alleles == hard_limit) {
-        ret = TSK_ERR_TOO_MANY_ALLELES;
+        ret = tsk_trace_error(TSK_ERR_TOO_MANY_ALLELES);
         goto out;
     }
     self->max_alleles = TSK_MIN(hard_limit, self->max_alleles * 2);
     p = tsk_realloc(self->alleles, self->max_alleles * sizeof(*self->alleles));
     if (p == NULL) {
-        ret = TSK_ERR_NO_MEMORY;
+        ret = tsk_trace_error(TSK_ERR_NO_MEMORY);
         goto out;
     }
     self->alleles = p;
     p = tsk_realloc(
         self->allele_lengths, self->max_alleles * sizeof(*self->allele_lengths));
     if (p == NULL) {
-        ret = TSK_ERR_NO_MEMORY;
+        ret = tsk_trace_error(TSK_ERR_NO_MEMORY);
         goto out;
     }
     self->allele_lengths = p;
@@ -439,6 +433,27 @@ tsk_variant_mark_missing(tsk_variant_t *self)
     return num_missing;
 }
 
+/* Mark missing for any requested node (sample or non-sample) that is isolated
+ * in the current tree, i.e., has no parent and no children at this position. */
+static tsk_size_t
+tsk_variant_mark_missing_any(tsk_variant_t *self)
+{
+    tsk_size_t num_missing = 0;
+    int32_t *restrict genotypes = self->genotypes;
+    const tsk_id_t *restrict parent = self->tree.parent;
+    const tsk_id_t *restrict left_child = self->tree.left_child;
+    tsk_size_t j;
+
+    for (j = 0; j < self->num_samples; j++) {
+        tsk_id_t u = self->samples[j];
+        if (parent[u] == TSK_NULL && left_child[u] == TSK_NULL) {
+            genotypes[j] = TSK_MISSING_DATA;
+            num_missing++;
+        }
+    }
+    return num_missing;
+}
+
 static tsk_id_t
 tsk_variant_get_allele_index(tsk_variant_t *self, const char *allele, tsk_size_t length)
 {
@@ -470,7 +485,7 @@ tsk_variant_decode(
     tsk_size_t (*mark_missing)(tsk_variant_t *);
 
     if (self->tree_sequence == NULL) {
-        ret = TSK_ERR_VARIANT_CANT_DECODE_COPY;
+        ret = tsk_trace_error(TSK_ERR_VARIANT_CANT_DECODE_COPY);
         goto out;
     }
 
@@ -487,7 +502,7 @@ tsk_variant_decode(
     /* When we have no specified samples we need sample lists to be active
      * on the tree, as indicated by the presence of left_sample */
     if (!by_traversal && self->tree.left_sample == NULL) {
-        ret = TSK_ERR_NO_SAMPLE_LISTS;
+        ret = tsk_trace_error(TSK_ERR_NO_SAMPLE_LISTS);
         goto out;
     }
 
@@ -502,13 +517,17 @@ tsk_variant_decode(
     update_genotypes = tsk_variant_update_genotypes_sample_list;
     if (by_traversal) {
         update_genotypes = tsk_variant_update_genotypes_traversal;
+        /* When decoding a user-provided list of nodes (which may include
+         * non-samples), mark isolated nodes as missing directly by checking
+         * isolation status for each requested node. */
+        mark_missing = tsk_variant_mark_missing_any;
     }
 
     if (self->user_alleles) {
         allele_index = tsk_variant_get_allele_index(
             self, self->site.ancestral_state, self->site.ancestral_state_length);
         if (allele_index == -1) {
-            ret = TSK_ERR_ALLELE_NOT_FOUND;
+            ret = tsk_trace_error(TSK_ERR_ALLELE_NOT_FOUND);
             goto out;
         }
     } else {
@@ -545,7 +564,7 @@ tsk_variant_decode(
             self, mutation.derived_state, mutation.derived_state_length);
         if (allele_index == -1) {
             if (self->user_alleles) {
-                ret = TSK_ERR_ALLELE_NOT_FOUND;
+                ret = tsk_trace_error(TSK_ERR_ALLELE_NOT_FOUND);
                 goto out;
             }
             if (self->num_alleles == self->max_alleles) {
@@ -606,7 +625,7 @@ tsk_variant_restricted_copy(const tsk_variant_t *self, tsk_variant_t *other)
     if (other->samples == NULL || other->genotypes == NULL
         || other->user_alleles_mem == NULL || other->allele_lengths == NULL
         || other->alleles == NULL) {
-        ret = TSK_ERR_NO_MEMORY;
+        ret = tsk_trace_error(TSK_ERR_NO_MEMORY);
         goto out;
     }
     tsk_memcpy(
@@ -641,6 +660,210 @@ tsk_vargen_next(tsk_vargen_t *self, tsk_variant_t **variant)
         *variant = &self->variant;
         ret = 1;
     }
+out:
+    return ret;
+}
+
+static int
+tsk_treeseq_decode_alignments_overlay_missing(const tsk_treeseq_t *self,
+    const tsk_id_t *nodes, tsk_size_t num_nodes, double left, double right,
+    char missing_data_character, tsk_size_t L, char *alignments_out)
+{
+    int ret = 0;
+    tsk_tree_t tree;
+    tsk_size_t i, seg_left, seg_right;
+    char *row = NULL;
+    tsk_id_t u;
+
+    tsk_memset(&tree, 0, sizeof(tree));
+
+    ret = tsk_tree_init(&tree, self, 0);
+    if (ret != 0) {
+        goto out;
+    }
+    ret = tsk_tree_seek(&tree, left, 0);
+    if (ret != 0) {
+        goto out;
+    }
+    while (tree.index != -1 && tree.interval.left < right) {
+        seg_left = TSK_MAX((tsk_size_t) tree.interval.left, (tsk_size_t) left);
+        seg_right = TSK_MIN((tsk_size_t) tree.interval.right, (tsk_size_t) right);
+        if (seg_right > seg_left) {
+            for (i = 0; i < num_nodes; i++) {
+                u = nodes[i];
+                if (tree.parent[u] == TSK_NULL && tree.left_child[u] == TSK_NULL) {
+                    row = alignments_out + i * L;
+                    /* memset takes an `int`, `missing_data_character` is a `char` which
+                     * can be signed or unsigned depending on the platform, so we need to
+                     * cast. Some tools/compilers will warn if we just cast
+                     * to `unsigned char` and leave the cast to `int` as implicit, hence
+                     * the double cast. */
+                    tsk_memset(row + (seg_left - (tsk_size_t) left),
+                        (int) (unsigned char) missing_data_character,
+                        seg_right - seg_left);
+                }
+            }
+        }
+        ret = tsk_tree_next(&tree);
+        if (ret < 0) {
+            goto out;
+        }
+    }
+
+    /* On success we should return 0, not TSK_TREE_OK from the last tsk_tree_next */
+    ret = 0;
+out:
+    tsk_tree_free(&tree);
+    return ret;
+}
+
+static int
+tsk_treeseq_decode_alignments_overlay_sites(const tsk_treeseq_t *self,
+    const tsk_id_t *nodes, tsk_size_t num_nodes, double left, double right,
+    char missing_data_character, tsk_size_t L, char *alignments_out, tsk_flags_t options)
+{
+    int ret = 0;
+    tsk_variant_t var;
+    tsk_id_t site_id;
+    tsk_site_t site;
+    char *allele_byte = NULL;
+    tsk_size_t allele_cap = 0;
+    tsk_size_t i, j;
+    char *row = NULL;
+    int32_t g;
+    char c;
+    char *tmp = NULL;
+
+    tsk_memset(&var, 0, sizeof(var));
+
+    ret = tsk_variant_init(&var, self, nodes, num_nodes, NULL, options);
+    if (ret != 0) {
+        goto out;
+    }
+    for (site_id = 0; site_id < (tsk_id_t) tsk_treeseq_get_num_sites(self); site_id++) {
+        ret = tsk_treeseq_get_site(self, site_id, &site);
+        if (ret != 0) {
+            goto out;
+        }
+        if (site.position < left) {
+            continue;
+        }
+        if (site.position >= right) {
+            break;
+        }
+        ret = tsk_variant_decode(&var, site_id, 0);
+        if (ret != 0) {
+            goto out;
+        }
+        if (var.num_alleles > 0) {
+            if (var.num_alleles > allele_cap) {
+                tmp = tsk_realloc(allele_byte, var.num_alleles * sizeof(*allele_byte));
+                if (tmp == NULL) {
+                    ret = tsk_trace_error(TSK_ERR_NO_MEMORY);
+                    goto out;
+                }
+                allele_byte = tmp;
+                allele_cap = var.num_alleles;
+            }
+            for (j = 0; j < var.num_alleles; j++) {
+                if (var.allele_lengths[j] != 1) {
+                    ret = tsk_trace_error(TSK_ERR_BAD_ALLELE_LENGTH);
+                    goto out;
+                }
+                allele_byte[j] = var.alleles[j][0];
+                if (allele_byte[j] == missing_data_character) {
+                    ret = tsk_trace_error(TSK_ERR_MISSING_CHAR_COLLISION);
+                    goto out;
+                }
+            }
+            for (i = 0; i < num_nodes; i++) {
+                row = alignments_out + i * L;
+                g = var.genotypes[i];
+                c = missing_data_character;
+                if (g != TSK_MISSING_DATA) {
+                    tsk_bug_assert(g >= 0);
+                    tsk_bug_assert((tsk_size_t) g < var.num_alleles);
+                    c = allele_byte[g];
+                }
+                row[((tsk_size_t) site.position) - (tsk_size_t) left] = (char) c;
+            }
+        }
+    }
+
+out:
+    tsk_safe_free(allele_byte);
+    tsk_variant_free(&var);
+    return ret;
+}
+
+/* NOTE: We usually keep functions with a tsk_treeseq_t signature in trees.c.
+ * tsk_treeseq_decode_alignments is implemented here instead because it
+ * depends directly on tsk_variant_t and the genotype/allele machinery in
+ * this file (and thus on genotypes.h). This slightly breaks that layering
+ * convention but keeps the implementation close to the variant code. */
+int
+tsk_treeseq_decode_alignments(const tsk_treeseq_t *self, const char *ref_seq,
+    tsk_size_t ref_seq_length, const tsk_id_t *nodes, tsk_size_t num_nodes, double left,
+    double right, char missing_data_character, char *alignments_out, tsk_flags_t options)
+{
+    int ret = 0;
+    tsk_size_t i, L;
+    char *row = NULL;
+
+    if (!tsk_treeseq_get_discrete_genome(self)) {
+        ret = tsk_trace_error(TSK_ERR_BAD_PARAM_VALUE);
+        goto out;
+    }
+    if (ref_seq == NULL) {
+        ret = tsk_trace_error(TSK_ERR_BAD_PARAM_VALUE);
+        goto out;
+    }
+    if (ref_seq_length != (tsk_size_t) tsk_treeseq_get_sequence_length(self)) {
+        ret = tsk_trace_error(TSK_ERR_BAD_PARAM_VALUE);
+        goto out;
+    }
+    if (trunc(left) != left || trunc(right) != right) {
+        ret = tsk_trace_error(TSK_ERR_BAD_PARAM_VALUE);
+        goto out;
+    }
+    if (left < 0 || right > tsk_treeseq_get_sequence_length(self)
+        || (tsk_size_t) left >= (tsk_size_t) right) {
+        ret = tsk_trace_error(TSK_ERR_BAD_PARAM_VALUE);
+        goto out;
+    }
+    L = (tsk_size_t) right - (tsk_size_t) left;
+    if (num_nodes == 0) {
+        return 0;
+    }
+    if (nodes == NULL || alignments_out == NULL) {
+        ret = tsk_trace_error(TSK_ERR_BAD_PARAM_VALUE);
+        goto out;
+    }
+    for (i = 0; i < num_nodes; i++) {
+        if (nodes[i] < 0 || nodes[i] >= (tsk_id_t) tsk_treeseq_get_num_nodes(self)) {
+            ret = tsk_trace_error(TSK_ERR_NODE_OUT_OF_BOUNDS);
+            goto out;
+        }
+    }
+
+    /* Fill rows with the reference slice */
+    for (i = 0; i < num_nodes; i++) {
+        row = alignments_out + i * L;
+        tsk_memcpy(row, ref_seq + (tsk_size_t) left, L);
+    }
+    if (!(options & TSK_ISOLATED_NOT_MISSING)) {
+        ret = tsk_treeseq_decode_alignments_overlay_missing(self, nodes, num_nodes, left,
+            right, missing_data_character, L, alignments_out);
+        if (ret != 0) {
+            goto out;
+        }
+    }
+    ret = tsk_treeseq_decode_alignments_overlay_sites(self, nodes, num_nodes, left,
+        right, missing_data_character, L, alignments_out, options);
+    if (ret != 0) {
+        goto out;
+    }
+
 out:
     return ret;
 }

@@ -49,7 +49,12 @@
 # file has changed.
 
 
-cmake_minimum_required (VERSION 2.8.12 FATAL_ERROR)
+# This syntax sets the minimum version to 2.8.12, for compatibility with very old installs, but
+# sets the "policy max" to 4.0.  It's hard to tell from the CMake doc whether the "policy" changes
+# that actually signs us up for matter (wow, CMake is complicated!); but we're not doing anything
+# fancy, so it's hard to imagine it matters.  Be careful to add the 4.0 policy max everywhere that
+# cmake_minimum_required is set.  BCH 4/12/2025
+cmake_minimum_required (VERSION 2.8.12...4.0 FATAL_ERROR)
 
 
 # clang-tidy support (for internal development); must come before the project() line
@@ -57,7 +62,7 @@ cmake_minimum_required (VERSION 2.8.12 FATAL_ERROR)
 option(TIDY "Run clang-tidy on SLiM (for development)" OFF)
 
 if(TIDY)
-	# cmake_minimum_required(VERSION 3.6 FATAL_ERROR)
+	# cmake_minimum_required(VERSION 3.6...4.0 FATAL_ERROR)
   if(CMAKE_VERSION VERSION_LESS "3.6")
     message(FATAL_ERROR "To use the clang-tidy wrapper TIDY in this project you will need a version of CMake at least as new as 3.6.")
   endif()
@@ -70,6 +75,35 @@ if(TIDY)
 	message(STATUS "+++ CLANG_TIDY_COMMAND is ${CLANG_TIDY_COMMAND}")
 endif()
 
+
+# cppcheck support (for internal development)
+# for now this processes one file at a time; there is an alternative approach that
+# outputs a project file with CMAKE_EXPORT_COMPILE_COMMANDS and then runs cppcheck
+# on that, but I'm not sure how to do it within cmake so for now I'm punting on it
+option(CPPCHECK "Run cppcheck on SLiM (for development)" OFF)
+
+if(CPPCHECK)
+  if(CMAKE_VERSION VERSION_LESS "3.10")
+    message(FATAL_ERROR "To use the cppcheck wrapper CPPCHECK in this project you will need a version of CMake at least as new as 3.10.")
+  endif()
+  
+  find_program(CPPCHECK_EXECUTABLE cppcheck)
+  if (CPPCHECK_EXECUTABLE)
+    message(STATUS "CPPCHECK is ${CPPCHECK}; building with cppcheck (for development)")
+    set(CPPCHECK_COMMAND "${CPPCHECK_EXECUTABLE}" "--enable=all;--suppress=missingIncludeSystem;--suppress=syntaxError;--suppress=unmatchedSuppression;--inline-suppr;--std=c++11;--quiet;--suppress=*:robin_hood.h;--suppress=*:lodepng.cpp;--suppress=*:pcg_extras.hpp;--suppress=*:pcg_random.hpp;--suppress=checkersReport;--suppress=*:eidos_openmp.h;--suppress=unusedFunction")
+    message(STATUS "+++ cppcheck is at ${CPPCHECK_EXECUTABLE}")
+    message(STATUS "+++ CPPCHECK_COMMAND is ${CPPCHECK_COMMAND}")
+  else()
+    message(FATAL_ERROR "The CPPCHECK option could be enabled because the cppcheck command could not be found.")
+  endif()
+endif()
+
+# Support a COVERAGE flag for Codecov; see the GitHub Actions YAML file for the use of this
+option(COVERAGE "Enable code coverage" OFF)
+if(COVERAGE)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --coverage")
+  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} --coverage")
+endif()
 
 project(SLiM)
 if(WIN32)
@@ -100,6 +134,12 @@ endif(NOT CMAKE_BUILD_TYPE)
 # Add "-D BUILD_SLIMGUI=ON" to the CMake command to build SLiMgui
 # This requires that Qt, a widget framework, is installed
 option(BUILD_SLIMGUI "Build the Qt-based GUI for SLiM" OFF)
+
+# Add "-D ASAN=ON" to the CMake command to build with ASan runtime checking
+option(ASAN "Build with ASan runtime checking" OFF)
+
+# Add "-D UBSAN=ON" to the CMake command to build with ASan runtime checking
+option(UBSAN "Build with UBSan runtime checking" OFF)
 
 # Add "-D PARALLEL=ON" to the CMake command to make a parallel (multi-threaded) build
 # This is supported only for the command-line tools, not for SLiMgui; do not set BUILD_SLIMGUI
@@ -148,7 +188,8 @@ if(WIN32)
     set(CMAKE_CXX_STANDARD_LIBRARIES "-static-libgcc -static-libstdc++ -lwsock32 -lws2_32 ${CMAKE_CXX_STANDARD_LIBRARIES}")
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,-Bstatic,--whole-archive -lwinpthread -Wl,--no-whole-archive")
     set(GNULIB_NAMESPACE_SOURCES "${PROJECT_SOURCE_DIR}/core/chromosome.cpp" 
-        "${PROJECT_SOURCE_DIR}/core/genome.cpp" 
+        "${PROJECT_SOURCE_DIR}/core/haplosome.cpp" 
+        "${PROJECT_SOURCE_DIR}/core/individual.cpp" 
         "${PROJECT_SOURCE_DIR}/core/population.cpp"
         "${PROJECT_SOURCE_DIR}/core/slim_globals.cpp"
         "${PROJECT_SOURCE_DIR}/core/slim_sim_eidos.cpp"
@@ -176,6 +217,24 @@ set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -g -Og -DDEBUG=1")
 
 set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} -O3")
 set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3")
+
+# Build with ASan enabled if requested
+if(ASAN)
+	message(STATUS "ASAN is ${ASAN}")
+	add_compile_options(-fsanitize=address -fno-omit-frame-pointer) # -fno-omit-frame-pointer for better stack traces
+	add_link_options(-fsanitize=address)
+else()
+	message(STATUS "ASAN is ${ASAN}; use -DASAN=ON to enable ASan run-time checking")
+endif(ASAN)
+
+# Build with UBSan enabled if requested
+if(UBSAN)
+	message(STATUS "UBSAN is ${UBSAN}")
+	add_compile_options(-fsanitize=undefined -fno-omit-frame-pointer) # -fno-omit-frame-pointer for better stack traces
+	add_link_options(-fsanitize=undefined)
+else()
+	message(STATUS "UBSAN is ${UBSAN}; use -DUBSAN=ON to enable UBSan run-time checking")
+endif(UBSAN)
 
 # Report whether the build is parallel or not
 if(PARALLEL)
@@ -244,10 +303,84 @@ if(BUILD_LTO)
     endif()
 endif()
 
+#
+# SIMD SUPPORT (independent of OpenMP)
+#
+
+# Option to disable SIMD entirely
+option(USE_SIMD "Enable SIMD optimizations (SSE4.2/AVX2 on x86_64, NEON on ARM64)" ON)
+
+# Check architecture
+# CMAKE_SYSTEM_PROCESSOR is "x86_64" on Intel Macs and Linux x86_64, "arm64"/"aarch64" on ARM
+set(IS_X86_64 FALSE)
+set(IS_ARM64 FALSE)
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64|amd64|i686|i386")
+    set(IS_X86_64 TRUE)
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64|ARM64")
+    set(IS_ARM64 TRUE)
+endif()
+
+if(USE_SIMD AND NOT WIN32 AND IS_X86_64)
+    include(CheckCXXCompilerFlag)
+
+    # Check for AVX2 support
+    check_cxx_compiler_flag("-mavx2" COMPILER_SUPPORTS_AVX2)
+    check_cxx_compiler_flag("-msse4.2" COMPILER_SUPPORTS_SSE42)
+    check_cxx_compiler_flag("-mfma" COMPILER_SUPPORTS_FMA)
+
+    if(COMPILER_SUPPORTS_AVX2)
+        message(STATUS "SIMD: AVX2 support detected")
+        add_compile_definitions(EIDOS_HAS_AVX2=1)
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -mavx2")
+        if(COMPILER_SUPPORTS_FMA)
+            message(STATUS "SIMD: FMA support detected")
+            add_compile_definitions(EIDOS_HAS_FMA=1)
+            set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -mfma")
+        endif()
+    elseif(COMPILER_SUPPORTS_SSE42)
+        message(STATUS "SIMD: SSE4.2 support detected (no AVX2)")
+        add_compile_definitions(EIDOS_HAS_SSE42=1)
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -msse4.2")
+    else()
+        message(STATUS "SIMD: No x86 SIMD support detected, using scalar fallback")
+    endif()
+elseif(USE_SIMD AND NOT WIN32 AND IS_ARM64)
+    # ARM64 NEON is always available on ARM64, no compiler flag needed
+    message(STATUS "SIMD: ARM64 NEON support enabled")
+    add_compile_definitions(EIDOS_HAS_NEON=1)
+elseif(USE_SIMD AND NOT WIN32)
+    message(STATUS "SIMD: Unknown architecture (${CMAKE_SYSTEM_PROCESSOR}), using scalar fallback")
+elseif(USE_SIMD AND WIN32)
+    # Windows SIMD detection - MinGW uses GCC, so we can use the same flags as Linux
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+        include(CheckCXXCompilerFlag)
+        check_cxx_compiler_flag("-mavx2" COMPILER_SUPPORTS_AVX2_WIN)
+        check_cxx_compiler_flag("-mfma" COMPILER_SUPPORTS_FMA_WIN)
+
+        if(COMPILER_SUPPORTS_AVX2_WIN)
+            message(STATUS "SIMD: AVX2 support detected (Windows/MinGW)")
+            add_compile_definitions(EIDOS_HAS_AVX2=1)
+            set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -mavx2")
+            if(COMPILER_SUPPORTS_FMA_WIN)
+                message(STATUS "SIMD: FMA support detected (Windows/MinGW)")
+                add_compile_definitions(EIDOS_HAS_FMA=1)
+                set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -mfma")
+            endif()
+        else()
+            message(STATUS "SIMD: No AVX2 support on Windows/MinGW, using scalar fallback")
+        endif()
+    else()
+        # MSVC path - not currently used but could be added in the future
+        message(STATUS "SIMD: MSVC SIMD detection not yet implemented, using scalar fallback")
+    endif()
+else()
+    message(STATUS "SIMD: Disabled by user")
+endif()
+
 # GSL - adding /usr/local/include so all targets that use GSL_INCLUDES get omp.h
 set(TARGET_NAME_GSL gsl)
 file(GLOB_RECURSE GSL_SOURCES ${PROJECT_SOURCE_DIR}/gsl/*.c ${PROJECT_SOURCE_DIR}/gsl/*/*.c)
-set(GSL_INCLUDES ${PROJECT_SOURCE_DIR}/gsl ${PROJECT_SOURCE_DIR}/gsl/specfunc ${PROJECT_SOURCE_DIR}/gsl/blas ${PROJECT_SOURCE_DIR}/gsl/rng ${PROJECT_SOURCE_DIR}/gsl/cdf ${PROJECT_SOURCE_DIR}/gsl/vector ${PROJECT_SOURCE_DIR}/gsl/err ${PROJECT_SOURCE_DIR}/gsl/sys ${PROJECT_SOURCE_DIR}/gsl/randist ${PROJECT_SOURCE_DIR}/gsl/matrix ${PROJECT_SOURCE_DIR}/gsl/cblas ${PROJECT_SOURCE_DIR}/gsl/complex ${PROJECT_SOURCE_DIR}/gsl/block ${PROJECT_SOURCE_DIR}/gsl/interpolation ${PROJECT_SOURCE_DIR}/gsl/linalg /usr/local/include)
+set(GSL_INCLUDES ${PROJECT_SOURCE_DIR}/gsl ${PROJECT_SOURCE_DIR}/gsl/specfunc ${PROJECT_SOURCE_DIR}/gsl/blas ${PROJECT_SOURCE_DIR}/gsl/rng ${PROJECT_SOURCE_DIR}/gsl/cdf ${PROJECT_SOURCE_DIR}/gsl/vector ${PROJECT_SOURCE_DIR}/gsl/err ${PROJECT_SOURCE_DIR}/gsl/sys ${PROJECT_SOURCE_DIR}/gsl/randist ${PROJECT_SOURCE_DIR}/gsl/matrix ${PROJECT_SOURCE_DIR}/gsl/cblas ${PROJECT_SOURCE_DIR}/gsl/complex ${PROJECT_SOURCE_DIR}/gsl/block ${PROJECT_SOURCE_DIR}/gsl/interpolation ${PROJECT_SOURCE_DIR}/gsl/linalg ${PROJECT_SOURCE_DIR}/gsl/permutation /usr/local/include)
 add_library(${TARGET_NAME_GSL} STATIC ${GSL_SOURCES})
 target_include_directories(${TARGET_NAME_GSL} PUBLIC ${GSL_INCLUDES})
 
@@ -300,7 +433,7 @@ if(WIN32)
     set_source_files_properties(${SLIM_SOURCES} PROPERTIES COMPILE_FLAGS "-include config.h")
     set_source_files_properties(${GNULIB_NAMESPACE_SOURCES} TARGET_DIRECTORY slim PROPERTIES COMPILE_FLAGS "-include config.h -DGNULIB_NAMESPACE=gnulib")
     target_include_directories(${TARGET_NAME_SLIM} BEFORE PUBLIC ${GNU_DIR})
-    target_link_libraries(${TARGET_NAME_SLIM} PUBLIC gnu)
+    target_link_libraries(${TARGET_NAME_SLIM} PUBLIC gnu PRIVATE bcrypt)
 endif()
 
 # EIDOS
@@ -324,7 +457,7 @@ if(WIN32)
     set_source_files_properties(${EIDOS_SOURCES} PROPERTIES COMPILE_FLAGS "-include config.h")
     set_source_files_properties(${GNULIB_NAMESPACE_SOURCES} TARGET_DIRECTORY slim eidos PROPERTIES COMPILE_FLAGS "-include config.h -DGNULIB_NAMESPACE=gnulib")
     target_include_directories(${TARGET_NAME_EIDOS} BEFORE PUBLIC ${GNU_DIR})
-    target_link_libraries(${TARGET_NAME_EIDOS} PUBLIC gnu)
+    target_link_libraries(${TARGET_NAME_EIDOS} PUBLIC gnu PRIVATE bcrypt)
 endif()
 
 if(PARALLEL)
@@ -335,7 +468,7 @@ endif(PARALLEL)
 
 # SLiMgui -- this can be enabled with the -DBUILD_SLIMGUI=ON option to cmake
 if(BUILD_SLIMGUI)
-  cmake_minimum_required (VERSION 3.1.0 FATAL_ERROR)
+  cmake_minimum_required (VERSION 3.1.0...4.0 FATAL_ERROR)
   set(TARGET_NAME_SLIMGUI SLiMgui)
   find_package(OpenGL REQUIRED)
 
@@ -398,7 +531,7 @@ if(BUILD_SLIMGUI)
       set_source_files_properties(${QTSLIM_SOURCES} PROPERTIES COMPILE_FLAGS "-include config.h")
       set_source_files_properties(${GNULIB_NAMESPACE_SOURCES} TARGET_DIRECTORY slim eidos SLiMgui PROPERTIES COMPILE_FLAGS "-include config.h -DGNULIB_NAMESPACE=gnulib")
       target_include_directories(${TARGET_NAME_SLIMGUI} BEFORE PUBLIC ${GNU_DIR})
-      target_link_libraries(${TARGET_NAME_SLIMGUI} PUBLIC OpenGL::GL gsl tables eidos_zlib gnu )
+      target_link_libraries(${TARGET_NAME_SLIMGUI} PUBLIC OpenGL::GL gsl tables eidos_zlib gnu PRIVATE bcrypt)
     else()
       target_link_libraries( ${TARGET_NAME_SLIMGUI} PUBLIC OpenGL::GL gsl tables eidos_zlib )
 
@@ -468,6 +601,20 @@ if(TIDY)
 	endif(PARALLEL)
 	if(BUILD_SLIMGUI)
 		set_target_properties(SLiMgui PROPERTIES CXX_CLANG_TIDY "${CLANG_TIDY_COMMAND}")
+	endif(BUILD_SLIMGUI)
+endif()
+
+# implement cppcheck for all end-user targets (not for gsl, zlib, kastore, tskit)
+if(CPPCHECK)
+	if(PARALLEL)
+		set_target_properties(eidos_multi PROPERTIES CXX_CPPCHECK "${CPPCHECK_COMMAND}")
+		set_target_properties(slim_multi PROPERTIES CXX_CPPCHECK "${CPPCHECK_COMMAND}")
+	else()
+		set_target_properties(eidos PROPERTIES CXX_CPPCHECK "${CPPCHECK_COMMAND}")
+		set_target_properties(slim PROPERTIES CXX_CPPCHECK "${CPPCHECK_COMMAND}")
+	endif(PARALLEL)
+	if(BUILD_SLIMGUI)
+		set_target_properties(SLiMgui PROPERTIES CXX_CPPCHECK "${CPPCHECK_COMMAND}")
 	endif(BUILD_SLIMGUI)
 endif()
 

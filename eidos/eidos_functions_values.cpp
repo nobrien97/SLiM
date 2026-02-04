@@ -3,7 +3,7 @@
 //  Eidos
 //
 //  Created by Ben Haller on 4/6/15; split from eidos_functions.cpp 09/26/2022
-//  Copyright (c) 2015-2024 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2015-2025 Benjamin C. Haller.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -324,7 +324,7 @@ EidosValue_SP Eidos_ExecuteFunction_sample(const std::vector<EidosValue_SP> &p_a
 	// and is handled below, because gsl_ran_shuffle() can't move std::string safely
 	if (!weights_value && !replace && (sample_size == x_count) && (sample_size != 1) && (x_type != EidosValueType::kValueString))
 	{
-		gsl_rng *main_thread_rng = EIDOS_GSL_RNG(omp_get_thread_num());
+		EidosRNG_32_bit &main_thread_rng_32 = EIDOS_32BIT_RNG(omp_get_thread_num());
 		
 		result_SP = x_value->CopyValues();
 		EidosValue *result = result_SP.get();
@@ -334,16 +334,16 @@ EidosValue_SP Eidos_ExecuteFunction_sample(const std::vector<EidosValue_SP> &p_a
 			case EidosValueType::kValueVOID: break;			// NOLINT(*-branch-clone) : intentional consecutive branches
 			case EidosValueType::kValueNULL: break;
 			case EidosValueType::kValueLogical:
-				Eidos_ran_shuffle(main_thread_rng, result->LogicalData_Mutable(), x_count);
+				Eidos_ran_shuffle_uint32(main_thread_rng_32, result->LogicalData_Mutable(), x_count);
 				break;
 			case EidosValueType::kValueInt:
-				Eidos_ran_shuffle(main_thread_rng, result->IntData_Mutable(), x_count);
+				Eidos_ran_shuffle_uint32(main_thread_rng_32, result->IntData_Mutable(), x_count);
 				break;
 			case EidosValueType::kValueFloat:
-				Eidos_ran_shuffle(main_thread_rng, result->FloatData_Mutable(), x_count);
+				Eidos_ran_shuffle_uint32(main_thread_rng_32, result->FloatData_Mutable(), x_count);
 				break;
 			case EidosValueType::kValueObject:
-				Eidos_ran_shuffle(main_thread_rng, result->ObjectData_Mutable(), x_count);
+				Eidos_ran_shuffle_uint32(main_thread_rng_32, result->ObjectData_Mutable(), x_count);
 				break;
 			default:
 				EIDOS_TERMINATION << "ERROR (Eidos_ExecuteFunction_sample): (internal error) unsupported type in sample()" << EidosTerminate(nullptr);
@@ -386,8 +386,6 @@ EidosValue_SP Eidos_ExecuteFunction_sample(const std::vector<EidosValue_SP> &p_a
 	// the algorithm used depends on whether weights were supplied
 	if (weights_value)
 	{
-		gsl_rng *main_thread_rng = EIDOS_GSL_RNG(omp_get_thread_num());
-		
 		if (replace && ((x_count > 100) || (sample_size > 100)) && (sample_size > 1))
 		{
 			// a large sampling task with replacement and weights goes through an optimized code path here
@@ -456,12 +454,12 @@ EidosValue_SP Eidos_ExecuteFunction_sample(const std::vector<EidosValue_SP> &p_a
 				EIDOS_THREAD_COUNT(gEidos_OMP_threads_SAMPLE_WR_INT);
 #pragma omp parallel default(none) shared(gEidos_RNG_PERTHREAD, sample_size) firstprivate(discrete_draw, int_data, int_result_data) if(sample_size >= EIDOS_OMPMIN_SAMPLE_WR_INT) num_threads(thread_count)
 				{
-					gsl_rng *rng = EIDOS_GSL_RNG(omp_get_thread_num());
+					gsl_rng *rng_gsl = EIDOS_GSL_RNG(omp_get_thread_num());
 					
 #pragma omp for schedule(static) nowait
 					for (int64_t samples_generated = 0; samples_generated < sample_size; ++samples_generated)
 					{
-						int rose_index = (int)gsl_ran_discrete(rng, discrete_draw);
+						int rose_index = (int)gsl_ran_discrete(rng_gsl, discrete_draw);
 						
 						int_result_data[samples_generated] = int_data[rose_index];
 					}
@@ -477,12 +475,12 @@ EidosValue_SP Eidos_ExecuteFunction_sample(const std::vector<EidosValue_SP> &p_a
 				EIDOS_THREAD_COUNT(gEidos_OMP_threads_SAMPLE_WR_FLOAT);
 #pragma omp parallel default(none) shared(gEidos_RNG_PERTHREAD, sample_size) firstprivate(discrete_draw, float_data, float_result_data) if(sample_size >= EIDOS_OMPMIN_SAMPLE_WR_FLOAT) num_threads(thread_count)
 				{
-					gsl_rng *rng = EIDOS_GSL_RNG(omp_get_thread_num());
+					gsl_rng *rng_gsl = EIDOS_GSL_RNG(omp_get_thread_num());
 					
 #pragma omp for schedule(static) nowait
 					for (int64_t samples_generated = 0; samples_generated < sample_size; ++samples_generated)
 					{
-						int rose_index = (int)gsl_ran_discrete(rng, discrete_draw);
+						int rose_index = (int)gsl_ran_discrete(rng_gsl, discrete_draw);
 						
 						float_result_data[samples_generated] = float_data[rose_index];
 					}
@@ -499,12 +497,12 @@ EidosValue_SP Eidos_ExecuteFunction_sample(const std::vector<EidosValue_SP> &p_a
 				EIDOS_THREAD_COUNT(gEidos_OMP_threads_SAMPLE_WR_OBJECT);
 #pragma omp parallel default(none) shared(gEidos_RNG_PERTHREAD, sample_size) firstprivate(discrete_draw, object_data, object_result_data) if(sample_size >= EIDOS_OMPMIN_SAMPLE_WR_OBJECT) num_threads(thread_count)
 				{
-					gsl_rng *rng = EIDOS_GSL_RNG(omp_get_thread_num());
+					gsl_rng *rng_gsl = EIDOS_GSL_RNG(omp_get_thread_num());
 					
 #pragma omp for schedule(static) nowait
 					for (int64_t samples_generated = 0; samples_generated < sample_size; ++samples_generated)
 					{
-						int rose_index = (int)gsl_ran_discrete(rng, discrete_draw);
+						int rose_index = (int)gsl_ran_discrete(rng_gsl, discrete_draw);
 						EidosObject *object_element = object_data[rose_index];
 						
 						object_result_data[samples_generated] = object_element;
@@ -524,6 +522,7 @@ EidosValue_SP Eidos_ExecuteFunction_sample(const std::vector<EidosValue_SP> &p_a
 			else
 			{
 				// This handles the logical and string cases
+				gsl_rng *main_thread_rng = EIDOS_GSL_RNG(omp_get_thread_num());
 				result_SP = x_value->NewMatchingType();
 				EidosValue *result = result_SP.get();
 				
@@ -562,7 +561,8 @@ EidosValue_SP Eidos_ExecuteFunction_sample(const std::vector<EidosValue_SP> &p_a
 			if (sample_size == 1)
 			{
 				// a sample size of 1 is very common; make it as fast as we can by getting a singleton EidosValue directly from x
-				double rose = Eidos_rng_uniform(main_thread_rng) * weights_sum;
+				EidosRNG_64_bit &main_thread_rng_64 = EIDOS_64BIT_RNG(omp_get_thread_num());
+				double rose = Eidos_rng_uniform_doubleCO(main_thread_rng_64) * weights_sum;
 				double rose_sum = 0.0;
 				int rose_index;
 				
@@ -580,12 +580,13 @@ EidosValue_SP Eidos_ExecuteFunction_sample(const std::vector<EidosValue_SP> &p_a
 			{
 				// with replacement, we can just do a series of independent draws
 				// (note the large-task case is handled with the GSL above)
+				EidosRNG_64_bit &main_thread_rng_64 = EIDOS_64BIT_RNG(omp_get_thread_num());
 				result_SP = x_value->NewMatchingType();
 				EidosValue *result = result_SP.get();
 				
 				for (int64_t samples_generated = 0; samples_generated < sample_size; ++samples_generated)
 				{
-					double rose = Eidos_rng_uniform(main_thread_rng) * weights_sum;
+					double rose = Eidos_rng_uniform_doubleCO(main_thread_rng_64) * weights_sum;
 					double rose_sum = 0.0;
 					int rose_index;
 					
@@ -603,6 +604,7 @@ EidosValue_SP Eidos_ExecuteFunction_sample(const std::vector<EidosValue_SP> &p_a
 			else
 			{
 				// without replacement, we remove each item after it is drawn, so brute force seems like the only way
+				EidosRNG_64_bit &main_thread_rng_64 = EIDOS_64BIT_RNG(omp_get_thread_num());
 				result_SP = x_value->NewMatchingType();
 				EidosValue *result = result_SP.get();
 				
@@ -614,7 +616,7 @@ EidosValue_SP Eidos_ExecuteFunction_sample(const std::vector<EidosValue_SP> &p_a
 					if (weights_sum <= 0.0)
 						EIDOS_TERMINATION << "ERROR (Eidos_ExecuteFunction_sample): function sample() encountered weights summing to <= 0." << EidosTerminate(nullptr);
 					
-					double rose = Eidos_rng_uniform(main_thread_rng) * weights_sum;
+					double rose = Eidos_rng_uniform_doubleCO(main_thread_rng_64) * weights_sum;
 					double rose_sum = 0.0;
 					int rose_index;
 					
@@ -660,7 +662,8 @@ EidosValue_SP Eidos_ExecuteFunction_sample(const std::vector<EidosValue_SP> &p_a
 			if (sample_size == 1)
 			{
 				// a sample size of 1 is very common; make it as fast as we can by getting a singleton EidosValue directly from x
-				int64_t rose = (int64_t)ceil(Eidos_rng_uniform(main_thread_rng) * weights_sum);
+				EidosRNG_64_bit &main_thread_rng_64 = EIDOS_64BIT_RNG(omp_get_thread_num());
+				int64_t rose = (int64_t)ceil(Eidos_rng_uniform_doubleCO(main_thread_rng_64) * weights_sum);
 				int64_t rose_sum = 0;
 				int rose_index;
 				
@@ -678,12 +681,13 @@ EidosValue_SP Eidos_ExecuteFunction_sample(const std::vector<EidosValue_SP> &p_a
 			{
 				// with replacement, we can just do a series of independent draws
 				// (note the large-task case is handled with the GSL above)
+				EidosRNG_64_bit &main_thread_rng_64 = EIDOS_64BIT_RNG(omp_get_thread_num());
 				result_SP = x_value->NewMatchingType();
 				EidosValue *result = result_SP.get();
 				
 				for (int64_t samples_generated = 0; samples_generated < sample_size; ++samples_generated)
 				{
-					int64_t rose = (int64_t)ceil(Eidos_rng_uniform(main_thread_rng) * weights_sum);
+					int64_t rose = (int64_t)ceil(Eidos_rng_uniform_doubleCO(main_thread_rng_64) * weights_sum);
 					int64_t rose_sum = 0;
 					int rose_index;
 					
@@ -701,6 +705,7 @@ EidosValue_SP Eidos_ExecuteFunction_sample(const std::vector<EidosValue_SP> &p_a
 			else
 			{
 				// without replacement, we remove each item after it is drawn, so brute force seems like the only way
+				EidosRNG_64_bit &main_thread_rng_64 = EIDOS_64BIT_RNG(omp_get_thread_num());
 				result_SP = x_value->NewMatchingType();
 				EidosValue *result = result_SP.get();
 				
@@ -712,7 +717,7 @@ EidosValue_SP Eidos_ExecuteFunction_sample(const std::vector<EidosValue_SP> &p_a
 					if (weights_sum <= 0)
 						EIDOS_TERMINATION << "ERROR (Eidos_ExecuteFunction_sample): function sample() encountered weights summing to <= 0." << EidosTerminate(nullptr);
 					
-					int64_t rose = (int64_t)ceil(Eidos_rng_uniform(main_thread_rng) * weights_sum);
+					int64_t rose = (int64_t)ceil(Eidos_rng_uniform_doubleCO(main_thread_rng_64) * weights_sum);
 					int64_t rose_sum = 0;
 					int rose_index;
 					
@@ -746,9 +751,9 @@ EidosValue_SP Eidos_ExecuteFunction_sample(const std::vector<EidosValue_SP> &p_a
 		if (sample_size == 1)
 		{
 			// a sample size of 1 is very common; make it as fast as we can by getting a singleton EidosValue directly from x
-			gsl_rng *main_thread_rng = EIDOS_GSL_RNG(omp_get_thread_num());
+			EidosRNG_32_bit &main_thread_rng_32 = EIDOS_32BIT_RNG(omp_get_thread_num());
 			
-			return x_value->GetValueAtIndex((int)Eidos_rng_uniform_int(main_thread_rng, x_count), nullptr);
+			return x_value->GetValueAtIndex((int)Eidos_rng_interval_uint32(main_thread_rng_32, x_count), nullptr);
 		}
 		else if (replace)
 		{
@@ -773,12 +778,12 @@ EidosValue_SP Eidos_ExecuteFunction_sample(const std::vector<EidosValue_SP> &p_a
 				EIDOS_THREAD_COUNT(gEidos_OMP_threads_SAMPLE_R_INT);
 #pragma omp parallel default(none) shared(gEidos_RNG_PERTHREAD, sample_size) firstprivate(int_data, int_result_data, x_count) if(sample_size >= EIDOS_OMPMIN_SAMPLE_R_INT) num_threads(thread_count)
 				{
-					gsl_rng *rng = EIDOS_GSL_RNG(omp_get_thread_num());
+					EidosRNG_32_bit &rng_32 = EIDOS_32BIT_RNG(omp_get_thread_num());
 					
 #pragma omp for schedule(static) nowait
 					for (int64_t samples_generated = 0; samples_generated < sample_size; ++samples_generated)
 					{
-						int32_t sample = Eidos_rng_uniform_int(rng, x_count);
+						int32_t sample = Eidos_rng_interval_uint32(rng_32, x_count);
 						int_result_data[samples_generated] = int_data[sample];
 					}
 				}
@@ -793,12 +798,12 @@ EidosValue_SP Eidos_ExecuteFunction_sample(const std::vector<EidosValue_SP> &p_a
 				EIDOS_THREAD_COUNT(gEidos_OMP_threads_SAMPLE_R_FLOAT);
 #pragma omp parallel default(none) shared(gEidos_RNG_PERTHREAD, sample_size) firstprivate(float_data, float_result_data, x_count) if(sample_size >= EIDOS_OMPMIN_SAMPLE_R_FLOAT) num_threads(thread_count)
 				{
-					gsl_rng *rng = EIDOS_GSL_RNG(omp_get_thread_num());
+					EidosRNG_32_bit &rng_32 = EIDOS_32BIT_RNG(omp_get_thread_num());
 					
 #pragma omp for schedule(static) nowait
 					for (int64_t samples_generated = 0; samples_generated < sample_size; ++samples_generated)
 					{
-						int32_t sample = Eidos_rng_uniform_int(rng, x_count);
+						int32_t sample = Eidos_rng_interval_uint32(rng_32, x_count);
 						float_result_data[samples_generated] = float_data[sample];
 					}
 				}
@@ -814,12 +819,12 @@ EidosValue_SP Eidos_ExecuteFunction_sample(const std::vector<EidosValue_SP> &p_a
 				EIDOS_THREAD_COUNT(gEidos_OMP_threads_SAMPLE_R_OBJECT);
 #pragma omp parallel default(none) shared(gEidos_RNG_PERTHREAD, sample_size) firstprivate(object_data, object_result_data, x_count) if(sample_size >= EIDOS_OMPMIN_SAMPLE_R_OBJECT) num_threads(thread_count)
 				{
-					gsl_rng *rng = EIDOS_GSL_RNG(omp_get_thread_num());
+					EidosRNG_32_bit &rng_32 = EIDOS_32BIT_RNG(omp_get_thread_num());
 					
 #pragma omp for schedule(static) nowait
 					for (int64_t samples_generated = 0; samples_generated < sample_size; ++samples_generated)
 					{
-						int32_t sample = Eidos_rng_uniform_int(rng, x_count);
+						int32_t sample = Eidos_rng_interval_uint32(rng_32, x_count);
 						EidosObject *object_element = object_data[sample];
 						object_result_data[samples_generated] = object_element;
 					}
@@ -838,13 +843,12 @@ EidosValue_SP Eidos_ExecuteFunction_sample(const std::vector<EidosValue_SP> &p_a
 			else
 			{
 				// This handles the logical and string cases
-				gsl_rng *main_thread_rng = EIDOS_GSL_RNG(omp_get_thread_num());
-				
+				EidosRNG_32_bit &main_thread_rng_32 = EIDOS_32BIT_RNG(omp_get_thread_num());
 				result_SP = x_value->NewMatchingType();
 				EidosValue *result = result_SP.get();
 				
 				for (int64_t samples_generated = 0; samples_generated < sample_size; ++samples_generated)
-					result->PushValueFromIndexOfEidosValue((int)Eidos_rng_uniform_int(main_thread_rng, x_count), *x_value, nullptr);
+					result->PushValueFromIndexOfEidosValue((int)Eidos_rng_interval_uint32(main_thread_rng_32, x_count), *x_value, nullptr);
 			}
 		}
 		else
@@ -855,8 +859,7 @@ EidosValue_SP Eidos_ExecuteFunction_sample(const std::vector<EidosValue_SP> &p_a
 			// gsl_ran_choose() does a gsl_rng_uniform() call for every element in x_value()!  We only do one
 			// Eidos_rng_uniform_int() call per element in sample_size, at the price of a separate index buffer
 			// and a lack of re-entrancy and thread-safety.  This is a *lot* faster for sample_size << x_count.
-			gsl_rng *main_thread_rng = EIDOS_GSL_RNG(omp_get_thread_num());
-			
+			EidosRNG_32_bit &main_thread_rng_32 = EIDOS_32BIT_RNG(omp_get_thread_num());
 			result_SP = x_value->NewMatchingType();
 			EidosValue *result = result_SP.get();
 			
@@ -865,7 +868,7 @@ EidosValue_SP Eidos_ExecuteFunction_sample(const std::vector<EidosValue_SP> &p_a
 			
 			for (int64_t samples_generated = 0; samples_generated < sample_size; ++samples_generated)
 			{
-				int rose_index = (int)Eidos_rng_uniform_int(main_thread_rng, (uint32_t)contender_count);
+				int rose_index = (int)Eidos_rng_interval_uint32(main_thread_rng_32, (uint32_t)contender_count);
 				result->PushValueFromIndexOfEidosValue(index_buffer[rose_index], *x_value, nullptr);
 				index_buffer[rose_index] = index_buffer[--contender_count];
 			}
@@ -1131,6 +1134,74 @@ EidosValue_SP Eidos_ExecuteFunction_all(const std::vector<EidosValue_SP> &p_argu
 	return result_SP;
 }
 
+//	(logical$)allClose(float x, float y, [float$ rtol = 1.0e-05], [float$ atol = 1.0e-08], [logical$ equalNAN = F])
+EidosValue_SP Eidos_ExecuteFunction_allClose(const std::vector<EidosValue_SP> &p_arguments, __attribute__((unused)) EidosInterpreter &p_interpreter)
+{
+	// Note that this function ignores matrix/array attributes, and always returns a vector, by design
+	
+	// BEWARE: This method shares code with Eidos_ExecuteFunction_isClose(); they should be changed in parallel.
+	
+	EidosValue *x_value = p_arguments[0].get();
+	EidosValue *y_value = p_arguments[1].get();
+	EidosValue *rtol_value = p_arguments[2].get();
+	EidosValue *atol_value = p_arguments[3].get();
+	EidosValue *equalNAN_value = p_arguments[4].get();
+	int x_count = x_value->Count();
+	int y_count = y_value->Count();
+	
+	// rtol
+	double rtol = rtol_value->FloatAtIndex_NOCAST(0, nullptr);
+	
+	if (rtol < 0.0)
+		EIDOS_TERMINATION << "ERROR (Eidos_ExecuteFunction_allClose): function allClose() requires rtol >= 0.0." << EidosTerminate(nullptr);
+	
+	// atol
+	double atol = atol_value->FloatAtIndex_NOCAST(0, nullptr);
+	
+	if (atol < 0.0)
+		EIDOS_TERMINATION << "ERROR (Eidos_ExecuteFunction_allClose): function allClose() requires atol >= 0.0." << EidosTerminate(nullptr);
+	
+	// equalNAN
+	eidos_logical_t equalNAN = equalNAN_value->LogicalAtIndex_NOCAST(0, nullptr);
+	
+	if ((x_count == y_count) || (x_count == 1) || (y_count == 1))
+	{
+		const double *x_data = x_value->FloatData();
+		const double *y_data = y_value->FloatData();
+		const double xv_singleton = (x_count == 1) ? x_data[0] : 0.0;
+		const double yv_singleton = (y_count == 1) ? y_data[0] : 0.0;
+		int value_count = std::max(x_count, y_count);
+		
+		for (int value_index = 0; value_index < value_count; ++value_index)
+		{
+			double xv = (x_count == 1) ? xv_singleton : x_data[value_index];
+			double yv = (y_count == 1) ? yv_singleton : y_data[value_index];
+			
+			if (std::isfinite(xv) && std::isfinite(yv))
+			{
+				if (std::abs(xv - yv) <= atol + rtol * std::abs(yv))
+					continue;
+			}
+			else if (std::isinf(xv) && std::isinf(yv))
+			{
+				if (std::signbit(xv) == std::signbit(yv))
+					continue;
+			}
+			else if (std::isnan(xv) && std::isnan(yv))
+			{
+				if (equalNAN)
+					continue;
+			}
+			
+			return gStaticEidosValue_LogicalF;
+		}
+	}
+	else
+		EIDOS_TERMINATION << "ERROR (Eidos_ExecuteFunction_allClose): function allClose() requires the lengths of x and y to be equal, or that either x or y is singleton." << EidosTerminate(nullptr);
+	
+	return gStaticEidosValue_LogicalT;
+}
+
 //	(logical$)any(logical x, ...)
 EidosValue_SP Eidos_ExecuteFunction_any(const std::vector<EidosValue_SP> &p_arguments, __attribute__((unused)) EidosInterpreter &p_interpreter)
 {
@@ -1176,6 +1247,9 @@ EidosValue_SP Eidos_ExecuteFunction_cat(const std::vector<EidosValue_SP> &p_argu
 	eidos_logical_t use_error_stream = p_arguments[2]->LogicalAtIndex_NOCAST(0, nullptr);
 	std::ostream &output_stream = (use_error_stream ? p_interpreter.ErrorOutputStream() : p_interpreter.ExecutionOutputStream());
 	
+	// before writing anything, erase a progress line if we've got one up, to try to make a clean slate
+	Eidos_EraseProgress();
+	
 	for (int value_index = 0; value_index < x_count; ++value_index)
 	{
 		if (value_index > 0)
@@ -1202,6 +1276,9 @@ EidosValue_SP Eidos_ExecuteFunction_catn(const std::vector<EidosValue_SP> &p_arg
 	std::string separator = p_arguments[1]->StringAtIndex_NOCAST(0, nullptr);
 	eidos_logical_t use_error_stream = p_arguments[2]->LogicalAtIndex_NOCAST(0, nullptr);
 	std::ostream &output_stream = (use_error_stream ? p_interpreter.ErrorOutputStream() : p_interpreter.ExecutionOutputStream());
+	
+	// before writing anything, erase a progress line if we've got one up, to try to make a clean slate
+	Eidos_EraseProgress();
 	
 	for (int value_index = 0; value_index < x_count; ++value_index)
 	{
@@ -1674,6 +1751,103 @@ EidosValue_SP Eidos_ExecuteFunction_ifelse(const std::vector<EidosValue_SP> &p_a
 	result_SP->CopyDimensionsFromValue(test_value);
 	
 	return result_SP;
+}
+
+//	(logical)isClose(float x, float y, [float$ rtol = 1.0e-05], [float$ atol = 1.0e-08], [logical$ equalNAN = F])
+EidosValue_SP Eidos_ExecuteFunction_isClose(const std::vector<EidosValue_SP> &p_arguments, __attribute__((unused)) EidosInterpreter &p_interpreter)
+{
+	// Note that this function ignores matrix/array attributes, and always returns a vector, by design
+	
+	// BEWARE: This method shares code with Eidos_ExecuteFunction_allClose(); they should be changed in parallel.
+	
+	EidosValue *x_value = p_arguments[0].get();
+	EidosValue *y_value = p_arguments[1].get();
+	EidosValue *rtol_value = p_arguments[2].get();
+	EidosValue *atol_value = p_arguments[3].get();
+	EidosValue *equalNAN_value = p_arguments[4].get();
+	int x_count = x_value->Count();
+	int y_count = y_value->Count();
+	
+	// rtol
+	double rtol = rtol_value->FloatAtIndex_NOCAST(0, nullptr);
+	
+	if (rtol < 0.0)
+		EIDOS_TERMINATION << "ERROR (Eidos_ExecuteFunction_isClose): function isClose() requires rtol >= 0.0." << EidosTerminate(nullptr);
+	
+	// atol
+	double atol = atol_value->FloatAtIndex_NOCAST(0, nullptr);
+	
+	if (atol < 0.0)
+		EIDOS_TERMINATION << "ERROR (Eidos_ExecuteFunction_isClose): function isClose() requires atol >= 0.0." << EidosTerminate(nullptr);
+	
+	// equalNAN
+	eidos_logical_t equalNAN = equalNAN_value->LogicalAtIndex_NOCAST(0, nullptr);
+	
+	if ((x_count == y_count) || (x_count == 1) || (y_count == 1))
+	{
+		if ((x_count == 1) && (y_count == 1))
+		{
+			double xv = x_value->FloatAtIndex_NOCAST(0, nullptr);
+			double yv = y_value->FloatAtIndex_NOCAST(0, nullptr);
+			
+			if (std::isfinite(xv) && std::isfinite(yv))
+			{
+				// if xv and yv are finite, they are "close" if absolute(xv - yv) <= (atol + rtol * absolute(yv))
+				// note that this mirrors the behavior of the numpy function isclose(), which this is based upon;
+				// it is documented at https://numpy.org/doc/stable/reference/generated/numpy.isclose.html.
+				// Note that Python's built-in math.isclose() has a different criterion, and different defaults;
+				// see https://docs.python.org/3/library/math.html#math.isclose.
+				bool close = (std::abs(xv - yv) <= atol + rtol * std::abs(yv));
+				
+				return (close ? gStaticEidosValue_LogicalT : gStaticEidosValue_LogicalF);
+			}
+			else
+			{
+				// if xv and yv are infinite, they are "close" if and only if they have the same sign
+				if (std::isinf(xv) && std::isinf(yv))
+					return ((std::signbit(xv) == std::signbit(yv)) ? gStaticEidosValue_LogicalT : gStaticEidosValue_LogicalF);
+				
+				// if xv and yv are NAN, they are "close" if and only if the equalNAN flag is true
+				if (std::isnan(xv) && std::isnan(yv))
+					return (equalNAN ? gStaticEidosValue_LogicalT : gStaticEidosValue_LogicalF);
+				
+				// all other cases involving INF and/or NAN are not "close"
+				return gStaticEidosValue_LogicalF;
+			}
+		}
+		else
+		{
+			const double *x_data = x_value->FloatData();
+			const double *y_data = y_value->FloatData();
+			const double xv_singleton = (x_count == 1) ? x_data[0] : 0.0;
+			const double yv_singleton = (y_count == 1) ? y_data[0] : 0.0;
+			
+			int value_count = std::max(x_count, y_count);
+			EidosValue_Logical *logical_result = (new (gEidosValuePool->AllocateChunk()) EidosValue_Logical())->resize_no_initialize(value_count);
+			
+			for (int value_index = 0; value_index < value_count; ++value_index)
+			{
+				double xv = (x_count == 1) ? xv_singleton : x_data[value_index];
+				double yv = (y_count == 1) ? yv_singleton : y_data[value_index];
+				bool close;
+				
+				if (std::isfinite(xv) && std::isfinite(yv))
+					close = (std::abs(xv - yv) <= atol + rtol * std::abs(yv));
+				else if (std::isinf(xv) && std::isinf(yv))
+					close = (std::signbit(xv) == std::signbit(yv));
+				else if (std::isnan(xv) && std::isnan(yv))
+					close = equalNAN;
+				else
+					close = false;
+				
+				logical_result->set_logical_no_check(close, value_index);
+			}
+			
+			return EidosValue_SP(logical_result);
+		}
+	}
+	else
+		EIDOS_TERMINATION << "ERROR (Eidos_ExecuteFunction_isClose): function isClose() requires the lengths of x and y to be equal, or that either x or y is singleton." << EidosTerminate(nullptr);
 }
 
 //	(integer)match(* x, * table)
@@ -2196,6 +2370,9 @@ EidosValue_SP Eidos_ExecuteFunction_print(const std::vector<EidosValue_SP> &p_ar
 	eidos_logical_t use_error_stream = p_arguments[1]->LogicalAtIndex_NOCAST(0, nullptr);
 	std::ostream &output_stream = (use_error_stream ? p_interpreter.ErrorOutputStream() : p_interpreter.ExecutionOutputStream());
 	
+	// before writing anything, erase a progress line if we've got one up, to try to make a clean slate
+	Eidos_EraseProgress();
+	
 	output_stream << *x_value << std::endl;
 	
 	return gStaticEidosValueVOID;
@@ -2533,6 +2710,9 @@ EidosValue_SP Eidos_ExecuteFunction_str(const std::vector<EidosValue_SP> &p_argu
 	EidosValue *x_value = p_arguments[0].get();
 	eidos_logical_t use_error_stream = p_arguments[1]->LogicalAtIndex_NOCAST(0, nullptr);
 	std::ostream &output_stream = (use_error_stream ? p_interpreter.ErrorOutputStream() : p_interpreter.ExecutionOutputStream());
+	
+	// before writing anything, erase a progress line if we've got one up, to try to make a clean slate
+	Eidos_EraseProgress();
 	
 	x_value->PrintStructure(output_stream, 2);
 	output_stream << std::endl;

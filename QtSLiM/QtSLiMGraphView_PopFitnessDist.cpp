@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 8/3/2020.
-//  Copyright (c) 2020-2024 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2020-2025 Benjamin C. Haller.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -34,7 +34,8 @@ QtSLiMGraphView_PopFitnessDist::QtSLiMGraphView_PopFitnessDist(QWidget *p_parent
     histogramBinCount_ = 50;
     allowBinCountRescale_ = true;
     
-    x1_ = 2.0;
+    original_x1_ = 2.0;
+    x1_ = original_x1_;
     
     xAxisMax_ = x1_;
     xAxisMajorTickInterval_ = 1.0;

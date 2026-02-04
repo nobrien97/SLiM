@@ -3,7 +3,7 @@
 //  Eidos
 //
 //  Created by Ben Haller on 4/7/15.
-//  Copyright (c) 2015-2024 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2015-2025 Benjamin C. Haller.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -86,6 +86,7 @@ extern EidosValue_String_SP gStaticEidosValue_StringSpace;
 extern EidosValue_String_SP gStaticEidosValue_StringAsterisk;
 extern EidosValue_String_SP gStaticEidosValue_StringDoubleAsterisk;
 extern EidosValue_String_SP gStaticEidosValue_StringComma;
+extern EidosValue_String_SP gStaticEidosValue_StringTab;
 extern EidosValue_String_SP gStaticEidosValue_StringPeriod;
 extern EidosValue_String_SP gStaticEidosValue_StringDoubleQuote;
 extern EidosValue_String_SP gStaticEidosValue_String_ECMAScript;
@@ -652,7 +653,7 @@ public:
 	virtual void PrintValueAtIndex(const int p_idx, std::ostream &p_ostream) const override;
 	virtual nlohmann::json JSONRepresentation(void) const override;
 	
-	inline __attribute__((always_inline)) void PushString(const std::string &p_string) { WILL_MODIFY(this); UncacheScript(); values_.emplace_back(p_string); }
+	inline __attribute__((always_inline)) void PushString(const std::string &p_string) { WILL_MODIFY(this); UncacheScript(); values_.push_back(p_string); }
 	inline __attribute__((always_inline)) EidosValue_String *Reserve(int p_reserved_size) { WILL_MODIFY(this); values_.reserve(p_reserved_size); return this; }
 	
 	virtual std::string StringAtIndex_NOCAST(int p_idx, const EidosToken *p_blame_token) const override;

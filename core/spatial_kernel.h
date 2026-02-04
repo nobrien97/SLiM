@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 9/9/23.
-//  Copyright (c) 2023-2024 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2023-2025 Benjamin C. Haller.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -74,7 +74,7 @@ public:
 	// we don't use the GSL for this, because it does two gamma-function calculations that we don't need (they normalize away)
 	static inline double tdist(double x, double max, double nu, double tau) {
 		double x_over_tau = x / tau;
-		return max / pow(1.0 + x_over_tau * x_over_tau / nu, -(nu + 1.0) / 2.0);
+		return max * pow(1.0 + x_over_tau * x_over_tau / nu, -(nu + 1.0) / 2.0);
 	};
 	
 public:

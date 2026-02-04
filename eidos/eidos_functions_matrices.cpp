@@ -3,7 +3,7 @@
 //  Eidos
 //
 //  Created by Ben Haller on 4/6/15; split from eidos_functions.cpp 09/26/2022
-//  Copyright (c) 2015-2024 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2015-2025 Benjamin C. Haller.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -24,6 +24,10 @@
 #include <utility>
 #include <vector>
 #include <algorithm>
+
+#include "gsl_linalg.h"
+#include "gsl_matrix.h"
+#include "gsl_errno.h"
 
 
 // ************************************************************************************
@@ -78,8 +82,8 @@ EidosValue_SP Eidos_ExecuteFunction_apply(const std::vector<EidosValue_SP> &p_ar
 	
 	// Get the lambda string and cache its script
 	EidosValue *lambda_value = p_arguments[2].get();
-	EidosValue_String *lambda_value_singleton = dynamic_cast<EidosValue_String *>(p_arguments[2].get());
-	EidosScript *script = (lambda_value_singleton ? lambda_value_singleton->CachedScript() : nullptr);
+	EidosValue_String *lambda_value_singleton = (EidosValue_String *)p_arguments[2].get();
+	EidosScript *script = lambda_value_singleton->CachedScript();
 	
 	// Errors in lambdas should be reported for the lambda script, not for the calling script,
 	// if possible.  In the GUI this does not work well, however; there, errors should be
@@ -91,9 +95,9 @@ EidosValue_SP Eidos_ExecuteFunction_apply(const std::vector<EidosValue_SP> &p_ar
 	// We try to do tokenization and parsing once per script, by caching the script inside the EidosValue_String_singleton instance
 	if (!script)
 	{
-		script = new EidosScript(lambda_value->StringAtIndex_NOCAST(0, nullptr), -1);
+		script = new EidosScript(lambda_value->StringAtIndex_NOCAST(0, nullptr));
 		
-		gEidosErrorContext = EidosErrorContext{{-1, -1, -1, -1}, script, true};
+		gEidosErrorContext = EidosErrorContext{{-1, -1, -1, -1}, script};
 		
 		try
 		{
@@ -103,7 +107,10 @@ EidosValue_SP Eidos_ExecuteFunction_apply(const std::vector<EidosValue_SP> &p_ar
 		catch (...)
 		{
 			if (gEidosTerminateThrows)
+			{
 				gEidosErrorContext = error_context_save;
+				TranslateErrorContextToUserScript("Eidos_ExecuteFunction_apply()");
+			}
 			
 			delete script;
 			
@@ -116,13 +123,17 @@ EidosValue_SP Eidos_ExecuteFunction_apply(const std::vector<EidosValue_SP> &p_ar
 	
 	std::vector<EidosValue_SP> results;
 	
-	gEidosErrorContext = EidosErrorContext{{-1, -1, -1, -1}, script, true};
+	gEidosErrorContext = EidosErrorContext{{-1, -1, -1, -1}, script};
 	
 	try
 	{
 		EidosSymbolTable &symbols = p_interpreter.SymbolTable();									// use our own symbol table
 		EidosFunctionMap &function_map = p_interpreter.FunctionMap();								// use our own function map
-		EidosInterpreter interpreter(*script, symbols, function_map, p_interpreter.Context(), p_interpreter.ExecutionOutputStream(), p_interpreter.ErrorOutputStream());
+		EidosInterpreter interpreter(*script, symbols, function_map, p_interpreter.Context(), p_interpreter.ExecutionOutputStream(), p_interpreter.ErrorOutputStream()
+#ifdef SLIMGUI
+			, p_interpreter.check_infinite_loops_
+#endif
+			);
 		bool consistent_return_length = true;	// consistent across all values, including NULLs?
 		int return_length = -1;					// what the consistent length is
 		
@@ -160,7 +171,7 @@ EidosValue_SP Eidos_ExecuteFunction_apply(const std::vector<EidosValue_SP> &p_ar
 			{
 				int margin_dim = margins[margin_index];
 				
-				inclusion_indices[margin_dim].clear();
+				inclusion_indices[margin_dim].resize(0);
 				inclusion_indices[margin_dim].emplace_back(margin_counter[margin_index]);
 			}
 			
@@ -258,11 +269,19 @@ EidosValue_SP Eidos_ExecuteFunction_apply(const std::vector<EidosValue_SP> &p_ar
 	catch (...)
 	{
 		// If exceptions throw, then we want to set up the error information to highlight the
-		// sapply() that failed, since we can't highlight the actual error.  (If exceptions
+		// apply() that failed, since we can't highlight the actual error.  (If exceptions
 		// don't throw, this catch block will never be hit; exit() will already have been called
 		// and the error will have been reported from the context of the lambda script string.)
 		if (gEidosTerminateThrows)
-			gEidosErrorContext = error_context_save;
+		{
+			// In some cases, such as if the error occurred in a derived user-defined function, we can
+			// actually get a user script error context at this point, and don't need to intervene.
+			if (!gEidosErrorContext.currentScript || (gEidosErrorContext.currentScript->UserScriptUTF16Offset() == -1))
+			{
+				gEidosErrorContext = error_context_save;
+				TranslateErrorContextToUserScript("Eidos_ExecuteFunction_apply()");
+			}
+		}
 		
 		if (!lambda_value_singleton)
 			delete script;
@@ -1230,7 +1249,465 @@ EidosValue_SP Eidos_ExecuteFunction_diag(const std::vector<EidosValue_SP> &p_arg
 	EIDOS_TERMINATION << "ERROR (Eidos_ExecuteFunction_diag): diag() requires one of four specific input parameter patterns; see the documentation." << EidosTerminate(nullptr);
 }
 
+// (numeric$)tr(numeric x)
+EidosValue_SP Eidos_ExecuteFunction_tr(const std::vector<EidosValue_SP> &p_arguments, __attribute__((unused)) EidosInterpreter &p_interpreter)
+{
+	EidosValue *x_value = p_arguments[0].get();
+	
+	if (x_value->DimensionCount() != 2)
+		EIDOS_TERMINATION << "ERROR (Eidos_ExecuteFunction_tr): in function tr() x must be a matrix." << EidosTerminate(nullptr);
+	
+	const int64_t *x_dim = x_value->Dimensions();
+	int64_t x_nrow = x_dim[0];
+	int64_t x_ncol= x_dim[1];
+	
+	// The R psych package throws an error, which seems appropriate; this should not be called with a non-square matrix
+	if (x_nrow != x_ncol)
+		EIDOS_TERMINATION << "ERROR (Eidos_ExecuteFunction_tr): in function tr() x must be a square matrix." << EidosTerminate(nullptr);
+	
+	if (x_value->Type() == EidosValueType::kValueInt)
+	{
+		int64_t diag_sum = 0;
+		const int64_t *x_data = x_value->IntData();
+		
+		for (int64_t diag_index = 0; diag_index < x_nrow; ++diag_index)
+		{
+			int64_t diag_element = x_data[diag_index * x_nrow + diag_index];
+			bool overflow = Eidos_add_overflow(diag_sum, diag_element, &diag_sum);
+			
+			if (overflow)
+				EIDOS_TERMINATION << "ERROR (Eidos_ExecuteFunction_tr): integer addition overflow in function tr(); you may wish to cast the matrix to float with asFloat() before calling this function." << EidosTerminate(nullptr);
+		}
+		
+		return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Int(diag_sum));
+	}
+	else
+	{
+		double diag_sum = 0.0;
+		const double *x_data = x_value->FloatData();
+		
+		for (int64_t diag_index = 0; diag_index < x_nrow; ++diag_index)
+			diag_sum += x_data[diag_index * x_nrow + diag_index];
+		
+		return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float(diag_sum));
+	}
+}
 
+// (numeric$)det(numeric x)
+EidosValue_SP Eidos_ExecuteFunction_det(const std::vector<EidosValue_SP> &p_arguments, __attribute__((unused)) EidosInterpreter &p_interpreter)
+{
+	EidosValue *x_value = p_arguments[0].get();
+	
+	if (x_value->DimensionCount() != 2)
+		EIDOS_TERMINATION << "ERROR (Eidos_ExecuteFunction_det): in function det() x must be a matrix." << EidosTerminate(nullptr);
+	
+	const int64_t *x_dim = x_value->Dimensions();
+	int64_t x_nrow = x_dim[0];
+	int64_t x_ncol= x_dim[1];
+	
+	// The R base package throws an error, which seems appropriate; this should not be called with a non-square matrix
+	if (x_nrow != x_ncol)
+		EIDOS_TERMINATION << "ERROR (Eidos_ExecuteFunction_det): in function det() x must be a square matrix." << EidosTerminate(nullptr);
+	
+	int64_t d = x_nrow;		// square matrix
+	
+	// Set up the input matrix and allocate a permutation object
+	gsl_matrix *A = gsl_matrix_alloc(d, d);
+	int signum;
+	
+	if (!A)
+		EIDOS_TERMINATION << "ERROR (Eidos_ExecuteFunction_det): allocation failed; you may need to raise the memory limit for SLiM." << EidosTerminate(nullptr);
+	
+	if (x_value->Type() == EidosValueType::kValueInt)
+	{
+		const int64_t *x_data = x_value->IntData();
+		
+		for (int row_index = 0; row_index < d; ++row_index)
+		{
+			for (int col_index = 0; col_index < d; ++col_index)
+			{
+				int64_t value = x_data[row_index + col_index * d];
+				
+				gsl_matrix_set(A, row_index, col_index, value);
+			}
+		}
+	}
+	else
+	{
+		const double *x_data = x_value->FloatData();
+		
+		for (int row_index = 0; row_index < d; ++row_index)
+		{
+			for (int col_index = 0; col_index < d; ++col_index)
+			{
+				double value = x_data[row_index + col_index * d];
+				
+				if (std::isnan(value))
+				{
+					gsl_matrix_free(A);
+					EIDOS_TERMINATION << "ERROR (Eidos_ExecuteFunction_det): function det() does not allow x to contain NANs." << EidosTerminate(nullptr);
+				}
+				
+				gsl_matrix_set(A, row_index, col_index, value);
+			}
+		}
+	}
+	
+	// Perform LU decomposition
+	gsl_permutation *p = gsl_permutation_alloc(d);
+	
+	if (!p)
+		EIDOS_TERMINATION << "ERROR (Eidos_ExecuteFunction_det): allocation failed; you may need to raise the memory limit for SLiM." << EidosTerminate(nullptr);
+	
+	int result = gsl_linalg_LU_decomp(A, p, &signum);
+	
+	if (result != GSL_SUCCESS)
+	{
+		// This indicates that the matrix is singular, and the determinant is zero.
+		if (x_value->Type() == EidosValueType::kValueInt)
+			return gStaticEidosValue_Integer0;
+		else
+			return gStaticEidosValue_Float0;
+	}
+	
+	// Calculate the determinant from the LU decomposition, since the matrix is not singular
+	double determinant = gsl_linalg_LU_det(A, signum);
+	
+	gsl_matrix_free(A);
+	gsl_permutation_free(p);
+	
+	// If the original matrix is of type integer, the determinant is also an integer.
+	// The conversion to integer might overflow, in which case we raise an error.
+	if (x_value->Type() == EidosValueType::kValueInt)
+	{
+		determinant = std::round(determinant);	// in case of numerical error
+		
+		if (!std::isfinite(determinant) || (determinant < INT64_MIN) || (determinant > INT64_MAX))
+			EIDOS_TERMINATION << "ERROR (Eidos_ExecuteFunction_det): integer overflow in function det(); you may wish to cast the matrix to float with asFloat() before calling this function." << EidosTerminate(nullptr);
+		
+		int64_t determinant_int = (int64_t)determinant;
+		
+		return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Int(determinant_int));
+	}
+	else
+	{
+		return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float(determinant));
+	}
+}
+
+// (float)inverse(numeric x)
+EidosValue_SP Eidos_ExecuteFunction_inverse(const std::vector<EidosValue_SP> &p_arguments, __attribute__((unused)) EidosInterpreter &p_interpreter)
+{
+	EidosValue *x_value = p_arguments[0].get();
+	
+	if (x_value->DimensionCount() != 2)
+		EIDOS_TERMINATION << "ERROR (Eidos_ExecuteFunction_inverse): in function inverse() x must be a matrix." << EidosTerminate(nullptr);
+	
+	const int64_t *x_dim = x_value->Dimensions();
+	int64_t x_nrow = x_dim[0];
+	int64_t x_ncol= x_dim[1];
+	
+	// this should not be called with a non-square matrix
+	if (x_nrow != x_ncol)
+		EIDOS_TERMINATION << "ERROR (Eidos_ExecuteFunction_inverse): in function inverse() x must be a square matrix." << EidosTerminate(nullptr);
+	
+	int64_t d = x_nrow;		// square matrix
+	
+	// Set up the input matrix and allocate a permutation object
+	gsl_matrix *A = gsl_matrix_alloc(d, d);
+	int signum;
+	
+	if (!A)
+		EIDOS_TERMINATION << "ERROR (Eidos_ExecuteFunction_inverse): allocation failed; you may need to raise the memory limit for SLiM." << EidosTerminate(nullptr);
+	
+	if (x_value->Type() == EidosValueType::kValueInt)
+	{
+		const int64_t *x_data = x_value->IntData();
+		
+		for (int row_index = 0; row_index < d; ++row_index)
+		{
+			for (int col_index = 0; col_index < d; ++col_index)
+			{
+				int64_t value = x_data[row_index + col_index * d];
+				
+				gsl_matrix_set(A, row_index, col_index, value);
+			}
+		}
+	}
+	else
+	{
+		const double *x_data = x_value->FloatData();
+		
+		for (int row_index = 0; row_index < d; ++row_index)
+		{
+			for (int col_index = 0; col_index < d; ++col_index)
+			{
+				double value = x_data[row_index + col_index * d];
+				
+				if (std::isnan(value))
+				{
+					gsl_matrix_free(A);
+					EIDOS_TERMINATION << "ERROR (Eidos_ExecuteFunction_inverse): function inverse() does not allow x to contain NANs." << EidosTerminate(nullptr);
+				}
+				
+				gsl_matrix_set(A, row_index, col_index, value);
+			}
+		}
+	}
+	
+	// Perform LU decomposition
+	gsl_permutation *p = gsl_permutation_alloc(d);
+	
+	if (!p)
+		EIDOS_TERMINATION << "ERROR (Eidos_ExecuteFunction_inverse): allocation failed; you may need to raise the memory limit for SLiM." << EidosTerminate(nullptr);
+	
+	int result = gsl_linalg_LU_decomp(A, p, &signum);
+	
+	if (result != GSL_SUCCESS)
+	{
+		// This indicates that the matrix is singular, and the determinant is zero; for inverse() this is an error
+		gsl_matrix_free(A);
+		gsl_permutation_free(p);
+		EIDOS_TERMINATION << "ERROR (Eidos_ExecuteFunction_inverse): in function inverse() x must not be singular (i.e., must be invertible).  You can use det() to check for singularity prior to calling inverse()." << EidosTerminate(nullptr);
+	}
+	
+	// Calculate the inverse from the LU decomposition, since the matrix is not singular
+	gsl_matrix *inverse = gsl_matrix_calloc(d, d);
+	
+	if (!inverse)
+		EIDOS_TERMINATION << "ERROR (Eidos_ExecuteFunction_inverse): allocation failed; you may need to raise the memory limit for SLiM." << EidosTerminate(nullptr);
+	
+	gsl_error_handler_t *old_handler = gsl_set_error_handler_off();
+	result = gsl_linalg_LU_invert(A, p, inverse);
+	gsl_set_error_handler(old_handler);
+	
+	if (result == GSL_EDOM)
+	{
+		// This indicates that the matrix is singular, and the determinant is zero; for inverse() this is an error
+		gsl_matrix_free(A);
+		gsl_permutation_free(p);
+		gsl_matrix_free(inverse);
+		EIDOS_TERMINATION << "ERROR (Eidos_ExecuteFunction_inverse): in function inverse() x must not be singular (i.e., must be invertible).  You can use det() to check for singularity prior to calling inverse()." << EidosTerminate(nullptr);
+	}
+	else if (result != GSL_SUCCESS)
+	{
+		// Some other error occurred
+		gsl_matrix_free(A);
+		gsl_permutation_free(p);
+		gsl_matrix_free(inverse);
+		EIDOS_TERMINATION << "ERROR (Eidos_ExecuteFunction_inverse): in function inverse() an internal GSL error occurred (code == " << result << ")." << EidosTerminate(nullptr);
+	}
+	
+	// Create a new EidosValue matrix from inverse
+	EidosValue_Float *float_result = (new (gEidosValuePool->AllocateChunk()) EidosValue_Float())->resize_no_initialize(d * d);
+	EidosValue_SP result_SP(float_result);
+	
+	for (int64_t col_index = 0; col_index < d; ++col_index)
+		for (int64_t row_index = 0; row_index < d; ++row_index)
+			float_result->set_float_no_check(gsl_matrix_get(inverse, row_index, col_index), col_index * d + row_index);
+	
+	const int64_t dim_buf[2] = {d, d};
+	
+	float_result->SetDimensions(2, dim_buf);
+	
+	gsl_matrix_free(A);
+	gsl_permutation_free(p);
+	gsl_matrix_free(inverse);
+	
+	return result_SP;
+}
+
+//	(*)asVector(* x)
+EidosValue_SP Eidos_ExecuteFunction_asVector(const std::vector<EidosValue_SP> &p_arguments, __attribute__((unused)) EidosInterpreter &p_interpreter)
+{
+	EidosValue *x_value = p_arguments[0].get();
+	EidosValue_SP result_SP(nullptr);
+	
+	if (x_value->DimensionCount() == 1)
+	{
+		result_SP.reset(x_value);
+	}
+	else
+	{
+		result_SP = x_value->CopyValues();
+		
+		result_SP->SetDimensions(1, nullptr);
+	}
+	
+	return result_SP;
+}
+
+//	(numeric)rowSums(lif x)
+EidosValue_SP Eidos_ExecuteFunction_rowSums(const std::vector<EidosValue_SP> &p_arguments, __attribute__((unused)) EidosInterpreter &p_interpreter)
+{
+	EidosValue_SP result_SP(nullptr);
+	
+	EidosValue *x_value = p_arguments[0].get();
+	EidosValueType x_type = x_value->Type();
+	
+	if (x_value->DimensionCount() != 2)
+		EIDOS_TERMINATION << "ERROR (Eidos_ExecuteFunction_rowSums): in function rowSums() x is not a matrix." << EidosTerminate(nullptr);
+	
+	const int64_t *dim_values = x_value->Dimensions();
+	size_t x_rowcount = (size_t)dim_values[0];
+	size_t x_colcount = (size_t)dim_values[1];
+	
+	if (x_type == EidosValueType::kValueInt)
+	{
+		const int64_t *int_data = x_value->IntData();
+		
+		EidosValue_Int *int_result = (new (gEidosValuePool->AllocateChunk()) EidosValue_Int())->resize_no_initialize(x_rowcount);
+		result_SP = EidosValue_SP(int_result);
+		
+		for (size_t value_index = 0; value_index < x_rowcount; ++value_index)
+		{
+			int64_t sum = 0;
+			const int64_t *series_ptr = int_data + value_index;
+			
+			for (size_t col_index = 0; col_index < x_colcount; ++col_index)
+			{
+				// do sum += *series_ptr but check for overflow
+				int64_t old_sum = sum;
+				int64_t temp = *series_ptr;
+				bool overflow = Eidos_add_overflow(old_sum, temp, &sum);
+				
+				if (overflow)
+					EIDOS_TERMINATION << "ERROR (Eidos_ExecuteFunction_rowSums): integer overflow in rowSums(); you might wish to convert to float before calling rowSums()." << EidosTerminate(nullptr);
+				
+				series_ptr += x_rowcount;
+			}
+			
+			int_result->set_int_no_check(sum, value_index);
+		}
+	}
+	else if (x_type == EidosValueType::kValueFloat)
+	{
+		const double *float_data = x_value->FloatData();
+		
+		EidosValue_Float *float_result = (new (gEidosValuePool->AllocateChunk()) EidosValue_Float())->resize_no_initialize(x_rowcount);
+		result_SP = EidosValue_SP(float_result);
+		
+		for (size_t value_index = 0; value_index < x_rowcount; ++value_index)
+		{
+			double sum = 0;
+			const double *series_ptr = float_data + value_index;
+			
+			for (size_t col_index = 0; col_index < x_colcount; ++col_index)
+			{
+				sum += *series_ptr;
+				series_ptr += x_rowcount;
+			}
+			
+			float_result->set_float_no_check(sum, value_index);
+		}
+	}
+	else if (x_type == EidosValueType::kValueLogical)
+	{
+		const eidos_logical_t *logical_data = x_value->LogicalData();
+		
+		EidosValue_Int *int_result = (new (gEidosValuePool->AllocateChunk()) EidosValue_Int())->resize_no_initialize(x_rowcount);
+		result_SP = EidosValue_SP(int_result);
+		
+		for (size_t value_index = 0; value_index < x_rowcount; ++value_index)
+		{
+			int64_t sum = 0;
+			const eidos_logical_t *series_ptr = logical_data + value_index;
+			
+			for (size_t col_index = 0; col_index < x_colcount; ++col_index)
+			{
+				sum += *series_ptr;
+				series_ptr += x_rowcount;
+			}
+			
+			int_result->set_int_no_check(sum, value_index);
+		}
+	}
+	
+	return result_SP;
+}
+
+//	(numeric)colSums(lif x)
+EidosValue_SP Eidos_ExecuteFunction_colSums(const std::vector<EidosValue_SP> &p_arguments, __attribute__((unused)) EidosInterpreter &p_interpreter)
+{
+	EidosValue_SP result_SP(nullptr);
+	
+	EidosValue *x_value = p_arguments[0].get();
+	EidosValueType x_type = x_value->Type();
+	
+	if (x_value->DimensionCount() != 2)
+		EIDOS_TERMINATION << "ERROR (Eidos_ExecuteFunction_colSums): in function colSums() x is not a matrix." << EidosTerminate(nullptr);
+	
+	const int64_t *dim_values = x_value->Dimensions();
+	size_t x_rowcount = (size_t)dim_values[0];
+	size_t x_colcount = (size_t)dim_values[1];
+	
+	if (x_type == EidosValueType::kValueInt)
+	{
+		const int64_t *int_data = x_value->IntData();
+		
+		EidosValue_Int *int_result = (new (gEidosValuePool->AllocateChunk()) EidosValue_Int())->resize_no_initialize(x_colcount);
+		result_SP = EidosValue_SP(int_result);
+		
+		for (size_t value_index = 0; value_index < x_colcount; ++value_index)
+		{
+			int64_t sum = 0;
+			const int64_t *series_ptr = int_data + value_index * x_rowcount;
+			
+			for (size_t row_index = 0; row_index < x_rowcount; ++row_index)
+			{
+				// do sum += *series_ptr but check for overflow
+				int64_t old_sum = sum;
+				int64_t temp = *series_ptr;
+				bool overflow = Eidos_add_overflow(old_sum, temp, &sum);
+				
+				if (overflow)
+					EIDOS_TERMINATION << "ERROR (Eidos_ExecuteFunction_colSums): integer overflow in colSums(); you might wish to convert to float before calling colSums()." << EidosTerminate(nullptr);
+				
+				series_ptr++;
+			}
+			
+			int_result->set_int_no_check(sum, value_index);
+		}
+	}
+	else if (x_type == EidosValueType::kValueFloat)
+	{
+		const double *float_data = x_value->FloatData();
+		
+		EidosValue_Float *float_result = (new (gEidosValuePool->AllocateChunk()) EidosValue_Float())->resize_no_initialize(x_colcount);
+		result_SP = EidosValue_SP(float_result);
+		
+		for (size_t value_index = 0; value_index < x_colcount; ++value_index)
+		{
+			double sum = 0;
+			const double *series_ptr = float_data + value_index * x_rowcount;
+			
+			for (size_t row_index = 0; row_index < x_rowcount; ++row_index)
+				sum += *(series_ptr++);
+			
+			float_result->set_float_no_check(sum, value_index);
+		}
+	}
+	else if (x_type == EidosValueType::kValueLogical)
+	{
+		const eidos_logical_t *logical_data = x_value->LogicalData();
+		
+		EidosValue_Int *int_result = (new (gEidosValuePool->AllocateChunk()) EidosValue_Int())->resize_no_initialize(x_colcount);
+		result_SP = EidosValue_SP(int_result);
+		
+		for (size_t value_index = 0; value_index < x_colcount; ++value_index)
+		{
+			int64_t sum = 0;
+			const eidos_logical_t *series_ptr = logical_data + value_index * x_rowcount;
+			
+			for (size_t row_index = 0; row_index < x_rowcount; ++row_index)
+				sum += *(series_ptr++);
+			
+			int_result->set_int_no_check(sum, value_index);
+		}
+	}
+	
+	return result_SP;
+}
 
 
 

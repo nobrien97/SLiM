@@ -3,7 +3,7 @@
 //  SLiM
 //
 //  Created by Ben Haller on 8/20/2020.
-//  Copyright (c) 2020-2024 Philipp Messer.  All rights reserved.
+//  Copyright (c) 2020-2025 Benjamin C. Haller.  All rights reserved.
 //	A product of the Messer Lab, http://messerlab.org/slim/
 //
 
@@ -37,19 +37,25 @@
 
 QtSLiMGraphView_1DSampleSFS::QtSLiMGraphView_1DSampleSFS(QWidget *p_parent, QtSLiMWindow *controller) : QtSLiMGraphView(p_parent, controller)
 {
-    histogramBinCount_ = 20;        // this is also the genome sample size
+    histogramBinCount_ = 20;        // this is also the haplosome sample size
     allowBinCountRescale_ = false;
     
-    x0_ = 0;
-    x1_ = histogramBinCount_;
+    original_x0_ = 0;
+    original_x1_ = histogramBinCount_;
+    
+    x0_ = original_x0_;
+    x1_ = original_x1_;
     
     xAxisMin_ = x0_;
     xAxisMax_ = x1_;
     xAxisHistogramStyle_ = true;
     xAxisTickValuePrecision_ = 0;
     
-    y0_ = -0.05;      // on log scale; we want a frequency of 1 to show slightly above baseline
-    y1_ = 3.0;        // on log scale; maximum power of 10
+    original_y0_ = -0.05;      // on log scale; we want a frequency of 1 to show slightly above baseline
+    original_y1_ = 3.0;        // on log scale; maximum power of 10
+    
+    y0_ = original_y0_;
+    y1_ = original_y1_;
     
     yAxisMin_ = y0_;
     yAxisMax_ = y1_;
@@ -143,7 +149,7 @@ QString QtSLiMGraphView_1DSampleSFS::graphTitle(void)
 
 QString QtSLiMGraphView_1DSampleSFS::aboutString(void)
 {
-    return "The 1D Sample SFS graph shows a Site Frequency Spectrum (SFS) for a sample of genomes taken "
+    return "The 1D Sample SFS graph shows a Site Frequency Spectrum (SFS) for a sample of haplosomes taken "
            "(with replacement) from a given subpopulation, for mutations of a given mutation type.  The x axis "
            "here is the occurrence count of a given mutation within the sample, from 1 to the sample size.  The "
            "y axis is the number of mutations in the sample with that specific occurrence count, on a log "
@@ -245,7 +251,8 @@ void QtSLiMGraphView_1DSampleSFS::changeSampleSize(void)
         {
             histogramBinCount_ = newSampleSize;
             xAxisMax_ = histogramBinCount_;
-            x1_ = histogramBinCount_;               // the same as xAxisMax_, for base plots
+            original_x1_ = histogramBinCount_;               // the same as xAxisMax_, for base plots
+            x1_ = original_x1_;
             invalidateCachedData();
             update();
         }
@@ -274,15 +281,21 @@ uint64_t *QtSLiMGraphView_1DSampleSFS::mutation1DSFS(void)
         
         // Get frequencies for a sample taken (with replacement) from subpop1
         {
-            std::vector<Genome *> sampleGenomes;
-            std::vector<Genome *> &subpopGenomes = subpop1->CurrentGenomes();
-            size_t subpopGenomeCount = subpopGenomes.size();
+            std::vector<Haplosome *> sampleHaplosomes;
+            std::vector<Individual *> &subpopIndividuals = subpop1->parent_individuals_;
+            size_t subpopHaplosomeCount = subpopIndividuals.size() * 2;
             
-            if (subpopGenomeCount)
+            if (subpopHaplosomeCount)
                 for (int i = 0; i < histogramBinCount_ - 1; ++i)
-                    sampleGenomes.emplace_back(subpopGenomes[random() % subpopGenomeCount]);
+                {
+                    slim_popsize_t haplosome_index = random() % subpopHaplosomeCount;
+                    slim_popsize_t individual_index = haplosome_index >> 1;
+                    Haplosome *haplosome = subpopIndividuals[individual_index]->haplosomes_[haplosome_index & 0x01];
+                    
+                    sampleHaplosomes.emplace_back(haplosome);
+                }
             
-            tallyGUIMutationReferences(sampleGenomes, selectedMutationTypeIndex_);
+            tallyGUIMutationReferences(sampleHaplosomes, selectedMutationTypeIndex_);
         }
         
         // Tally into our bins
