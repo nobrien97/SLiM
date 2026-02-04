@@ -4817,7 +4817,7 @@ int8_t HaplosomeWalker::NucleotideAtCurrentPosition(void)
 }
 
 // Get the IDs of mutations at some position in the genome
-std::vector<slim_mutationid_t> Genome::internalGetMutationIDsAtPosition(const slim_position_t &position)
+std::vector<slim_mutationid_t> Haplosome::internalGetMutationIDsAtPosition(const slim_position_t &position)
 {	
 	// Count the number of mutations of the given type
 	Mutation *mut_block_ptr = gSLiM_Mutation_Block;

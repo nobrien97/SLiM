@@ -3478,7 +3478,17 @@ EidosValue_SP Species::ExecuteMethod_calcLD(EidosGlobalStringID p_method_id, con
 	// TODO: This ignores all subpop information, just works over the first one
 	Subpopulation *subpop_value = SLiM_ExtractSubpopulationFromEidosValue_io(p_arguments[0].get(), 
 														0, &(this->community_), this, "calcLD()");
-	std::vector<Genome*>& genomes = subpop_value->CurrentGenomes();
+	std::vector<Haplosome*> genomes;
+	genomes.reserve(size(subpop_value->parent_individuals_) * 2);
+
+	// Fill vector
+	for (Individual *ind : subpop_value->parent_individuals_)
+	{
+		for (int haplosome_index = 0; haplosome_index <= 1; ++haplosome_index)
+		{
+			genomes.emplace_back(ind->haplosomes_[haplosome_index]);
+		}
+	}
 
 	// Do we want to calculate R^2 or D'?
 	EidosValue* statistic_ev = (EidosValue*)p_arguments[1].get();
@@ -3489,7 +3499,7 @@ EidosValue_SP Species::ExecuteMethod_calcLD(EidosGlobalStringID p_method_id, con
 		EIDOS_TERMINATION << "ERROR (Species::ExecuteMethod_calcLD): " << EidosStringRegistry::StringForGlobalStringID(p_method_id) << "() requires statistic to be one of r2, D, or D'." << EidosTerminate();
 	}
 	
-	int genomelength = subpop_value->species_.TheChromosome().last_position_ + 1;
+	int genomelength = subpop_value->species_.chromosomes_[0]->last_position_ + 1;
 	double singletonFreq = 1.0 / genomes.size();
 
 	static std::vector<Subpopulation*> subpops_to_tally;
@@ -3497,12 +3507,17 @@ EidosValue_SP Species::ExecuteMethod_calcLD(EidosGlobalStringID p_method_id, con
 
 	subpops_to_tally.emplace_back(subpop_value);
 
-	// tally across the requested subpop					
-	double denominator = population_.TallyMutationReferencesAcrossSubpopulations(&subpops_to_tally, false);
+	// tally across the requested subpops			
+	double denominator = 0.0;
+
+	for (Subpopulation* subpop : subpops_to_tally)
+	{
+		denominator += size(subpop->parent_individuals_);
+	}
 	
 	// Store the MAFs, mutation positions, and mutation ID in a vector
 	// [0] = MAF; [1] = pos; [2] = ID
-	std::vector<std::tuple<double, int, MutationIndex>> mutFreqMAFs(genomelength);
+	std::vector<std::tuple<double, int, Mutation*>> mutFreqMAFs(genomelength);
 
 	// Get all mutations in a std::vector
 	Mutation *mut_block_ptr = gSLiM_Mutation_Block;
@@ -3531,7 +3546,7 @@ EidosValue_SP Species::ExecuteMethod_calcLD(EidosGlobalStringID p_method_id, con
 		std::copy_if(allMuts.begin(), allMuts.end(), std::back_inserter( iMuts ), ([n]( Mutation* mut ) { return mut->position_ == n; }));
 		if (!iMuts.size()) // If there's no mutation at this position, we have an empty variable
 		{
-			mutFreqMAFs[n] = std::tuple<double, int, MutationIndex>{0.0, -1, -1};
+			mutFreqMAFs[n] = std::tuple<double, int, Mutation*>{0.0, -1, nullptr};
 			continue;
 		}
 		// Get each mutation's frequency
@@ -3555,7 +3570,7 @@ EidosValue_SP Species::ExecuteMethod_calcLD(EidosGlobalStringID p_method_id, con
 		// Now need to check if mutAllFreq is empty:
 		if (!mutAllFreq.size()) // If there's no mutation at this position, we have an empty variable
 		{
-			mutFreqMAFs[n] = std::tuple<double, int, MutationIndex>{0.0, -1, -1};
+			mutFreqMAFs[n] = std::tuple<double, int, Mutation*>{0.0, -1, nullptr};
 			continue;
 		}
 
@@ -3574,7 +3589,7 @@ EidosValue_SP Species::ExecuteMethod_calcLD(EidosGlobalStringID p_method_id, con
 		// Set mutFreqMAFs tuple values according to MAF values: MAF[0] = freq, MAF[1] = pos, MAF[2] = ID
 		std::get<0>(mutFreqMAFs[n]) = (MAF.first > singletonFreq) ? MAF.first : 0.0;
 		std::get<1>(mutFreqMAFs[n]) = (MAF.first > singletonFreq) ? MAF.second->position_ : -1;
-		std::get<2>(mutFreqMAFs[n]) = (MAF.first > singletonFreq) ? MAF.second->BlockIndex() : -1;
+		std::get<2>(mutFreqMAFs[n]) = (MAF.first > singletonFreq) ? MAF.second : nullptr;
 		mutAllFreq.clear();
 	}
 	// Then, calculate correlations and store in a matrix
@@ -3662,7 +3677,17 @@ EidosValue_SP Species::ExecuteMethod_calcLDBetweenSitePairs(EidosGlobalStringID 
 	// TODO: This ignores all subpop information, just works over the first one
 	Subpopulation *subpop_value = SLiM_ExtractSubpopulationFromEidosValue_io(p_arguments[0].get(), 
 														0, &(this->community_), this, "calcLD()");
-	std::vector<Genome*>& genomes = subpop_value->CurrentGenomes();
+	std::vector<Haplosome*> genomes;
+	genomes.reserve(size(subpop_value->parent_individuals_) * 2);
+
+	// Fill vector
+	for (Individual *ind : subpop_value->parent_individuals_)
+	{
+		for (int haplosome_index = 0; haplosome_index <= 1; ++haplosome_index)
+		{
+			genomes.emplace_back(ind->haplosomes_[haplosome_index]);
+		}
+	}
 
 	EidosValue* pos1_ev = (EidosValue*)p_arguments[1].get();
 	EidosValue* pos2_ev = (EidosValue*)p_arguments[2].get();
@@ -3692,8 +3717,16 @@ EidosValue_SP Species::ExecuteMethod_calcLDBetweenSitePairs(EidosGlobalStringID 
 
 	subpops_to_tally.emplace_back(subpop_value);
 
-	// tally across the requested subpop					
-	double denominator = population_.TallyMutationReferencesAcrossSubpopulations(&subpops_to_tally, false);
+	// tally across the requested subpops			
+	double denominator = 0.0;
+
+	for (Subpopulation* subpop : subpops_to_tally)
+	{
+		denominator += size(subpop->parent_individuals_);
+	}
+
+
+
 	
 	// Get a vector of unique sites we need to find the minor alleles of
 	std::vector<int> pos(pos1_ev->Count() * 2); // maximum size is twice the number of positions (if both vectors unique)
@@ -3710,7 +3743,7 @@ EidosValue_SP Species::ExecuteMethod_calcLDBetweenSitePairs(EidosGlobalStringID 
 
 	// Store the MAFs, mutation positions, and mutation ID in a std::map
 	// key: position, value: tuple([0] = MAF; [1] = ID)
-	std::map<int, std::tuple<double, MutationIndex>> mutFreqMAFs;
+	std::map<int, std::tuple<double, Mutation*>> mutFreqMAFs;
 
 	// Get all mutations in a std::vector
 	Mutation *mut_block_ptr = gSLiM_Mutation_Block;
@@ -3766,7 +3799,7 @@ EidosValue_SP Species::ExecuteMethod_calcLDBetweenSitePairs(EidosGlobalStringID 
 		// Now need to check if mutAllFreq is empty:
 		if (!mutAllFreq.size()) // If there's no mutation at this position, we have an empty variable
 		{
-			mutFreqMAFs.insert(std::pair<int, std::tuple<double, MutationIndex>>(pos[i], {0.0, -1}));
+			mutFreqMAFs.insert(std::pair<int, std::tuple<double, Mutation*>>(pos[i], {0.0, nullptr}));
 			continue;
 		}
 
@@ -3784,11 +3817,11 @@ EidosValue_SP Species::ExecuteMethod_calcLDBetweenSitePairs(EidosGlobalStringID 
 		} 
 
 		// Set mutFreqMAFs tuple values according to MAF values: MAF[0] = freq, MAF[1] = ID
-		mutFreqMAFs.insert(std::pair<int, std::tuple<double, MutationIndex>>(
+		mutFreqMAFs.insert(std::pair<int, std::tuple<double, Mutation*>>(
 			MAF.second->position_,
 			{
 				MAF.first,
-				MAF.second->BlockIndex()
+				MAF.second
 			}
 		));
 
@@ -3808,8 +3841,8 @@ EidosValue_SP Species::ExecuteMethod_calcLDBetweenSitePairs(EidosGlobalStringID 
 		int a = pos1_ev->IntAtIndex_NOCAST(adj_index, nullptr);
 		int b = pos2_ev->IntAtIndex_NOCAST(adj_index, nullptr);
 
-		bool mutExistsA = std::get<1>(mutFreqMAFs[a]) > -1;
-		bool mutExistsB = std::get<1>(mutFreqMAFs[b]) > -1;
+		bool mutExistsA = std::get<1>(mutFreqMAFs[a]) != nullptr;
+		bool mutExistsB = std::get<1>(mutFreqMAFs[b]) != nullptr;
 
 		// If the mutation doesn't exist at either site, exit early
 		if (!mutExistsA || !mutExistsB)
@@ -3927,7 +3960,17 @@ EidosValue_SP Species::ExecuteMethod_sharedMutFreqs(EidosGlobalStringID p_method
 	// TODO: This ignores all subpop information, just works over the first one
 	Subpopulation *subpop_value = SLiM_ExtractSubpopulationFromEidosValue_io(p_arguments[0].get(), 
 														0, &(this->community_), this, "sharedMutFreqs()");
-	std::vector<Genome*>& genomes = subpop_value->CurrentGenomes();
+	std::vector<Haplosome*> genomes;
+	genomes.reserve(size(subpop_value->parent_individuals_) * 2);
+
+	// Fill vector
+	for (Individual *ind : subpop_value->parent_individuals_)
+	{
+		for (int haplosome_index = 0; haplosome_index <= 1; ++haplosome_index)
+		{
+			genomes.emplace_back(ind->haplosomes_[haplosome_index]);
+		}
+	}
 
 	EidosValue* pos1_ev = (EidosValue*)p_arguments[1].get();
 	EidosValue* pos2_ev = (EidosValue*)p_arguments[2].get();
@@ -3945,8 +3988,13 @@ EidosValue_SP Species::ExecuteMethod_sharedMutFreqs(EidosGlobalStringID p_method
 
 	subpops_to_tally.emplace_back(subpop_value);
 
-	// tally across the requested subpop					
-	double denominator = population_.TallyMutationReferencesAcrossSubpopulations(&subpops_to_tally, false);
+	// tally across the requested subpops			
+	double denominator = 0.0;
+
+	for (Subpopulation* subpop : subpops_to_tally)
+	{
+		denominator += size(subpop->parent_individuals_);
+	}
 	
 	// Get a vector of unique sites we need to find the minor alleles of
 	std::vector<int> pos(pos1_ev->Count() * 2); // maximum size is twice the number of positions (if both vectors unique)
@@ -4106,7 +4154,7 @@ EidosValue_SP Species::ExecuteMethod_sharedMutFreqs(EidosGlobalStringID p_method
 		{
 			bool mut1Missing = (k - i) % 3 != 0;
 			bool mut2Missing = (k - i) % 2 == 0;
-			ABFreq = sharedMutFreq(genomes, mutBlockIDA, mutBlockIDB, mut1Missing, mut2Missing);		
+			ABFreq = sharedMutFreq(genomes, mutA, mutB, mut1Missing, mut2Missing);		
 			result[k] = ABFreq;
 		}
 
@@ -4176,12 +4224,12 @@ EidosValue_SP Species::ExecuteMethod_getHaplos(EidosGlobalStringID p_method_id, 
 	// Iterate over genomes and positions
 	for (int i = 0; i < genomesSize; ++i)
 	{
-		Genome *genome __attribute__((used)) = (Genome *)genomes_value->ObjectElementAtIndex_NOCAST(i, nullptr);
+		Haplosome *genome __attribute__((used)) = (Haplosome *)genomes_value->ObjectElementAtIndex_NOCAST(i, nullptr);
 		// New vector for this genome's mutations
 		std::vector<Mutation*> genMuts;
 		std::copy_if(allMuts.begin(), allMuts.end(), std::back_inserter(genMuts),
 		[genome](const Mutation* mut) {
-			return genome->contains_mutation(mut->BlockIndex());
+			return genome->contains_mutation(mut);
 		});
 
 		// If we have no valid mutations in this genome, and we have initialised to 0, we
@@ -5377,22 +5425,22 @@ EidosValue_SP Species::ExecuteMethod__debug(EidosGlobalStringID p_method_id, con
 	return gStaticEidosValueVOID;
 }
 
-static bool ContainsBothMuts(MutationIndex& mut1, MutationIndex& mut2, Genome*& genome)
+static bool ContainsBothMuts(Mutation* mut1, Mutation* mut2, Haplosome*& genome)
 {
 	return ((genome->contains_mutation(mut1)) && (genome->contains_mutation(mut2))); 
 }
 
-static bool ContainsMut1Only(MutationIndex& mut1, MutationIndex& mut2, Genome*& genome)
+static bool ContainsMut1Only(Mutation* mut1, Mutation* mut2, Haplosome*& genome)
 {
 	return ((genome->contains_mutation(mut1)) && !(genome->contains_mutation(mut2)));
 }
 
-static bool ContainsMut2Only(MutationIndex& mut1, MutationIndex& mut2, Genome*& genome)
+static bool ContainsMut2Only(Mutation* mut1, Mutation* mut2, Haplosome*& genome)
 {
 	return (!(genome->contains_mutation(mut1)) && (genome->contains_mutation(mut2)));
 }
 
-static bool ContainsNeitherMut(MutationIndex& mut1, MutationIndex& mut2, Genome*& genome)
+static bool ContainsNeitherMut(Mutation* mut1, Mutation* mut2, Haplosome*& genome)
 {
 	return (!(genome->contains_mutation(mut1)) && !(genome->contains_mutation(mut2)));
 }
@@ -5400,13 +5448,13 @@ static bool ContainsNeitherMut(MutationIndex& mut1, MutationIndex& mut2, Genome*
 
 
 // Helper Function for calcLD - gets the shared frequency between mutations
-double Species::sharedMutFreq(std::vector<Genome*>& genomes, MutationIndex mut1, MutationIndex mut2, bool mut1Missing, bool mut2Missing) {
+double Species::sharedMutFreq(std::vector<Haplosome*>& genomes, Mutation* mut1, Mutation* mut2, bool mut1Missing, bool mut2Missing) {
 	// Go through each genome, determine if it has both mutations or not, add to counter
 	double ABGenomes = 0;
 
 	// If either mutation is a flipped allele (major not minor), want to check if mut2 is missing instead
 	// for frequency of wildtype
-	static bool (*checkAlleleFn)(MutationIndex&, MutationIndex&, Genome*&);
+	static bool (*checkAlleleFn)(Mutation*, Mutation*, Haplosome*&);
 
 	checkAlleleFn = ContainsBothMuts;
 
@@ -5425,7 +5473,7 @@ double Species::sharedMutFreq(std::vector<Genome*>& genomes, MutationIndex mut1,
 		checkAlleleFn = ContainsNeitherMut;
 	}
 
-	for (Genome* g : genomes)
+	for (Haplosome* g : genomes)
 	{
 		ABGenomes += (double)checkAlleleFn(mut1, mut2, g);
 	}	
@@ -5528,7 +5576,7 @@ const std::vector<EidosMethodSignature_CSP> *Species_Class::Methods(void) const
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_calcLD, kEidosValueMaskFloat))->AddIntObject_S("subpop", gSLiM_Subpopulation_Class)->AddString_OS("statistic", EidosValue_String_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String("r2"))));
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_calcLDBetweenSitePairs, kEidosValueMaskFloat))->AddIntObject_S("subpop", gSLiM_Subpopulation_Class)->AddInt("pos1")->AddInt("pos2")->AddString_OS("statistic", EidosValue_String_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String("r2")))->AddLogical_OS("byFreq", gStaticEidosValue_LogicalF)->AddFloat_OS("threshold", EidosValue_Float_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float(0.05))));
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_sharedMutFreqs, kEidosValueMaskFloat))->AddIntObject_S("subpop", gSLiM_Subpopulation_Class)->AddInt("pos1")->AddInt("pos2")->AddFloat_OS("threshold", EidosValue_Float_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float(0.05))));
-		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_getHaplos, kEidosValueMaskInt))->AddObject("genomes", gSLiM_Genome_Class)->AddInt("pos"));
+		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_getHaplos, kEidosValueMaskInt))->AddObject("haplosomes", gSLiM_Haplosome_Class)->AddInt("pos"));
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_outputFixedMutations, kEidosValueMaskVOID))->AddString_OSN(gEidosStr_filePath, gStaticEidosValueNULL)->AddLogical_OS("append", gStaticEidosValue_LogicalF)->AddLogical_OS("objectTags", gStaticEidosValue_LogicalF));
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_outputFull, kEidosValueMaskVOID))->AddString_OSN(gEidosStr_filePath, gStaticEidosValueNULL)->AddLogical_OS("binary", gStaticEidosValue_LogicalF)->AddLogical_OS("append", gStaticEidosValue_LogicalF)->AddLogical_OS("spatialPositions", gStaticEidosValue_LogicalT)->AddLogical_OS("ages", gStaticEidosValue_LogicalT)->AddLogical_OS("ancestralNucleotides", gStaticEidosValue_LogicalT)->AddLogical_OS("pedigreeIDs", gStaticEidosValue_LogicalF)->AddLogical_OS("objectTags", gStaticEidosValue_LogicalF)->AddLogical_OS("substitutions", gStaticEidosValue_LogicalF));
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_outputMutations, kEidosValueMaskVOID))->AddObject("mutations", gSLiM_Mutation_Class)->AddString_OSN(gEidosStr_filePath, gStaticEidosValueNULL)->AddLogical_OS("append", gStaticEidosValue_LogicalF)->AddLogical_OS("objectTags", gStaticEidosValue_LogicalF));

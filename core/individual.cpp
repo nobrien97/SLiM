@@ -494,8 +494,8 @@ double Individual::internalSumOfMutationsOfType(const slim_objectid_t &mutType)
 	// Count the number of mutations of the given type
 	Mutation *mut_block_ptr = gSLiM_Mutation_Block;
 	
-	Genome *genome1 = this->genome1_;
-	Genome *genome2 = this->genome2_;
+	Haplosome *genome1 = this->haplosomes_[0];
+	Haplosome *genome2 = this->haplosomes_[1];
 	double selcoeff_sum = 0.0;
 		
 	if (!genome1->IsNull())

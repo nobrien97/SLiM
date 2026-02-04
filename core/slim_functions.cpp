@@ -2687,13 +2687,12 @@ EidosValue_SP SLiM_ExecuteFunction_calcHeterozygosityAtPosition(const std::vecto
 	for (int i = 0; i < nInds; ++i)
 	{
 		Individual *ind __attribute__((used)) = (Individual *)individuals_value->ObjectElementAtIndex_NOCAST(i, nullptr);
-		std::vector<Genome*> genomes = {ind->genome1_, ind->genome2_};
 		// Iterate over positions
 		for (int j = 0; j < nPos; ++j)
 		{
 			// Get all mutations at that position
-			std::vector<slim_mutationid_t> mutsGenome1 = genomes[0]->internalGetMutationIDsAtPosition(positions[j]);
-			std::vector<slim_mutationid_t> mutsGenome2 = genomes[1]->internalGetMutationIDsAtPosition(positions[j]);
+			std::vector<slim_mutationid_t> mutsGenome1 = ind->haplosomes_[0]->internalGetMutationIDsAtPosition(positions[j]);
+			std::vector<slim_mutationid_t> mutsGenome2 = ind->haplosomes_[1]->internalGetMutationIDsAtPosition(positions[j]);
 
 			// If there's nothing there, continue
 			if (mutsGenome1.size() == 0 && mutsGenome2.size() == 0)
