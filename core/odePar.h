@@ -5,7 +5,7 @@
 class ODEPar
 {
 protected:
-    double _AUC = 0.69; // default value when all parameters are 1
+    double _AUC = 0.67; // default value when all parameters are 1
     std::vector<double> _pars;
     std::vector<double> _solutionTraits;
 public:
@@ -20,6 +20,7 @@ public:
 		FFLC1,
 		FFLI1,
 		FFBH,
+        Complexity,
         none
 	};
 
@@ -62,6 +63,8 @@ public:
     static double CalcTimeAboveThreshold(const asc::Recorder &solution, const double &threshold, const int &solutionIndex);
 
     static std::vector<double> CalcSecondSteadyState(const asc::Recorder &solution, const double& prevSteadyState, const double& prevSteadyStateTime, const int &solutionIndex);
+
+    static std::vector<double> CalcTotalExpression(const asc::Recorder &solution);
 
     // Function for simple baseline regulation when t < Xstart
     static inline double SimpleRegulation(const float& t, const float& aZ, const float &baseline) {

@@ -27,6 +27,9 @@ std::unique_ptr<ODEPar> ODEPar::MakeODEPtr(motif_enum motifType)
         case FFBH:
             return std::make_unique<FFBHPar>();
             break;
+        case Complexity:
+            return std::make_unique<ComplexityPar>();
+            break;
         default:
             return nullptr;
             break;
@@ -51,6 +54,9 @@ std::unique_ptr<ODEPar> ODEPar::MakeODEPtr(motif_enum motifType, const ODEPar &i
             break;
         case FFBH:
             return std::make_unique<FFBHPar>(initialODEPar._solutionTraits, initialODEPar._pars);
+            break;
+        case Complexity:
+            return std::make_unique<ComplexityPar>(initialODEPar._solutionTraits, initialODEPar._pars);
             break;
         default:
             return nullptr;
@@ -461,4 +467,28 @@ double ODEPar::CalcTimeAboveThreshold(const asc::Recorder &solution, const doubl
     }
 
     return timeAboveThreshold;
+}
+
+std::vector<double> ODEPar::CalcTotalExpression(const asc::Recorder &solution)
+{
+    // Initialise result
+    std::vector<double> result(solution.history[0].size(), 0.0);
+    
+	for (uint i = 0; i < solution.history.size()-1; ++i)
+	{
+        const asc::state_t cur_state = solution.history[i];
+        const asc::state_t next_state = solution.history[i + 1];
+
+        for (uint j = 0; j < result.size(); ++j)
+        {
+            result[j] += ODEPar::AUC(0.1, (double)cur_state[j], (double)next_state[j]);
+        }
+	}
+	
+	// Check that X is > 0, set AUC, return
+    for (int i = 0; i < result.size(); ++i)
+    {
+        result[i] = (result[i] >= 0) ? result[i] : 0.0;
+    }
+    return(result);
 }

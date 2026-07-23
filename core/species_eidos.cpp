@@ -3319,101 +3319,58 @@ EidosValue_SP Species::ExecuteMethod_PARIntegrate(EidosGlobalStringID p_method_i
 	return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float{out});
 }
 
-//	*********************	– (float)ODEIntegrate(Object<Individual> individuals, string$ motif)
+// Specifically for Jack's ODE model
+// input is a nxm matrix of n individuals by m parameter values
+//	*********************	– (float)ODEIntegrate(float input)
 EidosValue_SP Species::ExecuteMethod_ODEIntegrate(EidosGlobalStringID p_method_id, const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter)
 {
 	// types
 	typedef std::vector<double> state_type;
 
-	// for switching between motifs
-	auto hashMotifString = [](std::string const& motifString)
-	{
-		if (motifString == "NAR") return ODEPar::motif_enum::NAR;
-		if (motifString == "PAR") return ODEPar::motif_enum::PAR;
-		if (motifString == "FFLC1") return ODEPar::motif_enum::FFLC1;
-		if (motifString == "FFLI1") return ODEPar::motif_enum::FFLI1;
-		if (motifString == "FFBH") return ODEPar::motif_enum::FFBH;
-
-		// Error type
-		return ODEPar::motif_enum::none;
-	};
-
 	EidosValue_SP result_SP(nullptr);
-	EidosValue_Object *individuals_value = (EidosValue_Object *)p_arguments[0].get();
-	EidosValue_String *motif_value = (EidosValue_String *)p_arguments[1].get();
-	std::string motif = motif_value->StringAtIndex_NOCAST(0, nullptr);
+	EidosValue *input_value = p_arguments[0].get();
 
-	// Choose correct motif
-	int mutTypeCount;
-	int traitCount;
+	int	numParCount = ComplexityPar::numPars;
+	int	traitCount = ComplexityPar::numTraits;
 
 
-	// Set the correct number of mut types and define the correct ODEPar derived class
-	switch (hashMotifString(motif))
-	{
-	case ODEPar::motif_enum::NAR:
-		mutTypeCount = NARPar::numPars;
-		traitCount = NARPar::numTraits;
-		break;
-	case ODEPar::motif_enum::PAR:
-		mutTypeCount = PARPar::numPars;
-		traitCount = PARPar::numTraits;
-		break;
-	case ODEPar::motif_enum::FFLC1:
-		mutTypeCount = FFLC1Par::numPars;
-		traitCount = FFLC1Par::numTraits;
-		break;
-	case ODEPar::motif_enum::FFLI1:
-		mutTypeCount = FFLI1Par::numPars;
-		traitCount = FFLI1Par::numTraits;
-		break;
-	case ODEPar::motif_enum::FFBH:
-		mutTypeCount = FFBHPar::numPars;
-		traitCount = FFBHPar::numTraits;
-		break;
-	default:
-		EIDOS_TERMINATION << "ERROR (Species::ExecuteMethod_ODEIntegrate): " << EidosStringRegistry::StringForGlobalStringID(p_method_id) << "() requires a valid ODE type (PAR, NAR, FFLC1, FFLI1, or FFBH)." << EidosTerminate();
-		break;
-	}
+	if (input_value->DimensionCount() != 2)
+		EIDOS_TERMINATION << "ERROR (Eidos_ExecuteFunction_ODEIntegrate): in function ODEIntegrate() input should be a matrix." << EidosTerminate(nullptr);
+
+	const int64_t *dim = input_value->Dimensions();
+	int64_t nrows = dim[0];
+	int64_t ncols = dim[1];
+	
+	// Create result matrix
+	EidosValue_Float *result = (new (gEidosValuePool->AllocateChunk()) EidosValue_Float())->resize_no_initialize(nrows * traitCount);
+	EidosValue_SP result_SP(result);
 	
 	// Iterate over all individuals, calculating their NAR AUC from their parameter set:
 	// First need to actually get the individuals and reserve some space for each individual's result
 	// Result size depends on the ODE type, different traits measured
-	int inds_count = p_arguments[0].get()->Count();
-	std::vector<double> out(inds_count * traitCount);
+	std::vector<double> out(nrows * traitCount);
 
-	// For each mutation type, get the relevant substitutions and calculate product of
-	// selection coefficients - we store that in subData
-	std::vector<double> subData = GetSubstitutions(population_.substitutions_, mutTypeCount);
-	
-	// Iterate over individuals to get input parameter values, store in a series of vectors
+	// Set up storage of parameters
+	std::unique_ptr<ODEPar> TempODEptr = ODEPar::MakeODEPtr(ODEPar::motif_enum::Complexity);
 
-	// Store saved combinations in the simulation's ongoing record vector of ODEPars
-	// NOTE: Now stored in SLiMSim::pastCombos
-	//std::vector<std::unique_ptr<ODEPar>> uniqueODEs;
+	std::vector<double> molComps(ncols);
 
 	// Now iterate over individuals to calculate phenotype
-	for (int ind_ex = 0; ind_ex < inds_count; ++ind_ex)
+	for (int ind_ex = 0; ind_ex < nrows; ++ind_ex)
 	{
-		// First, iterate over mutations and calculate NAR parameters
-		// Set up storage of NAR parameters
-		std::unique_ptr<ODEPar> TempODEptr = ODEPar::MakeODEPtr(hashMotifString(motif));
-		Individual *ind = (Individual *)individuals_value->ObjectElementAtIndex_NOCAST(ind_ex, nullptr);
-
-		// If the phenoPars hasn't been initialised yet, do that
-		if (ind->phenoPars == nullptr || typeid(ind->phenoPars).name() != motif + "Par") 
+		// First, iterate over columns to get parameters
+		for (int64_t col_index = 0; col_index < ncols; ++col_index)
 		{
-			//ind->InitializeODEPars(EV_data);
-			ind->phenoPars = ODEPar::MakeODEPtr(hashMotifString(motif));
+			// Get 1D index from rows/cols
+			int64_t par_index = col_index * nrows + ind_ex;
+
+			molComps[col_index] = input_value->FloatAtIndex_NOCAST(par_index, nullptr);
 		}
 
 		// Calculate offset for the output vector
 		int offset = ind_ex * traitCount;
 
-		// Get the individual's mutation values - offset by 3 because mutation types start at m3
-		// Setting EV_data value offset by 1 because value 0 means setting AUC
-		// parameter = e^sumOfMutationsAndSubs
-		std::vector<double> molComps = GetMutationValues(ind, subData);
+		//
 		TempODEptr->setParValue(molComps);
 
 		// Lambda to compare combination to ODEPar
@@ -3421,7 +3378,7 @@ EidosValue_SP Species::ExecuteMethod_ODEIntegrate(EidosGlobalStringID p_method_i
 		{
 			return TempODEptr->Compare(*existing);
 		};
-		// If we match an existing entry in the list of past combos - otherwise we need to calculate the AUC
+		// If we match an existing entry in the list of past combos - otherwise we need to recalculate
 		if (std::any_of(this->pastCombos.begin(), this->pastCombos.end(), compareODE))
 		{
 			std::vector<double> curTraits = ODEPar::getODEValFromVector(*TempODEptr, this->pastCombos, true);
@@ -3429,13 +3386,8 @@ EidosValue_SP Species::ExecuteMethod_ODEIntegrate(EidosGlobalStringID p_method_i
 			// Fill outputs
 			for (int j = 0; j < traitCount; ++j)
 			{
-				out[offset + j] = curTraits[j];
+				result->set_float_no_check(curTraits[j], offset + j);
 			}
-
-
-			// Update phenopars for this individual
-			ind->phenoPars.get()->setParValue(TempODEptr->getPars(false), false);
-			ind->phenoPars.get()->SetTraits(curTraits);
 			continue;
 		}
 	
@@ -3445,12 +3397,11 @@ EidosValue_SP Species::ExecuteMethod_ODEIntegrate(EidosGlobalStringID p_method_i
 		// Fill outputs
 		for (int j = 0; j < traitCount; ++j)
 		{
-			out[offset + j] = solution[j];
+			result->set_float_no_check(solution[j], offset + j);
 		}
 
 		// Update the individual's phenoPars values
-		ind->phenoPars.get()->setParValue(TempODEptr->getPars(false), false);
-		ind->phenoPars.get()->SetTraits(solution);
+		// TODO: individual trait values will have to be set from the output of this method now
 
 		// First check if the pastcombos list is too long: if it is, it's more expensive to search for a 
 		// match than to just calculate again. So we'll limit the number of combos to some sane amount, 
@@ -3459,13 +3410,16 @@ EidosValue_SP Species::ExecuteMethod_ODEIntegrate(EidosGlobalStringID p_method_i
 		if (pastCombos.size() < MAX_PAST_COMBOS)
 		{
 			// Add this to the list of existing solutions
-			this->pastCombos.emplace_back(ODEPar::MakeODEPtr(hashMotifString(motif), *ind->phenoPars.get()));
+			this->pastCombos.emplace_back(ODEPar::MakeODEPtr(ODEPar::motif_enum::Complexity, *TempODEptr.get()));
 		} 
 
 	}
 
-	// Initialise an Eidos vector to return our calculations
-	return EidosValue_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float{out});
+	const int64_t dim_buf[2] = {nrows, traitCount};
+	result->SetDimensions(2, dim_buf);
+
+	// return result matrix
+	return result_SP;
 }
 
 //	*********************	– (float)calcLD(Nio<Subpopulation>$ subpop, string$ statistic = "D'")
