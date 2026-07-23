@@ -1149,8 +1149,24 @@ if (abs(m - 9) > 0.4) stop('Mismatch in expectation vs. realization of rgeom() -
 // ***********************************************************************************************
 
 setSeed(asInteger(clock() * 100000));
+m = mean(rlaplace(100000, 5));	// expectation is 0.0
+if (abs(m) > 0.08) stop('Mismatch in expectation vs. realization of rlaplace() - could be random chance (but very unlikely), rerun test');
+
+// ***********************************************************************************************
+
+setSeed(asInteger(clock() * 100000));
 m = mean(log(rlnorm(10000, 5, 0.3)));	// expectation is 5
 if (abs(m - 5) > 0.02) stop('Mismatch in expectation vs. realization of rlnorm() - could be random chance (but very unlikely), rerun test');
+
+// ***********************************************************************************************
+
+setSeed(asInteger(clock() * 100000));
+x = rmultinom(10, 1000000000, c(0.1, 0.5, 0.1, 5.0, 0.25));
+if (!identical(colSums(x), rep(1000000000, 10))) stop('ERROR (rmultinom): (internal error) colSums incorrect');
+r = rowSums(x);
+norm = c(0.1, 0.5, 0.1, 5.0, 0.25) / sum(c(0.1, 0.5, 0.1, 5.0, 0.25));
+expected = 1000000000 * norm * 10;
+if (sum(abs(r - expected)) > 300000) stop('Mismatch in expectation vs. realization of rmultinom() - could be random chance (but very unlikely), rerun test');
 
 // ***********************************************************************************************
 

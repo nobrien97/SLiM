@@ -121,7 +121,9 @@ EidosValue_SP Eidos_ExecuteFunction_rf(const std::vector<EidosValue_SP> &p_argum
 EidosValue_SP Eidos_ExecuteFunction_dgamma(const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter);
 EidosValue_SP Eidos_ExecuteFunction_rgamma(const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter);
 EidosValue_SP Eidos_ExecuteFunction_rgeom(const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter);
+EidosValue_SP Eidos_ExecuteFunction_rlaplace(const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter);
 EidosValue_SP Eidos_ExecuteFunction_rlnorm(const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter);
+EidosValue_SP Eidos_ExecuteFunction_rmultinom(const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter);
 EidosValue_SP Eidos_ExecuteFunction_rmvnorm(const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter);
 EidosValue_SP Eidos_ExecuteFunction_rnbinom(const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter);
 EidosValue_SP Eidos_ExecuteFunction_rnorm(const std::vector<EidosValue_SP> &p_arguments, EidosInterpreter &p_interpreter);

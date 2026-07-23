@@ -21,7 +21,7 @@ QMAKE_INFO_PLIST = QtSLiM_Info.plist
 ICON = QtSLiM_AppIcon.icns
 QMAKE_TARGET_BUNDLE_PREFIX = "org.messerlab"
 QMAKE_BUNDLE = "SLiMgui"		# This governs the location of our prefs, which we keep under org.messerlab.SLiMgui
-VERSION = 5.1
+VERSION = 5.2
 
 docIconFiles.files = $$PWD/QtSLiM_DocIcon.icns
 docIconFiles.path = Contents/Resources
@@ -38,6 +38,24 @@ QMAKE_BUNDLE_DATA += docIconFiles
 # strict_string_checks=1:detect_stack_use_after_return=1:check_initialization_order=1:strict_init_order=1
 # This also enables undefined behavior sanitizing, in conjunction with ASAN, because why not.
 #CONFIG += sanitizer sanitize_address sanitize_undefined
+
+
+# BCH 4/8/2026: I force AVX2 and FMA on for x86_64 builds (true since 2013), and NEON on for ARM64 builds
+# (true since forever), without the compiler capability testing done in CMakeFlags.txt.  This is a hack;
+# if it breaks things for an end user they can build with CMake instead or disable these defines.  Note
+# that building in Qt Creator is not the primary supported build method for SLiM, and is probably mostly
+# used only by me; I just want this on for development.  See https://github.com/MesserLab/SLiM/issues/598.
+# Note that these settings are set in eidos.pro, core.pro, and QtSLiM.pro.
+message("Target architecture is: $${QMAKE_TARGET.arch}")
+
+QMAKE_CFLAGS += -Xarch_x86_64 -mavx2 -Xarch_x86_64 -mfma
+QMAKE_CXXFLAGS += -Xarch_x86_64 -mavx2 -Xarch_x86_64 -mfma
+
+QMAKE_CFLAGS += -Xarch_x86_64 -DEIDOS_HAS_AVX2=1 -Xarch_x86_64 -DEIDOS_HAS_FMA=1
+QMAKE_CXXFLAGS += -Xarch_x86_64 -DEIDOS_HAS_AVX2=1 -Xarch_x86_64 -DEIDOS_HAS_FMA=1
+
+QMAKE_CFLAGS += -Xarch_arm64 -DEIDOS_HAS_NEON=1
+QMAKE_CXXFLAGS += -Xarch_arm64 -DEIDOS_HAS_NEON=1
 
 
 # Get the current Git SHA-1 and put it into a define; see https://stackoverflow.com/questions/27041573/print-git-hash-in-qt-as-macro-created-at-compile-time

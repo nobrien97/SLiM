@@ -56,9 +56,31 @@
 
 // Include SLEEF for vectorized transcendental functions (exp, log, log10, log2)
 // SLEEF is only used when AVX2+FMA or NEON is available
+// BCH 12/31/2025: SLEEF generates tons of shadowed variable warnings for some reason; disable them
 #if defined(EIDOS_HAS_AVX2) || defined(EIDOS_HAS_NEON)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wshadow"
+#pragma GCC diagnostic ignored "-Wdouble-promotion"
+#pragma GCC diagnostic ignored "-Wunused-parameter"
+#pragma GCC diagnostic ignored "-Wunused-function"
+#pragma GCC diagnostic ignored "-Wimplicit-float-conversion"
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wshadow"
+#pragma clang diagnostic ignored "-Wdouble-promotion"
+#pragma clang diagnostic ignored "-Wunused-parameter"
+#pragma clang diagnostic ignored "-Wunused-function"
+#pragma clang diagnostic ignored "-Wimplicit-float-conversion"
 #include "sleef/sleef_config.h"
+#pragma clang diagnostic pop
+#pragma GCC diagnostic pop
 #endif
+
+// Disable certain warnings for the remainder of this file
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Waggressive-loop-optimizations"
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Waggressive-loop-optimizations"
+
 
 // ================================
 // SIMD Vector Math Operations
@@ -1190,5 +1212,11 @@ inline void convolve_dot_product_scaled_float64(
 }
 
 } // namespace Eidos_SIMD
+
+
+// stop suppressing warnings
+#pragma clang diagnostic pop
+#pragma GCC diagnostic pop
+
 
 #endif /* eidos_simd_h */

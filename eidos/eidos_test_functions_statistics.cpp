@@ -190,9 +190,9 @@ void _RunFunctionStatisticsTests_a_through_p(void)
 	EidosAssertScriptRaise("mean(c('foo', 'bar', 'baz'));", 0, "cannot be type");
 	EidosAssertScriptRaise("mean(_Test(7));", 0, "cannot be type");
 	EidosAssertScriptRaise("mean(NULL);", 0, "cannot be type");
-	EidosAssertScriptSuccess_NULL("mean(logical(0));");
-	EidosAssertScriptSuccess_NULL("mean(integer(0));");
-	EidosAssertScriptSuccess_NULL("mean(float(0));");
+	EidosAssertScriptSuccess_F("mean(logical(0));", std::numeric_limits<double>::quiet_NaN());	// BCH 1/11/2026: changed from NULL to NAN after SLiM 5.1
+	EidosAssertScriptSuccess_F("mean(integer(0));", std::numeric_limits<double>::quiet_NaN());	// BCH 1/11/2026: changed from NULL to NAN after SLiM 5.1
+	EidosAssertScriptSuccess_F("mean(float(0));", std::numeric_limits<double>::quiet_NaN());	// BCH 1/11/2026: changed from NULL to NAN after SLiM 5.1
 	EidosAssertScriptRaise("mean(string(0));", 0, "cannot be type");
 	EidosAssertScriptSuccess_F("mean(rep(1e18, 9));", 1e18);	// stays in integer internally
 #if EIDOS_HAS_OVERFLOW_BUILTINS
@@ -927,6 +927,22 @@ void _RunFunctionDistributionTests(void)
 	EidosAssertScriptRaise("rgeom(2, c(0.5, 1.1));", 0, "requires 0.0 < p <= 1.0");
 	EidosAssertScriptRaise("rgeom(2, NAN);", 0, "requires 0.0 < p <= 1.0");
 	
+	// rlaplace()
+	EidosAssertScriptSuccess("rlaplace(0);", gStaticEidosValue_Float_ZeroVec);
+	EidosAssertScriptSuccess("rlaplace(0, float(0));", gStaticEidosValue_Float_ZeroVec);
+	EidosAssertScriptSuccess_L("setSeed(0); abs(rlaplace(1) - c(-0.111405)) < 0.00001;", true);
+	EidosAssertScriptSuccess_LV("setSeed(0); abs(rlaplace(3) - c(-0.111405, -0.418235, -0.77246)) < 0.00001;", {true, true, true});
+	EidosAssertScriptSuccess_LV("setSeed(1); abs(rlaplace(3, 10) - c(-28.3454, -27.1145, 3.55203)) < 0.1;", {true, true, true});
+	EidosAssertScriptSuccess_LV("setSeed(2); abs(rlaplace(3, 100000) - c(-69536.44, -77285.89, 125604.39)) < 0.1;", {true, true, true});
+	EidosAssertScriptSuccess_LV("setSeed(3); abs(rlaplace(3, c(10, 100, 1000)) - c(-9.48116, -3.15833, 1488.54)) < 0.1;", {true, true, true});
+	EidosAssertScriptRaise("rlaplace(-1);", 0, "requires n to be");
+	EidosAssertScriptRaise("rlaplace(2, -0.001);", 0, "requires b > 0.0");
+	EidosAssertScriptRaise("rlaplace(2, 0.0);", 0, "requires b > 0.0");
+	EidosAssertScriptRaise("rlaplace(2, c(1.0, -0.001));", 0, "requires b > 0.0");
+	EidosAssertScriptRaise("rlaplace(2, c(1.0, 0.0));", 0, "requires b > 0.0");
+	EidosAssertScriptRaise("rlaplace(3, c(10, 5));", 0, "requires b to be");
+	EidosAssertScriptSuccess("rlaplace(1, NAN);", gStaticEidosValue_FloatNAN);
+	
 	// rlnorm()
 	EidosAssertScriptSuccess("rlnorm(0);", gStaticEidosValue_Float_ZeroVec);
 	EidosAssertScriptSuccess("rlnorm(0, float(0), float(0));", gStaticEidosValue_Float_ZeroVec);
@@ -944,6 +960,17 @@ void _RunFunctionDistributionTests(void)
 	EidosAssertScriptRaise("rlnorm(2, 10.0, c(0.1, 10, 1));", 0, "requires sdlog to be");
 	EidosAssertScriptSuccess("rlnorm(1, NAN, 100);", gStaticEidosValue_FloatNAN);
 	EidosAssertScriptSuccess("rlnorm(1, 1, NAN);", gStaticEidosValue_FloatNAN);
+	
+	// rmultinom()
+	EidosAssertScriptRaise("rmultinom(0, 10, c(0.1, 1.0, 10.0));", 0, "requires n to be");
+	EidosAssertScriptRaise("rmultinom(5, -1, c(0.1, 1.0, 10.0));", 0, "requires size to be");
+	EidosAssertScriptRaise("rmultinom(5, 10, float(0));", 0, "requires prob to be");
+	EidosAssertScriptRaise("rmultinom(5, 10, c(-0.1, 1.0, 10.0));", 0, "requires all probabilities in prob to be");
+	EidosAssertScriptRaise("rmultinom(5, 10, c(INF, 1.0, 10.0));", 0, "requires all probabilities in prob to be");
+	EidosAssertScriptRaise("rmultinom(5, 10, c(NAN, 1.0, 10.0));", 0, "requires all probabilities in prob to be");
+	EidosAssertScriptRaise("rmultinom(5, 10, c(0.0, 0.0, 0.0));", 0, "requires the sum of prob");
+	EidosAssertScriptSuccess_L("x = rmultinom(5, 10, c(0.1)); identical(x, matrix(rep(10, 5*1), ncol=5));", true);
+	EidosAssertScriptSuccess_L("x = rmultinom(5, 0, c(0.1, 1.0, 10.0)); identical(x, matrix(rep(0, 5*3), ncol=5));", true);
 	
 	// rmvnorm()
 	EidosAssertScriptRaise("rmvnorm(0, c(0,2), matrix(c(10,3), nrow=2));", 0, "requires n to be");

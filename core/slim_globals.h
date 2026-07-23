@@ -44,8 +44,8 @@ class SLiMEidosBlock;
 
 
 // SLiM version: see also Info.plist and QtSLiM.pro
-#define SLIM_VERSION_STRING	(("5.1 OB Lab; Built: " __DATE__ " " __TIME__))
-#define SLIM_VERSION_FLOAT	(5.1)
+#define SLIM_VERSION_STRING	(("5.2 OB Lab; Built: " __DATE__ " " __TIME__))
+#define SLIM_VERSION_FLOAT	(5.2)
 
 
 void SLiM_WarmUp(void);
@@ -809,6 +809,7 @@ extern const std::string &gStr_geneConversionMeanLength;
 extern const std::string &gStr_geneConversionSimpleConversionFraction;
 extern const std::string &gStr_chromosomeSubposition;
 extern const std::string &gStr_isNullHaplosome;
+extern const std::string &gStr_mutationCount;
 extern const std::string &gStr_mutations;
 extern const std::string &gStr_uniqueMutations;
 extern const std::string &gStr_genomicElementType;
@@ -951,6 +952,7 @@ extern const std::string &gStr_setSpatialPosition;
 extern const std::string &gStr_substitutionsOfType;
 extern const std::string &gStr_sumOfMutationsOfType;
 extern const std::string &gStr_uniqueMutationsOfType;
+extern const std::string &gStr_zygosityOfMutations;
 extern const std::string &gStr_mutationsFromHaplosomes;
 extern const std::string &gStr_setTraitValues;
 extern const std::string &gStr_getTraitValues;
@@ -1286,6 +1288,7 @@ enum _SLiMGlobalStringID : int {
 	gID_geneConversionSimpleConversionFraction,
 	gID_chromosomeSubposition,
 	gID_isNullHaplosome,
+	gID_mutationCount,
 	gID_mutations,
 	gID_uniqueMutations,
 	gID_genomicElementType,
@@ -1428,6 +1431,7 @@ enum _SLiMGlobalStringID : int {
 	gID_substitutionsOfType,
 	gID_sumOfMutationsOfType,
 	gID_uniqueMutationsOfType,
+	gID_zygosityOfMutations,
 	gID_mutationsFromHaplosomes,
 	gID_setTraitValues,
 	gID_getTraitValues,
