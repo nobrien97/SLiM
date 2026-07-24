@@ -79,7 +79,7 @@ bool ODEPar::Compare(const ODEPar rhs)
     int sum = 0;
     for (size_t i = 0; i < numPars; ++i)
     {
-        sum += (_pars[i] == rhs._pars[i] ? 1 : 0);
+        sum += (std::fabs(_pars[i] - rhs._pars[i]) < 1e-6 ? 1 : 0);
     }
     return sum == numPars;
 }
