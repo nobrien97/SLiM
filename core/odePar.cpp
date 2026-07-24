@@ -4,6 +4,7 @@
 #include "FFLC1Par.h"
 #include "FFLI1Par.h"
 #include "FFBHPar.h"
+#include "ComplexityPar.h"
 
 #define MAX_EXP 10000
 #define MAX_TIME 10.0

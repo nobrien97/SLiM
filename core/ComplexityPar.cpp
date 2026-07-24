@@ -22,15 +22,13 @@ std::vector<double> ComplexityPar::SolveODE()
     //std::vector<double> result(1, 0.0);
 
     // static components
-	const double Xstart = 1.0; 
-	const double Xstop = 6.0;
 	int X = 0;
 
 	// Compound Hill function
 	auto Hx = [](const int i, double* Xh, int* p, double* Kh)
 	{
 		double result = 1.0;
-		for (int j = 0; i < numTraits; ++j)
+		for (int j = 0; j < numTraits; ++j)
 		{
 			result *= p[i] * (Xh[j] / (Xh[j] + Kh[i])) + (1 - p[i]) * (Kh[i] / (Xh[j] + Kh[i]));
 		}
@@ -42,7 +40,6 @@ std::vector<double> ComplexityPar::SolveODE()
 	auto CompDerivative = [this, &Hx](const asc::state_t &val, asc::state_t &dxdt, double t)
 	{
 		// Setup parameters to avoid pow as much as possible
-		static int numParsPerModel = 5; 
 		double h = _pars[0];
 		double beta[numTraits], alpha[numTraits], Xh[numTraits];
 		double K[numTraits * numTraits];

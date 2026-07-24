@@ -34,6 +34,7 @@
 #include "FFLC1Par.h"
 #include "FFLI1Par.h"
 #include "FFBHPar.h"
+#include "ComplexityPar.h"
 #include "ascent/Ascent.h"
 
 #include <iostream>
@@ -3327,10 +3328,8 @@ EidosValue_SP Species::ExecuteMethod_ODEIntegrate(EidosGlobalStringID p_method_i
 	// types
 	typedef std::vector<double> state_type;
 
-	EidosValue_SP result_SP(nullptr);
 	EidosValue *input_value = p_arguments[0].get();
 
-	int	numParCount = ComplexityPar::numPars;
 	int	traitCount = ComplexityPar::numTraits;
 
 
@@ -5526,7 +5525,7 @@ const std::vector<EidosMethodSignature_CSP> *Species_Class::Methods(void) const
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_mutationsOfType, kEidosValueMaskObject, gSLiM_Mutation_Class))->AddIntObject_S("mutType", gSLiM_MutationType_Class));
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_NARIntegrate, kEidosValueMaskFloat))->AddIntObject_N("individuals", gSLiM_Individual_Class));
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_PARIntegrate, kEidosValueMaskFloat))->AddIntObject_N("individuals", gSLiM_Individual_Class));
-		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_ODEIntegrate, kEidosValueMaskFloat))->AddIntObject_N("individuals", gSLiM_Individual_Class)->AddString_OS("ODE", EidosValue_String_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String("NAR"))));
+		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_ODEIntegrate, kEidosValueMaskFloat))->AddFloat("input"));
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_calcLD, kEidosValueMaskFloat))->AddIntObject_S("subpop", gSLiM_Subpopulation_Class)->AddString_OS("statistic", EidosValue_String_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String("r2"))));
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_calcLDBetweenSitePairs, kEidosValueMaskFloat))->AddIntObject_S("subpop", gSLiM_Subpopulation_Class)->AddInt("pos1")->AddInt("pos2")->AddString_OS("statistic", EidosValue_String_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_String("r2")))->AddLogical_OS("byFreq", gStaticEidosValue_LogicalF)->AddFloat_OS("threshold", EidosValue_Float_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float(0.05))));
 		methods->emplace_back((EidosInstanceMethodSignature *)(new EidosInstanceMethodSignature(gStr_sharedMutFreqs, kEidosValueMaskFloat))->AddIntObject_S("subpop", gSLiM_Subpopulation_Class)->AddInt("pos1")->AddInt("pos2")->AddFloat_OS("threshold", EidosValue_Float_SP(new (gEidosValuePool->AllocateChunk()) EidosValue_Float(0.05))));
