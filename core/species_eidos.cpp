@@ -3385,7 +3385,7 @@ EidosValue_SP Species::ExecuteMethod_ODEIntegrate(EidosGlobalStringID p_method_i
 			// Fill outputs
 			for (int j = 0; j < traitCount; ++j)
 			{
-				result->set_float_no_check(curTraits[j], offset + j);
+				out[offset + j] = curTraits[j];
 			}
 			continue;
 		}
@@ -3396,7 +3396,8 @@ EidosValue_SP Species::ExecuteMethod_ODEIntegrate(EidosGlobalStringID p_method_i
 		// Fill outputs
 		for (int j = 0; j < traitCount; ++j)
 		{
-			result->set_float_no_check(solution[j], offset + j);
+			out[offset + j] = solution[j];
+			//result->set_float_no_check(solution[j], offset + j);
 		}
 
 		// Update the individual's phenoPars values
@@ -3412,6 +3413,16 @@ EidosValue_SP Species::ExecuteMethod_ODEIntegrate(EidosGlobalStringID p_method_i
 			this->pastCombos.emplace_back(ODEPar::MakeODEPtr(ODEPar::motif_enum::Complexity, *TempODEptr.get()));
 		} 
 
+	}
+
+	// Convert from row-wise to column-wise and fill result
+	for (size_t value_index = 0; value_index < size(out) - 1; ++value_index)
+	{
+		size_t dest_col = (value_index / nrows);
+		size_t dest_row = (value_index % nrows);
+		size_t src_index = dest_col + dest_row * traitCount;
+		
+		result->set_float_no_check(out[src_index], value_index);
 	}
 
 	const int64_t dim_buf[2] = {nrows, traitCount};
