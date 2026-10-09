@@ -82,6 +82,13 @@ namespace asc
       ///
       /// \param[in] initializer_list An input initializer list. Highly efficient as it performs a move operation on the data list.
       inline void operator()(std::initializer_list<T>&& initializer_list) { history.emplace_back(std::move(initializer_list)); }
+      inline void operator()(T t, std::vector<T>& state) { 
+         std::vector<T> values;
+         values.reserve(1 + state.size());
+         values.emplace_back(t);
+         values.insert(values.end(), state.begin(), state.end());
+         history.emplace_back(std::move(values)); 
+      }
 
       /// \brief Add row of history data
       ///

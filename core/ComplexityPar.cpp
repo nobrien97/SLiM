@@ -29,7 +29,8 @@ std::vector<double> ComplexityPar::SolveODE()
 	{
 		double result = 1.0;
 		for (int j = 0; j < numTraits; ++j)
-		{
+		{			
+			// += OR logic; *= AND logic
 			result *= p[i] * (Xh[j] / (Xh[j] + Kh[i])) + (1 - p[i]) * (Kh[i] / (Xh[j] + Kh[i]));
 		}
 		return result;
@@ -63,7 +64,8 @@ std::vector<double> ComplexityPar::SolveODE()
 		{
 			// Offset, presolve K^h
 			K[i] = pow(_pars[i + offset], h);
-			p[i] = _pars[i + numTraits * numTraits + offset];
+			// In SLiM p is encoded as -1 and 1, we will convert to 0 or 1 instead
+			p[i] = (_pars[i + numTraits * numTraits + offset] + 1) / 2;
 		}
 
 		// Solve each equation
@@ -82,11 +84,16 @@ std::vector<double> ComplexityPar::SolveODE()
 	asc::RK4 integrator;
 	asc::Recorder recorder;
 
+	// initState[0] is time, starts at 0
+	asc::state_t initState(numTraits+1, 0.1);
+	initState[0] = 0.0;
+
 	while (t < t_end)
 	{
 		// Add a small epsilon to get around t floating point inaccuracy
 		//X = ((t >= Xstart - 1e-5) && (t <= Xstop + 1e-5));
-		recorder({t, (asc::value_t)X, state[0]});
+		//recorder({ t, state[0], state[1], state[2], state[3], state[4] });
+		recorder(t, state);
 		integrator(CompDerivative, state, t, dt);
 	}
 

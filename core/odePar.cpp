@@ -473,16 +473,18 @@ double ODEPar::CalcTimeAboveThreshold(const asc::Recorder &solution, const doubl
 std::vector<double> ODEPar::CalcTotalExpression(const asc::Recorder &solution)
 {
     // Initialise result
-    std::vector<double> result(solution.history[0].size(), 0.0);
+    std::vector<double> result(solution.history[0].size() - 1, 0.0);
     
 	for (uint i = 0; i < solution.history.size()-1; ++i)
 	{
         const asc::state_t cur_state = solution.history[i];
         const asc::state_t next_state = solution.history[i + 1];
-
+        
+        // Iterate over traits
         for (uint j = 0; j < result.size(); ++j)
         {
-            result[j] += ODEPar::AUC(0.1, (double)cur_state[j], (double)next_state[j]);
+            // First entry is time, skip that
+            result[j] += ODEPar::AUC(0.1, (double)cur_state[j+1], (double)next_state[j+1]);
         }
 	}
 	
